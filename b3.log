@@ -1,0 +1,853 @@
+[1/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/core/lv_group.c.obj
+[2/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/core/lv_obj.c.obj
+[3/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/core/lv_obj_property.c.obj
+[4/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/core/lv_obj_id_builtin.c.obj
+[5/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/core/lv_obj_draw.c.obj
+[6/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/core/lv_obj_event.c.obj
+[7/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/core/lv_obj_class.c.obj
+[8/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/core/lv_obj_pos.c.obj
+[9/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/core/lv_obj_scroll.c.obj
+[10/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/core/lv_obj_style_gen.c.obj
+[11/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/core/lv_obj_style.c.obj
+[12/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/core/lv_observer.c.obj
+[13/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/core/lv_refr.c.obj
+[14/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/core/lv_obj_tree.c.obj
+[15/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/debugging/monkey/lv_monkey.c.obj
+[16/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/debugging/profiler/lv_profiler_builtin.c.obj
+[17/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/debugging/profiler/lv_profiler_builtin_posix.c.obj
+[18/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/debugging/test/lv_test_display.c.obj
+[19/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/debugging/sysmon/lv_sysmon.c.obj
+[20/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/debugging/test/lv_test_display_egl.c.obj
+[21/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/debugging/test/lv_test_helpers.c.obj
+[22/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/debugging/test/lv_test_fs.c.obj
+[23/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/debugging/test/lv_test_indev.c.obj
+[24/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/debugging/vg_lite_tvg/vg_lite_tvg.cpp.obj
+[25/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/debugging/test/lv_test_indev_gesture.c.obj
+[26/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/debugging/test/lv_test_screenshot_compare.c.obj
+[27/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/debugging/vg_lite_tvg/vg_lite_matrix.c.obj
+[28/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/display/lv_display.c.obj
+[29/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/dma2d/lv_draw_dma2d.c.obj
+[30/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/convert/lv_draw_buf_convert.c.obj
+[31/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/dma2d/lv_draw_dma2d_fill.c.obj
+[32/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/espressif/ppa/lv_draw_ppa.c.obj
+[33/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/dma2d/lv_draw_dma2d_img.c.obj
+[34/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/espressif/ppa/lv_draw_ppa_fill.c.obj
+[35/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/espressif/ppa/lv_draw_ppa_img.c.obj
+[36/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/espressif/ppa/lv_draw_ppa_buf.c.obj
+[37/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/eve/lv_draw_eve_fill.c.obj
+[38/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/eve/lv_draw_eve.c.obj
+[39/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/eve/lv_draw_eve_arc.c.obj
+[40/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/eve/lv_draw_eve_letter.c.obj
+[41/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/eve/lv_draw_eve_image.c.obj
+[42/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/eve/lv_draw_eve_ram_g.c.obj
+[43/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/eve/lv_draw_eve_line.c.obj
+[44/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/eve/lv_draw_eve_triangle.c.obj
+[45/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/lv_draw.c.obj
+[46/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/eve/lv_eve.c.obj
+[47/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/lv_draw_blur.c.obj
+[48/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/lv_draw_3d.c.obj
+[49/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/lv_draw_arc.c.obj
+[50/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/lv_draw_line.c.obj
+[51/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/lv_draw_buf.c.obj
+[52/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/lv_draw_label.c.obj
+[53/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/lv_draw_image.c.obj
+[54/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/lv_draw_triangle.c.obj
+[55/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/lv_draw_mask.c.obj
+[56/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/lv_draw_rect.c.obj
+[57/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/lv_draw_vector.c.obj
+[58/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nanovg/lv_draw_nanovg.c.obj
+[59/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nanovg/lv_draw_nanovg_3d.c.obj
+[60/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nanovg/lv_draw_nanovg_arc.c.obj
+[61/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nanovg/lv_draw_nanovg_blur.c.obj
+[62/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nanovg/lv_draw_nanovg_grad.c.obj
+[63/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nanovg/lv_draw_nanovg_fill.c.obj
+[64/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nanovg/lv_draw_nanovg_box_shadow.c.obj
+[65/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nanovg/lv_draw_nanovg_image.c.obj
+[66/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nanovg/lv_draw_nanovg_border.c.obj
+[67/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nanovg/lv_draw_nanovg_label.c.obj
+[68/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nanovg/lv_draw_nanovg_line.c.obj
+[69/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nanovg/lv_draw_nanovg_layer.c.obj
+[70/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nanovg/lv_draw_nanovg_triangle.c.obj
+[71/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nanovg/lv_draw_nanovg_mask_rect.c.obj
+[72/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nanovg/lv_draw_nanovg_vector.c.obj
+[73/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nanovg/lv_nanovg_fbo_cache.c.obj
+[74/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nanovg/lv_nanovg_image_cache.c.obj
+[75/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nema_gfx/lv_draw_nema_gfx.c.obj
+[76/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nema_gfx/lv_draw_nema_gfx_arc.c.obj
+[77/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nanovg/lv_nanovg_utils.c.obj
+[78/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nema_gfx/lv_draw_nema_gfx_fill.c.obj
+[79/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nema_gfx/lv_draw_nema_gfx_cache.c.obj
+[80/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nema_gfx/lv_draw_nema_gfx_img.c.obj
+[81/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nema_gfx/lv_draw_nema_gfx_border.c.obj
+[82/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nema_gfx/lv_draw_nema_gfx_layer.c.obj
+[83/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nema_gfx/lv_draw_nema_gfx_line.c.obj
+[84/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nema_gfx/lv_draw_nema_gfx_stm32_hal.c.obj
+[85/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nema_gfx/lv_draw_nema_gfx_label.c.obj
+[86/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nema_gfx/lv_draw_nema_gfx_utils.c.obj
+[87/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nema_gfx/lv_draw_nema_gfx_triangle.c.obj
+[88/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nema_gfx/lv_draw_nema_gfx_vector.c.obj
+[89/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nema_gfx/lv_nema_gfx_path.c.obj
+[90/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nxp/g2d/lv_draw_buf_g2d.c.obj
+[91/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nxp/g2d/lv_g2d_buf_map.c.obj
+[92/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nxp/g2d/lv_draw_g2d_img.c.obj
+[93/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nxp/g2d/lv_draw_g2d_fill.c.obj
+[94/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nxp/g2d/lv_draw_g2d.c.obj
+[95/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nxp/g2d/lv_g2d_utils.c.obj
+[96/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nxp/pxp/lv_draw_pxp.c.obj
+[97/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nxp/pxp/lv_draw_buf_pxp.c.obj
+[98/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nxp/pxp/lv_draw_pxp_img.c.obj
+[99/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nxp/pxp/lv_draw_pxp_fill.c.obj
+[100/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nxp/pxp/lv_pxp_utils.c.obj
+[101/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nxp/pxp/lv_pxp_osa.c.obj
+[102/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nxp/pxp/lv_draw_pxp_layer.c.obj
+[103/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/opengles/lv_draw_opengles.c.obj
+[104/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/renesas/dave2d/lv_draw_dave2d.c.obj
+[105/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/renesas/dave2d/lv_draw_dave2d_border.c.obj
+[106/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/nxp/pxp/lv_pxp_cfg.c.obj
+[107/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/renesas/dave2d/lv_draw_dave2d_arc.c.obj
+[108/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/renesas/dave2d/lv_draw_dave2d_fill.c.obj
+[109/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/renesas/dave2d/lv_draw_dave2d_label.c.obj
+[110/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/renesas/dave2d/lv_draw_dave2d_image.c.obj
+[111/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/renesas/dave2d/lv_draw_dave2d_mask_rectangle.c.obj
+[112/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/renesas/dave2d/lv_draw_dave2d_triangle.c.obj
+[113/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/renesas/dave2d/lv_draw_dave2d_line.c.obj
+[114/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/renesas/dave2d/lv_draw_dave2d_utils.c.obj
+[115/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sdl/lv_draw_sdl.c.obj
+[116/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/snapshot/lv_snapshot.c.obj
+[117/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/blend/lv_draw_sw_blend_to_al88.c.obj
+[118/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/blend/lv_draw_sw_blend_to_argb8888.c.obj
+[119/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/blend/lv_draw_sw_blend.c.obj
+[120/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/blend/lv_draw_sw_blend_to_a8.c.obj
+[121/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/blend/lv_draw_sw_blend_to_l8.c.obj
+[122/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/blend/lv_draw_sw_blend_to_i1.c.obj
+[123/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/blend/lv_draw_sw_blend_to_argb8888_premultiplied.c.obj
+[124/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/lv_draw_sw.c.obj
+[125/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/blend/riscv_v/lv_draw_sw_blend_riscv_v_to_rgb888.c.obj
+[126/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/blend/lv_draw_sw_blend_to_rgb565.c.obj
+[127/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/blend/lv_draw_sw_blend_to_rgb565_swapped.c.obj
+[128/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/blend/lv_draw_sw_blend_to_rgb888.c.obj
+[129/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/lv_draw_sw_border.c.obj
+[130/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/lv_draw_sw_blur.c.obj
+[131/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/lv_draw_sw_arc.c.obj
+[132/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/lv_draw_sw_box_shadow.c.obj
+[133/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/lv_draw_sw_fill.c.obj
+[134/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/lv_draw_sw_letter.c.obj
+[135/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/lv_draw_sw_line.c.obj
+[136/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/lv_draw_sw_img.c.obj
+[137/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/lv_draw_sw_grad.c.obj
+[138/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/lv_draw_sw_mask_rect.c.obj
+[139/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/lv_draw_sw_mask.c.obj
+[140/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_draw_vg_lite.c.obj
+[141/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/lv_draw_sw_transform.c.obj
+[142/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/lv_draw_sw_triangle.c.obj
+[143/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/lv_draw_sw_utils.c.obj
+[144/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/sw/lv_draw_sw_vector.c.obj
+[145/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_draw_buf_vg_lite.c.obj
+[146/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_draw_vg_lite_arc.c.obj
+[147/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_draw_vg_lite_box_shadow.c.obj
+[148/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_draw_vg_lite_border.c.obj
+[149/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_draw_vg_lite_img.c.obj
+[150/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_draw_vg_lite_fill.c.obj
+[151/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_draw_vg_lite_label.c.obj
+[152/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_draw_vg_lite_layer.c.obj
+[153/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_draw_vg_lite_line.c.obj
+[154/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_draw_vg_lite_mask_rect.c.obj
+[155/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_draw_vg_lite_triangle.c.obj
+[156/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_vg_lite_decoder.c.obj
+[157/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_vg_lite_math.c.obj
+[158/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_vg_lite_bitmap_font_cache.c.obj
+[159/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_vg_lite_grad.c.obj
+[160/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_draw_vg_lite_vector.c.obj
+[161/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/display/drm/lv_linux_drm.c.obj
+[162/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_vg_lite_path.c.obj
+[163/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_vg_lite_utils.c.obj
+[164/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_vg_lite_stroke.c.obj
+[165/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/draw/vg_lite/lv_vg_lite_pending.c.obj
+[166/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/drivers/display/lovyan_gfx/lv_lovyan_gfx.cpp.obj
+[167/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/display/drm/lv_linux_drm_common.c.obj
+[168/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/display/fb/lv_linux_fbdev.c.obj
+[169/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/display/ft81x/lv_ft81x.c.obj
+[170/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/display/drm/lv_linux_drm_egl.c.obj
+[171/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/display/mipi/lv_ili9341.c.obj
+[172/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/display/mipi/lv_st7796.c.obj
+[173/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/display/mipi/lv_lcd_generic_mipi.c.obj
+[174/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/display/mipi/lv_st7789.c.obj
+[175/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/display/mipi/lv_nv3007.c.obj
+[176/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/display/mipi/lv_st7735.c.obj
+[177/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/display/nxp_elcdif/lv_nxp_elcdif.c.obj
+[178/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/display/renesas_glcdc/lv_renesas_glcdc.c.obj
+[179/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/drivers/display/tft_espi/lv_tft_espi.cpp.obj
+[180/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/draw/eve/lv_draw_eve_display.c.obj
+[181/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/display/st_ltdc/lv_st_ltdc.c.obj
+[182/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/evdev/lv_evdev.c.obj
+[183/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/libinput/lv_xkb.c.obj
+[184/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/libinput/lv_libinput.c.obj
+[185/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/nuttx/lv_nuttx_entry.c.obj
+[186/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/nuttx/lv_nuttx_cache.c.obj
+[187/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/nuttx/lv_nuttx_fbdev.c.obj
+[188/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/nuttx/lv_nuttx_image_cache.c.obj
+[189/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/nuttx/lv_nuttx_mouse.c.obj
+[190/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/nuttx/lv_nuttx_profiler.c.obj
+[191/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/nuttx/lv_nuttx_lcd.c.obj
+[192/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/nuttx/lv_nuttx_libuv.c.obj
+[193/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/nuttx/lv_nuttx_touchscreen.c.obj
+[194/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/opengles/assets/lv_opengles_shader.c.obj
+[195/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/opengles/glad/src/egl.c.obj
+[196/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/opengles/glad/src/gles2.c.obj
+[197/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/opengles/glad/src/gl.c.obj
+[198/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/opengles/lv_opengles_debug.c.obj
+[199/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/opengles/lv_opengles_egl.c.obj
+[200/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/opengles/lv_opengles_glfw.c.obj
+[201/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/opengles/lv_opengles_driver.c.obj
+[202/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/opengles/opengl_shader/lv_opengl_shader_manager.c.obj
+[203/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/opengles/lv_opengles_texture.c.obj
+[204/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/qnx/lv_qnx.c.obj
+[205/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/sdl/lv_sdl_keyboard.c.obj
+[206/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/sdl/lv_sdl_egl.c.obj
+[207/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/sdl/lv_sdl_mousewheel.c.obj
+[208/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/opengles/opengl_shader/lv_opengl_shader_program.c.obj
+[209/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/sdl/lv_sdl_mouse.c.obj
+[210/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/sdl/lv_sdl_sw.c.obj
+[211/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/sdl/lv_sdl_texture.c.obj
+[212/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/sdl/lv_sdl_window.c.obj
+[213/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/uefi/lv_uefi_context.c.obj
+[214/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/uefi/lv_uefi_indev_pointer.c.obj
+[215/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/uefi/lv_uefi_indev_keyboard.c.obj
+[216/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/uefi/lv_uefi_display.c.obj
+[217/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/uefi/lv_uefi_indev_touch.c.obj
+[218/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/uefi/lv_uefi_private.c.obj
+[219/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/wayland/lv_wayland.c.obj
+[220/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/wayland/lv_wayland_backend.c.obj
+[221/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/wayland/lv_wayland_backend_dmabuf.c.obj
+[222/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/wayland/lv_wayland_backend_g2d.c.obj
+[223/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/wayland/lv_wayland_backend_shm.c.obj
+[224/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/wayland/lv_wayland_backend_egl.c.obj
+[225/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/wayland/lv_wayland_keyboard.c.obj
+[226/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/wayland/lv_wayland_dmabuf.c.obj
+[227/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/wayland/lv_wayland_seat.c.obj
+[228/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/wayland/lv_wayland_pointer.c.obj
+[229/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/wayland/lv_wayland_touch.c.obj
+[230/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/windows/lv_windows_context.c.obj
+[231/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/wayland/lv_wayland_xdg_shell.c.obj
+[232/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/wayland/lv_wayland_window.c.obj
+[233/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/windows/lv_windows_input.c.obj
+[234/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/windows/lv_windows_display.c.obj
+[235/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/x11/lv_x11_display.c.obj
+[236/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/drivers/x11/lv_x11_input.c.obj
+[237/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/binfont_loader/lv_binfont_loader.c.obj
+[238/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/fmt_txt/lv_font_fmt_txt.c.obj
+[239/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/font_manager/lv_font_manager.c.obj
+[240/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/font_manager/lv_font_manager_recycle.c.obj
+[241/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/freetype/lv_freetype_glyph.c.obj
+[242/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/freetype/lv_freetype.c.obj
+[243/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/freetype/lv_freetype_outline.c.obj
+[244/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/freetype/lv_freetype_image.c.obj
+[245/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/freetype/lv_ftsystem.c.obj
+[246/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_dejavu_16_persian_hebrew.c.obj
+[247/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font.c.obj
+[248/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/imgfont/lv_imgfont.c.obj
+[249/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_12.c.obj
+[250/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_10.c.obj
+[251/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_12_subpx.c.obj
+[252/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_14_aligned.c.obj
+[253/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_14.c.obj
+[254/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_16.c.obj
+[255/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_18.c.obj
+[256/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_20.c.obj
+[257/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_22.c.obj
+[258/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_24.c.obj
+[259/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_26.c.obj
+[260/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_28.c.obj
+[261/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_32.c.obj
+[262/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_28_compressed.c.obj
+[263/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_30.c.obj
+[264/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_34.c.obj
+[265/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_36.c.obj
+[266/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_38.c.obj
+[267/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_40.c.obj
+[268/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_44.c.obj
+[269/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_46.c.obj
+[270/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_42.c.obj
+[271/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_48.c.obj
+[272/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_montserrat_8.c.obj
+[273/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_source_han_sans_sc_14_cjk.c.obj
+[274/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/fs/lv_fs_arduino_esp_littlefs.cpp.obj
+[275/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_source_han_sans_sc_16_cjk.c.obj
+[276/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/fs/lv_fs_arduino_sd.cpp.obj
+[277/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/tiny_ttf/lv_tiny_ttf.c.obj
+[278/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_unscii_16.c.obj
+[279/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/font/lv_font_unscii_8.c.obj
+[280/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/fs/lv_fs.c.obj
+[281/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/fs/lv_fs_frogfs.c.obj
+[282/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/fs/lv_fs_fatfs.c.obj
+[283/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/fs/lv_fs_posix.c.obj
+[284/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/fs/lv_fs_uefi.c.obj
+[285/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/fs/lv_fs_memfs.c.obj
+[286/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/fs/lv_fs_littlefs.c.obj
+[287/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/fs/lv_fs_stdio.c.obj
+[288/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/fs/lv_fs_win32.c.obj
+[289/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/image/lv_bmp.c.obj
+[290/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/image/lv_bin_decoder.c.obj
+[291/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/image/lv_image_decoder.c.obj
+[292/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/image/lv_libpng.c.obj
+[293/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/image/lv_libjpeg_turbo.c.obj
+[294/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/image/lv_lodepng.c.obj
+[295/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/image/lv_libwebp.c.obj
+[296/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/image/lv_tjpgd.c.obj
+[297/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/image/svg/lv_svg.c.obj
+[298/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/image/svg/lv_svg_token.c.obj
+[299/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/image/svg/lv_svg_decoder.c.obj
+[300/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/image/svg/lv_svg_render.c.obj
+[301/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/image/svg/lv_svg_parser.c.obj
+[302/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/indev/lv_gridnav.c.obj
+[303/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/indev/lv_indev.c.obj
+[304/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/indev/lv_indev_scroll.c.obj
+[305/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/indev/lv_indev_gesture.c.obj
+[306/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/layouts/flex/lv_flex.c.obj
+[307/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/layouts/grid/lv_grid.c.obj
+[308/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/FT800-FT813/EVE_commands.c.obj
+[309/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/FT800-FT813/EVE_supplemental.c.obj
+[310/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/layouts/lv_layout.c.obj
+[311/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/barcode/code128.c.obj
+[312/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/frogfs/src/decomp_raw.c.obj
+[313/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/frogfs/src/frogfs.c.obj
+[314/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/gltf_data/lv_gltf_data_cache.cpp.obj
+[315/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/gltf_data/lv_gltf_data_animations.cpp.obj
+[316/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/gltf_data/lv_gltf_data.cpp.obj
+[317/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/gltf_data/lv_gltf_data_injest.cpp.obj
+[318/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/gltf_data/lv_gltf_data_mesh.cpp.obj
+[319/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/gltf_data/lv_gltf_data_primitive.cpp.obj
+[320/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/gltf_data/lv_gltf_data_shader.cpp.obj
+[321/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/gltf_data/lv_gltf_data_texture.cpp.obj
+[322/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/gif/gif.c.obj
+[323/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/gltf_data/lv_gltf_data_skin.cpp.obj
+[324/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/gltf_data/lv_gltf_model_node.cpp.obj
+[325/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/gltf_data/lv_gltf_uniform_locations.cpp.obj
+[326/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/gltf_view/lv_gltf_view.cpp.obj
+[327/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/gltf_data/lv_gltf_model_loader.c.obj
+[328/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/gltf_view/lv_gltf_view_shader.cpp.obj
+[329/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/gltf_view/lv_gltf_view_render.cpp.obj
+[330/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/gltf_view/assets/lv_gltf_view_shader.c.obj
+[331/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/gltf_view/assets/chromatic.c.obj
+[332/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/gltf_environment/lv_gltf_ibl_sampler.c.obj
+[333/498] Building CXX object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/math/lv_gltf_math.cpp.obj
+[334/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/lz4/lz4.c.obj
+[335/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/lodepng/lodepng.c.obj
+[336/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/gltf/math/lv_3dmath.c.obj
+[337/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/qrcode/qrcodegen.c.obj
+[338/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/rle/lv_rle.c.obj
+[339/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/nanovg/nanovg.c.obj
+[340/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/tjpgd/tjpgd.c.obj
+[341/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/vg_lite_driver/VGLite/vg_lite.c.obj
+[342/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/rlottie/lv_rlottie.c.obj
+[343/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/vg_lite_driver/VGLite/vg_lite_image.c.obj
+[344/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/vg_lite_driver/VGLite/vg_lite_matrix.c.obj
+[345/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/vg_lite_driver/VGLiteKernel/vg_lite_kernel.c.obj
+[346/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/vg_lite_driver/VGLite/vg_lite_path.c.obj
+[347/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/vg_lite_driver/VGLite/vg_lite_stroke.c.obj
+[348/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/vg_lite_driver/lv_vg_lite_hal/lv_vg_lite_hal.c.obj
+[349/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/libs/vg_lite_driver/lv_vg_lite_hal/vg_lite_os.c.obj
+[350/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/lv_init.c.obj
+[351/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/cache/class/lv_cache_lru_ll.c.obj
+[352/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/logging/lv_log.c.obj
+[353/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/cache/class/lv_cache_sc_da.c.obj
+[354/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/cache/class/lv_cache_lru_rb.c.obj
+[355/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/cache/instance/lv_image_header_cache.c.obj
+[356/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/cache/instance/lv_image_cache.c.obj
+[357/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/cache/lv_cache.c.obj
+[358/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/cache/lv_cache_entry.c.obj
+[359/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_anim_timeline.c.obj
+[360/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_area.c.obj
+[361/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_anim.c.obj
+[362/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_async.c.obj
+[363/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_array.c.obj
+[364/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_circle_buf.c.obj
+[365/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_bidi.c.obj
+[366/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_color.c.obj
+[367/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_color_op.c.obj
+[368/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_grad.c.obj
+[369/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_event.c.obj
+[370/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_iter.c.obj
+[371/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_ll.c.obj
+[372/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_lru.c.obj
+[373/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_math.c.obj
+[374/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_palette.c.obj
+[375/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_matrix.c.obj
+[376/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_pending.c.obj
+[377/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_rb.c.obj
+[378/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_style.c.obj
+[379/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_style_gen.c.obj
+[380/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_text.c.obj
+[381/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_text_ap.c.obj
+[382/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_timer.c.obj
+[383/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_tree.c.obj
+[384/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/misc/lv_utils.c.obj
+[385/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/osal/lv_cmsis_rtos2.c.obj
+[386/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/osal/lv_freertos.c.obj
+[387/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/osal/lv_linux.c.obj
+[388/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/osal/lv_mqx.c.obj
+[389/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/osal/lv_pthread.c.obj
+[390/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/osal/lv_os_none.c.obj
+[391/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/osal/lv_os.c.obj
+[392/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/osal/lv_sdl2.c.obj
+[393/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/osal/lv_windows.c.obj
+[394/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/others/file_explorer/lv_file_explorer.c.obj
+[395/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/osal/lv_rtthread.c.obj
+[396/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/others/fragment/lv_fragment.c.obj
+[397/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/others/fragment/lv_fragment_manager.c.obj
+[398/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/stdlib/builtin/lv_mem_core_builtin.c.obj
+[399/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/stdlib/builtin/lv_sprintf_builtin.c.obj
+[400/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/others/translation/lv_translation.c.obj
+[401/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/stdlib/builtin/lv_string_builtin.c.obj
+[402/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/stdlib/builtin/lv_tlsf.c.obj
+[403/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/stdlib/clib/lv_mem_core_clib.c.obj
+[404/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/stdlib/clib/lv_sprintf_clib.c.obj
+[405/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/stdlib/clib/lv_string_clib.c.obj
+[406/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/stdlib/rtthread/lv_sprintf_rtthread.c.obj
+[407/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/stdlib/rtthread/lv_mem_core_rtthread.c.obj
+[408/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/stdlib/micropython/lv_mem_core_micropython.c.obj
+[409/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/stdlib/lv_mem.c.obj
+[410/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/stdlib/uefi/lv_mem_core_uefi.c.obj
+[411/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/themes/lv_theme.c.obj
+[412/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/themes/mono/lv_theme_mono.c.obj
+[413/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/stdlib/rtthread/lv_string_rtthread.c.obj
+[414/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/themes/default/lv_theme_default.c.obj
+[415/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/3dtexture/lv_3dtexture.c.obj
+[416/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/themes/simple/lv_theme_simple.c.obj
+[417/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/tick/lv_tick.c.obj
+[418/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/animimage/lv_animimage.c.obj
+[419/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/arc/lv_arc.c.obj
+[420/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/barcode/lv_barcode.c.obj
+[421/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/arclabel/lv_arclabel.c.obj
+[422/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/bar/lv_bar.c.obj
+[423/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/buttonmatrix/lv_buttonmatrix.c.obj
+[424/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/button/lv_button.c.obj
+[425/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/calendar/lv_calendar.c.obj
+[426/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/calendar/lv_calendar_header_arrow.c.obj
+[427/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/calendar/lv_calendar_header_dropdown.c.obj
+[428/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/calendar/lv_calendar_chinese.c.obj
+[429/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/checkbox/lv_checkbox.c.obj
+[430/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/ffmpeg/lv_ffmpeg.c.obj
+[431/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/dropdown/lv_dropdown.c.obj
+[432/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/chart/lv_chart.c.obj
+[433/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/canvas/lv_canvas.c.obj
+[434/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/gif/lv_gif.c.obj
+[435/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/image/lv_image.c.obj
+[436/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/gstreamer/lv_gstreamer.c.obj
+[437/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/imagebutton/lv_imagebutton.c.obj
+[438/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/ime/lv_ime_pinyin.c.obj
+[439/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/led/lv_led.c.obj
+[440/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/keyboard/lv_keyboard.c.obj
+[441/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/line/lv_line.c.obj
+[442/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/label/lv_label.c.obj
+[443/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/list/lv_list.c.obj
+[444/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/lottie/lv_lottie.c.obj
+[445/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/menu/lv_menu.c.obj
+[446/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_arc_properties.c.obj
+[447/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/msgbox/lv_msgbox.c.obj
+[448/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_animimage_properties.c.obj
+[449/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_bar_properties.c.obj
+[450/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_chart_properties.c.obj
+[451/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_buttonmatrix_properties.c.obj
+[452/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_checkbox_properties.c.obj
+[453/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_image_properties.c.obj
+[454/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_label_properties.c.obj
+[455/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_led_properties.c.obj
+[456/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_keyboard_properties.c.obj
+[457/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_menu_properties.c.obj
+[458/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_dropdown_properties.c.obj
+[459/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_line_properties.c.obj
+[460/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_obj_properties.c.obj
+[461/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_style_properties.c.obj
+[462/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_spinner_properties.c.obj
+[463/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_roller_properties.c.obj
+[464/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_slider_properties.c.obj
+[465/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_span_properties.c.obj
+[466/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_spinbox_properties.c.obj
+[467/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_scale_properties.c.obj
+[468/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_switch_properties.c.obj
+[469/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_textarea_properties.c.obj
+[470/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_tabview_properties.c.obj
+[471/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/qrcode/lv_qrcode.c.obj
+[472/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/property/lv_table_properties.c.obj
+[473/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/roller/lv_roller.c.obj
+[474/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/slider/lv_slider.c.obj
+[475/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/scale/lv_scale.c.obj
+[476/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/span/lv_span.c.obj
+[477/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/spinbox/lv_spinbox.c.obj
+[478/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/spinner/lv_spinner.c.obj
+[479/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/switch/lv_switch.c.obj
+[480/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/tabview/lv_tabview.c.obj
+[481/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/table/lv_table.c.obj
+[482/498] Building CXX object CMakeFiles/MultiScaleBody-dsp.dir/plugins/MultiScaleBody/src/PluginMultiScaleBody.cpp.obj
+[483/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/textarea/lv_textarea.c.obj
+[484/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/tileview/lv_tileview.c.obj
+[485/498] Building CXX object CMakeFiles/MultiScaleBody-dsp.dir/plugins/MultiScaleBody/src/OutputLP.cpp.obj
+[486/498] Building CXX object CMakeFiles/MultiScaleBody-dsp.dir/plugins/MultiScaleBody/src/MultiScaleBodyEngine.cpp.obj
+[487/498] Building C object _lvgl/CMakeFiles/lvgl.dir/src/widgets/win/lv_win.c.obj
+[488/498] Building C object _lvgl/CMakeFiles/lvgl.dir/__/__/plugins/MultiScaleBody/src/lv_global_provider.c.obj
+In file included from E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/lv_global_provider.c:1:
+E:/dev/deps/lvgl/src/lv_conf_internal.h:1:2: warning: #warning Include public headers from the `src` folder is deprecated. This file will be removed soon. To ensure your application keeps working, you can choose to include the new header in <include/lvgl/config/lv_conf_internal.h> or include the main header file <include/lvgl/lvgl.h> [-Wcpp]
+    1 | #warning Include public headers from the `src` folder is deprecated. This file will be removed soon. To ensure your application keeps working, you can choose to include the new header in <include/lvgl/config/lv_conf_internal.h> or include the main header file <include/lvgl/lvgl.h>
+      |  ^~~~~~~
+[489/498] Building C object CMakeFiles/MultiScaleBody.dir/_dpf_empty.c.obj
+[490/498] Building CXX object CMakeFiles/MultiScaleBody-jack.dir/deps/DPF/distrho/DistrhoUIMain.cpp.obj
+In file included from E:/dev/deps/DPF/dgl/src/pugl.hpp:25,
+                 from E:/dev/deps/DPF/dgl/src/WindowPrivateData.hpp:24,
+                 from E:/dev/deps/DPF/distrho/src/DistrhoUI.cpp:82,
+                 from E:/dev/deps/DPF/distrho/DistrhoUIMain.cpp:17:
+C:/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/c++/cstdbool:50:6: warning: #warning "<cstdbool> is deprecated in C++17, remove the #include" [-Wcpp]
+   50 | #    warning "<cstdbool> is deprecated in C++17, remove the #include"
+      |      ^~~~~~~
+[491/498] Building CXX object CMakeFiles/MultiScaleBody-ui.dir/deps/dpf-widgets/generic/LVGL.cpp.obj
+E:/dev/deps/dpf-widgets/generic/LVGL.cpp: In instantiation of 'static void DGL::LVGLWidget<BaseWidget>::PrivateData::flush_cb(lv_display_t*, const lv_area_t*, uint8_t*) [with BaseWidget = DGL::SubWidget; lv_display_t = _lv_display_t; uint8_t = unsigned char]':
+E:/dev/deps/dpf-widgets/generic/LVGL.cpp:783:16:   required from here
+  783 | template class LVGLWidget<SubWidget>;
+      |                ^~~~~~~~~~~~~~~~~~~~~
+E:/dev/deps/dpf-widgets/generic/LVGL.cpp:286:101: warning: unused parameter 'data' [-Wunused-parameter]
+  286 |     static void flush_cb(lv_display_t* const evdisplay, const lv_area_t* const area, uint8_t* const data)
+      |                                                                                      ~~~~~~~~~~~~~~~^~~~
+E:/dev/deps/dpf-widgets/generic/LVGL.cpp: In instantiation of 'static void DGL::LVGLWidget<BaseWidget>::PrivateData::flush_cb(lv_display_t*, const lv_area_t*, uint8_t*) [with BaseWidget = DGL::TopLevelWidget; lv_display_t = _lv_display_t; uint8_t = unsigned char]':
+E:/dev/deps/dpf-widgets/generic/LVGL.cpp:803:16:   required from here
+  803 | template class LVGLWidget<TopLevelWidget>;
+      |                ^~~~~~~~~~~~~~~~~~~~~~~~~~
+E:/dev/deps/dpf-widgets/generic/LVGL.cpp:286:101: warning: unused parameter 'data' [-Wunused-parameter]
+  286 |     static void flush_cb(lv_display_t* const evdisplay, const lv_area_t* const area, uint8_t* const data)
+      |                                                                                      ~~~~~~~~~~~~~~~^~~~
+E:/dev/deps/dpf-widgets/generic/LVGL.cpp: In instantiation of 'static void DGL::LVGLWidget<BaseWidget>::PrivateData::flush_cb(lv_display_t*, const lv_area_t*, uint8_t*) [with BaseWidget = DGL::StandaloneWindow; lv_display_t = _lv_display_t; uint8_t = unsigned char]':
+E:/dev/deps/dpf-widgets/generic/LVGL.cpp:831:16:   required from here
+  831 | template class LVGLWidget<StandaloneWindow>;
+      |                ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+E:/dev/deps/dpf-widgets/generic/LVGL.cpp:286:101: warning: unused parameter 'data' [-Wunused-parameter]
+  286 |     static void flush_cb(lv_display_t* const evdisplay, const lv_area_t* const area, uint8_t* const data)
+      |                                                                                      ~~~~~~~~~~~~~~~^~~~
+E:/dev/deps/dpf-widgets/generic/LVGL.cpp:37:34: warning: 'DGL::lv_global' defined but not used [-Wunused-variable]
+   37 | static thread_local lv_global_t* lv_global = nullptr;
+      |                                  ^~~~~~~~~
+[492/498] Linking CXX static library _lvgl\liblvgl.a
+[493/498] Linking CXX static library libMultiScaleBody.a
+[494/498] Building CXX object CMakeFiles/MultiScaleBody-ui.dir/plugins/MultiScaleBody/src/PluginUI.cpp.obj
+In file included from E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:7:
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/ui/UIStyles.hpp: In member function 'void DISTRHO::UIStyles::applyToggleButton(lv_obj_t*, bool) const':
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/ui/UIStyles.hpp:368:24: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  368 |         lv_obj_add_flag(btn, LV_OBJ_FLAG_CHECKABLE);
+      |         ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from E:/dev/deps/lvgl/include/lvgl/lvgl.h:21,
+                 from E:/dev/deps/lvgl/lvgl.h:1,
+                 from E:/dev/deps/dpf-widgets/generic/LVGL.hpp:31,
+                 from E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:3:
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:234:6: note: declared here
+  234 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+In file included from E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:8:
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/ui/UIWidgets.hpp: In function 'void DISTRHO::{anonymous}::allowChildOverflow(lv_obj_t*)':
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/ui/UIWidgets.hpp:46:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+   46 |     lv_obj_add_flag(obj, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:234:6: note: declared here
+  234 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/ui/UIWidgets.hpp: In static member function 'static lv_obj_t* DISTRHO::UIWidgets::createArcKnob(lv_obj_t*, uint32_t, DISTRHO::AbstractMultiScaleBodyUI*, DISTRHO::UIStyles&, const DISTRHO::ArcVisualSpec&)':
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/ui/UIWidgets.hpp:107:81: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  107 |         lv_obj_set_scrollbar_mode(cont,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(cont,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                 ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/ui/UIWidgets.hpp:124:26: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  124 |         lv_obj_clear_flag(arc,LV_OBJ_FLAG_SCROLLABLE);
+      |                          ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/ui/UIWidgets.hpp:136:67: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  136 |         lv_obj_add_style(cap,&styles.knobCap,0); lv_obj_clear_flag(cap,LV_OBJ_FLAG_CLICKABLE); lv_obj_clear_flag(cap,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                   ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/ui/UIWidgets.hpp:136:113: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  136 |         lv_obj_add_style(cap,&styles.knobCap,0); lv_obj_clear_flag(cap,LV_OBJ_FLAG_CLICKABLE); lv_obj_clear_flag(cap,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                                                 ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/ui/UIWidgets.hpp:138:67: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  138 |         lv_obj_add_style(rim,&styles.knobRim,0); lv_obj_clear_flag(rim,LV_OBJ_FLAG_CLICKABLE);
+      |                                                                   ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/ui/UIWidgets.hpp:146:95: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  146 |                 lv_obj_set_style_transform_angle(tick,t*(3600/tickCount),0); lv_obj_clear_flag(tick,LV_OBJ_FLAG_CLICKABLE);
+      |                                                                                               ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/ui/UIWidgets.hpp:150:69: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  150 |         lv_obj_add_style(face,&styles.knobFace,0); lv_obj_clear_flag(face,LV_OBJ_FLAG_CLICKABLE); lv_obj_clear_flag(face,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                     ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/ui/UIWidgets.hpp:150:116: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  150 |         lv_obj_add_style(face,&styles.knobFace,0); lv_obj_clear_flag(face,LV_OBJ_FLAG_CLICKABLE); lv_obj_clear_flag(face,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                                                    ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/ui/UIWidgets.hpp:152:75: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  152 |         lv_obj_add_style(shading,&styles.knobShading,0); lv_obj_clear_flag(shading,LV_OBJ_FLAG_CLICKABLE);
+      |                                                                           ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/ui/UIWidgets.hpp:156:88: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  156 |         lv_obj_align(needle,LV_ALIGN_TOP_MID,0,spec.needleTopOffset); lv_obj_clear_flag(needle,LV_OBJ_FLAG_CLICKABLE);
+      |                                                                                        ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp: In constructor 'DISTRHO::MultiScaleBodyUI::MultiScaleBodyUI()':
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:39:22: warning: comparison of integer expressions of different signedness: 'int' and 'DISTRHO::PluginMultiScaleBody::Parameters' [-Wsign-compare]
+   39 |         for(int i=0;i<PluginMultiScaleBody::kParameterCount;++i) paramCache[i]=0.5f;
+      |                     ~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp: In member function 'virtual bool DISTRHO::MultiScaleBodyUI::onScroll(const DGL::Widget::ScrollEvent&)':
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:126:44: warning: 'bool lv_obj_has_flag(const lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_is_<flag>() functions instead, e.g. lv_obj_is_hidden(obj). [-Wdeprecated-declarations]
+  126 |             while(node){ if(lv_obj_has_flag(node,LV_OBJ_FLAG_SCROLLABLE)){ target=node; break; } node=lv_obj_get_parent(node); }
+      |                             ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:462:6: note: declared here
+  462 | bool lv_obj_has_flag(const lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp: In member function 'void DISTRHO::MultiScaleBodyUI::updateBodyPreview()':
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:183:34: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  183 |                 lv_obj_clear_flag(cellObj,LV_OBJ_FLAG_SCROLLABLE);
+      |                                  ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:184:34: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  184 |                 lv_obj_clear_flag(cellObj,LV_OBJ_FLAG_CLICKABLE);
+      |                                  ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp: In member function 'void DISTRHO::MultiScaleBodyUI::createKeyboard(lv_obj_t*)':
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:353:89: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  353 |         lv_obj_set_scrollbar_mode(kbContainer, LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(kbContainer, LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                         ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:359:86: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  359 |         lv_obj_set_scrollbar_mode(kbHeader, LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(kbHeader, LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                      ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:366:134: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  366 |         lv_obj_set_style_pad_column(octRow, scaled(6),0); lv_obj_set_scrollbar_mode(octRow, LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(octRow, LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                                                                      ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:379:83: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  379 |         lv_obj_set_scrollbar_mode(kbRow, LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(kbRow, LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                   ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:384:160: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  384 |         lv_obj_set_style_bg_opa(keysBox, LV_OPA_TRANSP,0); lv_obj_set_style_border_width(keysBox,0,0); lv_obj_set_style_pad_all(keysBox,0,0); lv_obj_clear_flag(keysBox, LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                                                                                                ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:391:30: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  391 |             lv_obj_clear_flag(w,LV_OBJ_FLAG_SCROLLABLE);
+      |                              ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:395:235: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  395 |             lv_obj_add_style(lbl,&styles.labelSmall,0); lv_obj_set_style_text_color(lbl,COL_PANEL_DARK,0); lv_obj_set_style_text_font(lbl,&lv_font_montserrat_10,0); lv_obj_align(lbl,LV_ALIGN_BOTTOM_MID,0,-scaled(4)); lv_obj_clear_flag(lbl,LV_OBJ_FLAG_CLICKABLE);
+      |                                                                                                                                                                                                                                           ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:402:30: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  402 |             lv_obj_clear_flag(b,LV_OBJ_FLAG_SCROLLABLE);
+      |                              ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp: In member function 'void DISTRHO::MultiScaleBodyUI::buildUI()':
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:435:81: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  435 |         lv_obj_set_scrollbar_mode(root,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(root,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                 ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:445:83: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  445 |         lv_obj_set_scrollbar_mode(header,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(header,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                   ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:453:82: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  453 |         lv_obj_set_scrollbar_mode(hLeft,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(hLeft,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                  ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:463:129: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  463 |         lv_obj_set_style_pad_column(hMid,scaled(12),0); lv_obj_set_scrollbar_mode(hMid,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(hMid,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                                                                 ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:469:26: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  469 |         lv_obj_clear_flag(bodyPreview,LV_OBJ_FLAG_SCROLLABLE);
+      |                          ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:475:86: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  475 |         lv_obj_set_scrollbar_mode(presetCol,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(presetCol,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                      ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:480:138: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  480 |         lv_obj_set_style_pad_column(presetRow,scaled(8),0); lv_obj_set_scrollbar_mode(presetRow,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(presetRow,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                                                                          ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:496:83: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  496 |         lv_obj_set_scrollbar_mode(hRight,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(hRight,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                   ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:509:82: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  509 |         lv_obj_set_scrollbar_mode(stage,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(stage,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                  ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:515:81: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  515 |         lv_obj_set_scrollbar_mode(left,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(left,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                 ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:521:86: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  521 |         lv_obj_set_scrollbar_mode(forgeHead,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(forgeHead,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                      ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:533:86: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  533 |         lv_obj_set_scrollbar_mode(knobsGrid,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(knobsGrid,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                      ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:556:87: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  556 |         lv_obj_set_scrollbar_mode(strikeCard,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(strikeCard,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                       ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:560:87: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  560 |         lv_obj_set_scrollbar_mode(strikeHead,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(strikeHead,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                       ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:567:24: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  567 |         lv_obj_add_flag(strikePad,LV_OBJ_FLAG_CLICKABLE);
+      |         ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:234:6: note: declared here
+  234 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:571:175: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  571 |             lv_obj_set_style_bg_color(vline,lv_color_hex(0x2A2418),0); lv_obj_set_style_bg_opa(vline,LV_OPA_30,0); lv_obj_set_style_border_width(vline,0,0); lv_obj_clear_flag(vline,LV_OBJ_FLAG_CLICKABLE); lv_obj_clear_flag(vline,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                                                                                                               ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:571:223: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  571 |             lv_obj_set_style_bg_color(vline,lv_color_hex(0x2A2418),0); lv_obj_set_style_bg_opa(vline,LV_OPA_30,0); lv_obj_set_style_border_width(vline,0,0); lv_obj_clear_flag(vline,LV_OBJ_FLAG_CLICKABLE); lv_obj_clear_flag(vline,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                                                                                                                                                               ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:573:175: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  573 |             lv_obj_set_style_bg_color(hline,lv_color_hex(0x2A2418),0); lv_obj_set_style_bg_opa(hline,LV_OPA_30,0); lv_obj_set_style_border_width(hline,0,0); lv_obj_clear_flag(hline,LV_OBJ_FLAG_CLICKABLE); lv_obj_clear_flag(hline,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                                                                                                               ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:573:223: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  573 |             lv_obj_set_style_bg_color(hline,lv_color_hex(0x2A2418),0); lv_obj_set_style_bg_opa(hline,LV_OPA_30,0); lv_obj_set_style_border_width(hline,0,0); lv_obj_clear_flag(hline,LV_OBJ_FLAG_CLICKABLE); lv_obj_clear_flag(hline,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                                                                                                                                                               ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:578:26: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  578 |         lv_obj_clear_flag(strikeDot,LV_OBJ_FLAG_CLICKABLE);
+      |                          ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:583:87: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  583 |         lv_obj_set_scrollbar_mode(strikeInfo,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(strikeInfo,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                       ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:591:82: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  591 |         lv_obj_set_scrollbar_mode(right,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(right,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                  ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:598:89: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  598 |         lv_obj_set_scrollbar_mode(spectrumCard,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(spectrumCard,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                         ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:604:85: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  604 |         lv_obj_set_scrollbar_mode(specHead,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(specHead,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                     ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:616:24: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  616 |         lv_obj_add_flag(chart,LV_OBJ_FLAG_CLICKABLE);
+      |         ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:234:6: note: declared here
+  234 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+E:/dev/dafxpaper/ranked/Synthesis & Sound Generation/0004-Multi-Scale Body/plugins/MultiScaleBody/src/PluginUI.cpp:623:84: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  623 |         lv_obj_set_scrollbar_mode(tickRow,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(tickRow,LV_OBJ_FLAG_SCROLLABLE);
+      |                                                                                    ^
+E:/dev/deps/lvgl/include/lvgl/core/lv_obj.h:243:6: note: declared here
+  243 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+[495/498] Linking CXX static library libMultiScaleBody-dsp.a
+[496/498] Building CXX object CMakeFiles/MultiScaleBody-jack.dir/deps/DPF/distrho/DistrhoPluginMain.cpp.obj
+In file included from E:/dev/deps/DPF/dgl/src/pugl.hpp:25,
+                 from E:/dev/deps/DPF/dgl/src/WindowPrivateData.hpp:24,
+                 from E:/dev/deps/DPF/distrho/src/DistrhoUIPrivateData.hpp:27,
+                 from E:/dev/deps/DPF/distrho/src/DistrhoUIInternal.hpp:20,
+                 from E:/dev/deps/DPF/distrho/src/DistrhoPluginJACK.cpp:24,
+                 from E:/dev/deps/DPF/distrho/DistrhoPluginMain.cpp:26:
+C:/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/c++/cstdbool:50:6: warning: #warning "<cstdbool> is deprecated in C++17, remove the #include" [-Wcpp]
+   50 | #    warning "<cstdbool> is deprecated in C++17, remove the #include"
+      |      ^~~~~~~
+[497/498] Linking CXX static library libMultiScaleBody-ui.a
+[498/498] Linking CXX executable bin\MultiScaleBody.exe
