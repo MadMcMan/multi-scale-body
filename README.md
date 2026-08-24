@@ -2,7 +2,7 @@
 
 Struck-object modal resonator instrument. A physical body (bowl, plate, bell, gong, ...) is analysed offline into its modal set — frequencies, decays, and per-strike-position gains — and rendered in real time as a bank of reson filters driven by note-on impulses. Based on Picard, Faure, Kry & Drettakis, *A Robust and Multi-Scale Modal Analysis for Sound Synthesis* (DAFx-09, paper 47).
 
-![MultiScaleBody UI](ui_shot8.png)
+![MultiScaleBody UI](ui_remake_1440.png)
 
 ## Signal model
 
@@ -58,3 +58,7 @@ g++ -std=c++17 -O1 -DHOST_BINARY -I plugins/MultiScaleBody/src -I deps/DPF/distr
 - C. Picard, F. Faure, P. G. Kry, G. Drettakis, *A Robust and Multi-Scale Modal Analysis for Sound Synthesis*, DAFx-09 — local transcript: [`paper_47.md`](paper_47.md)
 - K. van den Doel, P. G. Kry, D. K. Pai, *FoleyAutomatic*, SIGGRAPH 2001 (reson-filter rendering)
 - Implementation notes: [`PLAN.md`](PLAN.md) · [`research-plan.md`](research-plan.md) · [`BUILD.md`](BUILD.md)
+
+## License
+
+MIT (see `getLicense()` in `plugins/MultiScaleBody/src/PluginMultiScaleBody.cpp`).
