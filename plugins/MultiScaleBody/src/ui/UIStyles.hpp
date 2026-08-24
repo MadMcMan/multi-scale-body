@@ -38,6 +38,7 @@ struct UIStyles {
     lv_style_t compactSelectIndicator;
     lv_style_t compactSelectListMain;
     lv_style_t compactSelectListSelected;
+    lv_style_t meterTrack;
     lv_style_t card;
 
     lv_style_t knobCap;
@@ -87,6 +88,7 @@ struct UIStyles {
         lv_style_reset(&compactSelectIndicator);
         lv_style_reset(&compactSelectListMain);
         lv_style_reset(&compactSelectListSelected);
+        lv_style_reset(&meterTrack);
         lv_style_reset(&card);
         lv_style_reset(&knobCap);
         lv_style_reset(&knobRim);
@@ -114,7 +116,16 @@ struct UIStyles {
         lv_style_set_shadow_color(&panel, COL_BLACK);
         lv_style_set_shadow_opa(&panel, LV_OPA_20);
 
-        // Card style: darker inset well inside a plate
+        // Level meter track: inset well, hairline border; indicator color is
+        // set live per zone (safe/amber/hot) so it stays a dynamic state color
+        lv_style_init(&meterTrack);
+        lv_style_set_bg_color(&meterTrack, PLATE_WELL);
+        lv_style_set_bg_opa(&meterTrack, LV_OPA_COVER);
+        lv_style_set_border_color(&meterTrack, PLATE_LINE);
+        lv_style_set_border_width(&meterTrack, 1);
+        lv_style_set_radius(&meterTrack, scaled(3));
+        lv_style_set_pad_all(&meterTrack, 0);
+
         lv_style_init(&card);
         lv_style_set_bg_color(&card, COL_PANEL_DARK);
         lv_style_set_bg_opa(&card, LV_OPA_COVER);

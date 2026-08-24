@@ -139,6 +139,47 @@ int main(){
         require(peak>0.001f,"long tail audible");
         printf("long-tail finite PASS (peak %.3f)\n",peak);
     }
+    // --- audit: reverb headroom — dense IR must not blow up on sustained chords ---
+    {
+        MultiScaleBodyEngine rev;
+        rev.prepare(44100);
+        rev.setModeCount(1.f);   // worst case: max mode density
+        rev.setDecayScale(0.7f);
+        rev.setReverbWet(1.f);
+        const int notes[8]={48,55,60,64,67,72,76,79};
+        float peak=0.f;
+        for(int p=0;p<kNumPresets;++p){
+            rev.setPreset(p); rev.reset();
+            for(int nn:notes) rev.noteOn(nn,1.f,0);
+            for(int i=0;i<44100*2;++i){
+                float l,r; rev.processSampleStereo(l,r);
+                float a=std::max(std::abs(l),std::abs(r));
+                if(a>peak) peak=a;
+            }
+        }
+        // IR metrics (last preset): time-domain peak is normalized by design
+        // and bounds nothing — amplification is set by L1 / resonant |H(f)|
+        float irPk=0,l1l=0,l1r=0,resGain=0;
+        std::vector<float> irl((size_t)modal::kIrLen);
+        for(int ch=0;ch<2;++ch){
+            const float* ir = ch? rev.reverbIrR() : rev.reverbIrL();
+            for(int t=0;t<modal::kIrLen;++t){
+                float a=std::abs(ir[t]); irPk=std::max(irPk,a);
+                if(ch==0){ l1l+=a; irl[(size_t)t]=ir[t]; } else l1r+=a;
+            }
+        }
+        const auto& pr=kPresets[rev.currentPreset()];
+        int nm=std::min(pr.n,rev.currentModeCount());
+        for(int m=0;m<nm;++m){
+            float f=pr.freq[m]*rev.getPitchScale();
+            if(f<20.f||f>18000.f) continue;
+            resGain=std::max(resGain,goertzelMag(irl,(double)f,44100.0));
+        }
+        printf("reverb IR: peak %.3f L1 L%.2f R%.2f maxResonantGain %.2f\n",irPk,l1l,l1r,resGain);
+        printf("reverb chord peak (all presets, wet=1): %.3f\n",peak);
+        require(std::isfinite(peak),"reverb finite");
+        require(peak<0.98f,"reverb headroom: sustained chord at wet=1 must stay below clip");
+    }
     printf("=== ALL TESTS PASSED ===\n");
     return 0;
 }

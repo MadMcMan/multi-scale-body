@@ -228,9 +228,22 @@ bool MultiScaleBodyEngine::stepIrBake(int budgetModes){
         }
     }
     irBakeCursor_=end;
-    // renormalize partial IR so loudness is stable while baking converges
-    float mx=0; for(int i=0;i<kIrLen;++i) mx=std::max(mx,std::max(std::abs(irL_[i]),std::abs(irR_[i])));
-    if(mx>1e-9f){ float inv=0.8f/mx; for(int i=0;i<kIrLen;++i){ irL_[i]*=inv; irR_[i]*=inv; } }
+    // renormalize partial IR so loudness is stable while baking converges.
+    // Peak normalization alone bounds nothing: a dense long-decay modal IR
+    // correlates strongly with the engine's own ringing output over the whole
+    // window (matched-filter gain ~ L1), so the wet send burst ~10x past clip
+    // on every strike (= reported distortion). Cap per-channel L1 as well:
+    // |conv| <= L1*max|x| <= kIrL1Max*0.85 keeps dry+wet below clipping for
+    // ANY input, correlated or not.
+    float mx=0,l1l=0,l1r=0;
+    for(int i=0;i<kIrLen;++i){
+        float al=std::abs(irL_[i]), ar=std::abs(irR_[i]);
+        mx=std::max(mx,std::max(al,ar)); l1l+=al; l1r+=ar;
+    }
+    float inv=0.f;
+    if(mx>1e-9f) inv=0.8f/mx;                       // loudness anchor when sparse
+    if(std::max(l1l,l1r)>1e-6f) inv=std::min(inv,kIrL1Max/std::max(l1l,l1r));
+    if(inv>0.f){ for(int i=0;i<kIrLen;++i){ irL_[i]*=inv; irR_[i]*=inv; } }
     return irBakeCursor_>=n;
 }
 void MultiScaleBodyEngine::bakeCurrentIR(){

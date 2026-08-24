@@ -32,6 +32,9 @@ struct ScopedDenormals {};
 #endif
 inline constexpr int kVoiceCount = 8;
 inline constexpr int kIrLen = 2048; // ~46ms @44.1k — short body IR, cheap convolve via block overlap-add
+inline constexpr float kIrL1Max = 0.85f; // caps wet worst-case gain: |conv| <= L1*max|x|,
+                                         // so out <= (1-.7)*tanh_bound + L1*tanh_bound
+                                         //   = .3*.85 + .85*.85 = 0.978 < 0.98 always
 struct Voice {
     bool active=false; int midiNote=-1; int midiChannel=0; float vel=0.f; int age=0; int n=0;
     float freq[kMaxModes]{}; float decay[kMaxModes]{}; float gain[kMaxModes]{};
@@ -100,6 +103,9 @@ public:
     float strikeX() const { return strikeX_; }
     float strikeY() const { return strikeY_; }
     float lfoPhase() const { return (float)lfoPhase_; }
+    // tests/diagnostics: currently baked reverb IR (populated after any wet render)
+    const float* reverbIrL() const { return irL_; }
+    const float* reverbIrR() const { return irR_; }
 private:
     void recomputeVoiceCoeffs(Voice& v);
     void interpolateGainsFor(float* outGain,float sx,float sy) const;

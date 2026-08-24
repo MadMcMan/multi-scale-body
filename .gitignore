@@ -1,3 +1,45 @@
+# Build output
 build/
 build-dbg/
+
+# Vendored deps are Windows junctions into E:/dev/deps/* — never commit
 deps/
+
+# Build artifacts
+*.exe
+*.dll
+*.a
+*.o
+*.obj
+
+# Logs
+*.log
+
+# Copyrighted source paper
+*.pdf
+
+# Capture/log junk
+desktop.png
+ui_shot*.png
+ui_verify_default.png
+ui_verify_small.png
+ui_verify_log.txt
+gdb*.txt
+gdb_out.txt
+stderr_cap.txt
+stdout_cap.txt
+opentest_err.txt
+opentest_out.txt
+build_out.txt
+build_verify.txt
+jack_smoke.txt
+lv2_out.txt
+
+# Keep README heroes despite broad capture rules
+!ui_remake_1440.png
+!ui_remake_1100.png
+!ui_remake_2048.png
+
+# Nested git dirs safety
+**/.git/
+**/.git_disabled/
