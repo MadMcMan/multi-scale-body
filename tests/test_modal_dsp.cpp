@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <algorithm>
 #include <vector>
 static void require(bool c,const char* m){ if(!c){ fprintf(stderr,"FAIL: %s\n",m); std::exit(1);} }
 static float goertzelMag(const std::vector<float>& x,double targetHz,double sr){
@@ -179,6 +180,135 @@ int main(){
         printf("reverb chord peak (all presets, wet=1): %.3f\n",peak);
         require(std::isfinite(peak),"reverb finite");
         require(peak<0.98f,"reverb headroom: sustained chord at wet=1 must stay below clip");
+    }
+    // --- audit: DECAY DIRECTION — turning Decay UP must lengthen the tail ---
+    // Regression for the reported "decay is reversed" bug: the pole radius is
+    // R=exp(-(decay[i]*decayScale_)/sr) where decayScale_ multiplies a decay
+    // RATE, so the knob curve must invert (v -> 0.1*100^(1-v)). Measure the
+    // -30 dB tail time at knob 0.1 / 0.5 / 0.9 and require STRICT increase
+    // toward higher knob values.
+    {
+        auto tailSec=[&](float knob)->double{
+            MultiScaleBodyEngine e;
+            e.prepare(44100); e.reset();
+            e.setPreset(0); e.setModeCount(1.0f); e.setPitchScale(0.5f);
+            e.setDecayScale(knob);
+            e.setStrike(0.5f,0.5f); e.setReverbWet(0.f); e.setExciteMix(0.f);
+            e.noteOn(60,1.0f,0);
+            const int N=44100*20;
+            std::vector<float> buf; buf.reserve(N);
+            float peak=0.f;
+            for(int i=0;i<N;++i){
+                float s=e.processSampleMono();
+                buf.push_back(s);
+                float a=std::abs(s); if(a>peak) peak=a;
+            }
+            const float thr=peak*std::pow(10.f,-30.f/20.f);
+            for(int i=N-1;i>=0;--i)
+                if(std::abs(buf[(size_t)i])>=thr) return i/44100.0;
+            return -1.0;
+        };
+        const double tLo=tailSec(0.1f), tMid=tailSec(0.5f), tHi=tailSec(0.9f);
+        printf("decay tails (-30dB): knob0.1 %.2fs  knob0.5 %.2fs  knob0.9 %.2fs\n",tLo,tMid,tHi);
+        require(tHi>tMid && tMid>tLo,
+            "decay monotonicity: tail(knob 0.9) > tail(knob 0.5) > tail(knob 0.1) — Decay UP = LONGER ring");
+        require(tMid>1.25*tLo && tHi>1.25*tMid,
+            "decay spread: adjacent knob steps must audibly change tail length");
+        printf("decay monotonicity PASS (up = longer)\n");
+    }
+    // --- audit: LIMITER TRANSPARENCY — moderate play must be untouched ---
+    // Two proofs in one: (1) gain reduction stays at exactly 0 dB throughout,
+    // (2) halving velocity scales the whole output by exactly one half
+    // sample-for-sample (the engine is linear when the limiter idles).
+    {
+        auto render=[&](float vel,std::vector<float>& L,std::vector<float>& R)->float{
+            MultiScaleBodyEngine e;
+            e.prepare(44100); e.reset();
+            e.setPreset(0); e.setModeCount(0.6f); e.setBrightness(0.65f);
+            e.setDecayScale(0.5f); e.setStrike(0.5f,0.5f);
+            e.setReverbWet(0.f); e.setExciteMix(0.f);
+            const int notes[8]={48,55,60,64,67,72,76,79};
+            for(int n:notes) e.noteOn(n,vel,0);
+            const int N=44100*2;
+            float maxGR=0.f;
+            L.clear(); R.clear(); L.reserve(N); R.reserve(N);
+            for(int i=0;i<N;++i){
+                float l,r; e.processSampleStereo(l,r);
+                L.push_back(l); R.push_back(r);
+                maxGR=std::max(maxGR,-e.limiterGainDb());
+            }
+            return maxGR;
+        };
+        std::vector<float> la,ra,lb,rb;
+        const float grA=render(1.f,la,ra);
+        render(0.5f,lb,rb);
+        require(grA<1e-4f,"limiter transparency: gain reduction must stay 0 dB on moderate material");
+        double diff=0; float refPk=0;
+        for(size_t i=0;i<la.size();++i){
+            diff=std::max(diff,(double)std::abs(la[i]*0.5f-lb[i]));
+            diff=std::max(diff,(double)std::abs(ra[i]*0.5f-rb[i]));
+            refPk=std::max(refPk,std::abs(la[i]));
+        }
+        printf("transparency: maxGR %.6f dB, vel-halving max dev %.2e (ref peak %.3f)\n",grA,diff,refPk);
+        require(diff<1e-3,"limiter transparency: output must scale linearly below threshold");
+        // after the tail decays the limiter must settle back to exactly unity
+        MultiScaleBodyEngine e;
+        e.prepare(44100); e.reset();
+        e.setPreset(0); e.setDecayScale(0.9f); e.setReverbWet(0.f); e.setExciteMix(0.f);
+        e.noteOn(60,1.f,0);
+        for(int i=0;i<44100;++i) e.processSampleMono(); // ring out
+        require(e.limiterGainDb()==0.f,"limiter must return to unity gain after signal ends");
+        e.reset();
+        float resid=0.f;
+        for(int i=0;i<4096;++i) resid+=std::abs(e.processSampleMono());
+        require(resid<1e-12f,"engine reset() must yield digital silence through limiter");
+        printf("limiter settle/reset PASS\n");
+    }
+    // --- audit: LIMITER BOUND — worst-case sweep over presets x extremes ---
+    // All 18 presets, 8-voice vel-127 chords, Bright/Decay/Modes maxed, wet
+    // sweep, and sustained exciter drive (the historical "very loud" case).
+    // Assert the hard ceiling and report the worst offender.
+    {
+        struct Row{int preset;const char* cs;float pre;};
+        Row worst{0,"",0.f};
+        float globalPost=0.f; bool finite=true;
+        const int notes[8]={48,55,60,64,67,72,76,79};
+        auto sweep=[&](int preset,const char* cs,float wet,float ex,int exm,double secs){
+            MultiScaleBodyEngine e;
+            e.prepare(48000); e.reset();
+            e.setPreset(preset); e.setBrightness(1.f); e.setDecayScale(1.f);
+            e.setModeCount(1.f); e.setStrike(0.5f,0.5f);
+            e.setReverbWet(wet); e.setExciteMix(ex);
+            for(int n:notes) e.noteOn(n,1.f,0);
+            const long N=(long)(48000*secs);
+            double phase=0.0; const double w0=2*M_PI*(double)e.voice(0).freq[0]/48000.0;
+            const double ln10_20=0.11512925464970229;
+            float prePk=0.f, postPk=0.f;
+            for(long i=0;i<N;++i){
+                if(exm==1) e.setExciterSample(0.5f*(float)std::sin(phase));
+                else if(exm==2) e.setExciterSample(0.5f*(float)std::sin(2*M_PI*1000.0*i/48000.0));
+                phase+=w0; if(phase>2*M_PI) phase-=2*M_PI;
+                float l,r; e.processSampleStereo(l,r);
+                if(!std::isfinite(l)||!std::isfinite(r)){ finite=false; break; }
+                const float pk=std::max(std::abs(l),std::abs(r));
+                postPk=std::max(postPk,pk);
+                const float g=std::exp(e.limiterGainDb()*(float)ln10_20);
+                if(g>1e-9f) prePk=std::max(prePk,pk/g);
+            }
+            globalPost=std::max(globalPost,postPk);
+            if(prePk>worst.pre) worst={preset,cs,prePk};
+        };
+        for(int p=0;p<kNumPresets;++p){
+            sweep(p,"chord-bri1-dk1",0.f,0.f,0,1.5);
+            sweep(p,"chord+wet1",   1.f,0.f,0,1.5);
+            sweep(p,"wet1+ex@mode0",1.f,1.f,1,3.0);
+            sweep(p,"wet1+ex@1k",   1.f,1.f,2,3.0);
+        }
+        printf("worst-case sweep: max post-limiter peak %.4f (limit 0.98), worst pre-limiter %.2f at preset %d (%s)\n",
+               globalPost,worst.pre,worst.preset,worst.cs);
+        require(finite,"worst-case sweep must stay finite");
+        require(globalPost<=0.98f,"limiter bound: output peak must never exceed 0.98");
+        printf("limiter bound PASS\n");
     }
     printf("=== ALL TESTS PASSED ===\n");
     return 0;

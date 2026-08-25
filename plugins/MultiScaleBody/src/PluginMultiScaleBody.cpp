@@ -31,16 +31,12 @@ PluginMultiScaleBody::PluginMultiScaleBody() : Plugin(kNumParams, 0, 2) {
     engine_.setGlide(paramBase_[kParamGlide]);
     engine_.setReverbWet(paramBase_[kParamWet]);
     engine_.setMonoMode(paramBase_[kParamMono]>0.5f);
-    arpSamplesPerStep_ = sr*0.125; // default 120bpm 8ths
-    applyArpDefaults();
-}
-void PluginMultiScaleBody::applyArpDefaults(){
-    // simple up pattern across octave, gate 80
-    for(int i=0;i<16;++i){
-        int semis[16]={0,3,7,12,7,3,0,-5,0,3,7,12,15,12,7,3};
-        arpPattern_[i]=semis[i];
-        arpGate_[i]=(i%4==2)?60:85;
-    }
+    // look-ahead limiter delay: hosts compensate when aligning PDC.
+    // Reporting requires DISTRHO_PLUGIN_WANT_LATENCY=1 in DistrhoPluginInfo.h
+    // (left off for now; guarded so enabling the flag just works).
+#if DISTRHO_PLUGIN_WANT_LATENCY
+    setLatency(engine_.limiterLatency());
+#endif
 }
 const char* PluginMultiScaleBody::getLabel() const { return "MultiScaleBody"; }
 const char* PluginMultiScaleBody::getMaker() const { return "cymbals"; }
@@ -144,6 +140,9 @@ void PluginMultiScaleBody::sampleRateChanged(double sr){
     engine_.setGlide(paramBase_[kParamGlide]);
     engine_.setReverbWet(paramBase_[kParamWet]);
     engine_.setMonoMode(paramBase_[kParamMono]>0.5f);
+#if DISTRHO_PLUGIN_WANT_LATENCY
+    setLatency(engine_.limiterLatency());
+#endif
 }
 void PluginMultiScaleBody::activate(){ engine_.reset(); }
 void PluginMultiScaleBody::run(const float** inputs,float** outputs,uint32_t frames,const MidiEvent* midiEvents,uint32_t midiEventCount){
@@ -188,15 +187,16 @@ void PluginMultiScaleBody::run(const float** inputs,float** outputs,uint32_t fra
             arpCounter_ += 1.0;
             if(arpCounter_ >= arpSamplesPerStep_){
                 arpCounter_ -= arpSamplesPerStep_;
-                int step=arpPos_%arpSteps_;
-                int pat=arpPattern_[step];
+                static constexpr int kArpPattern[16]={0,3,7,12,7,3,0,-5,0,3,7,12,15,12,7,3};
+                static constexpr int kArpGate[16]={85,85,60,85}; // (i%4==2)?60:85 tiled
+                int pat=kArpPattern[arpPos_];
                 if(pat>-50){
-                    int note=std::clamp(arpBaseNote_+pat,0,127);
-                    float gate=(float)arpGate_[step]/100.f;
+                    int note=std::clamp(60+pat,0,127);
+                    float gate=(float)kArpGate[arpPos_%4]/100.f;
                     engine_.noteOn(note,std::clamp(0.45f+gate*0.55f,0.f,1.f),0);
                     engine_.noteOff(note,0); // struck percussive — env release handles tail via releaseMs
                 }
-                arpPos_=(arpPos_+1)%arpSteps_;
+                arpPos_=(arpPos_+1)%16;
             }
         }
         // exciter from input

@@ -28,20 +28,17 @@ set(LV_BUILD_DEMOS OFF CACHE BOOL "" FORCE)
 
 add_subdirectory("${DEPS_DIR}/DPF" "${CMAKE_BINARY_DIR}/_dph" EXCLUDE_FROM_ALL)
 add_subdirectory("${DEPS_DIR}/lvgl" "${CMAKE_BINARY_DIR}/_lvgl" EXCLUDE_FROM_ALL)
-
 if(TARGET lvgl)
+    # lv_blend_helium.S fails to assemble outside ARM builds with CMSIS; drop it
+    # always, plus the whole helium/neon source dirs on non-ARM targets.
     get_target_property(_lvgl_sources lvgl SOURCES)
     if(_lvgl_sources)
         list(FILTER _lvgl_sources EXCLUDE REGEX "lv_blend_helium\\.S$")
-        set_property(TARGET lvgl PROPERTY SOURCES "${_lvgl_sources}")
-    endif()
-    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _proc)
-    if(NOT _proc MATCHES "arm|aarch64")
-        get_target_property(_lvgl_sources lvgl SOURCES)
-        if(_lvgl_sources)
+        string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _proc)
+        if(NOT _proc MATCHES "arm|aarch64")
             list(FILTER _lvgl_sources EXCLUDE REGEX "[\\\\/](helium|neon)[\\\\/]")
-            set_property(TARGET lvgl PROPERTY SOURCES "${_lvgl_sources}")
         endif()
+        set_property(TARGET lvgl PROPERTY SOURCES "${_lvgl_sources}")
     endif()
     set_target_properties(lvgl PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_sources(lvgl PRIVATE plugins/MultiScaleBody/src/lv_global_provider.c)
@@ -51,7 +48,6 @@ dpf_add_plugin(${NAME}
   FILES_DSP
       plugins/MultiScaleBody/src/PluginMultiScaleBody.cpp
       plugins/MultiScaleBody/src/MultiScaleBodyEngine.cpp
-      plugins/MultiScaleBody/src/OutputLP.cpp
   FILES_UI
       plugins/MultiScaleBody/src/PluginUI.cpp
       "${DEPS_DIR}/dpf-widgets/generic/LVGL.cpp"

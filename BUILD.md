@@ -36,8 +36,8 @@ Modal data is baked: `python tools/modal_bake.py -o plugins/MultiScaleBody/src/M
 ## Tests
 
 ```sh
-g++ -std=c++17 -I plugins/MultiScaleBody/src tests/test_modal_dsp.cpp plugins/MultiScaleBody/src/MultiScaleBodyEngine.cpp plugins/MultiScaleBody/src/OutputLP.cpp -o build/test_modal_dsp.exe && build/test_modal_dsp.exe
+g++ -std=c++17 -I plugins/MultiScaleBody/src tests/test_modal_dsp.cpp plugins/MultiScaleBody/src/MultiScaleBodyEngine.cpp -o build/test_modal_dsp.exe && build/test_modal_dsp.exe
 g++ -std=c++17 -O1 -DHOST_BINARY -I plugins/MultiScaleBody/src -I deps/DPF/distrho -I deps/DPF/dgl tests/test_preset_regression.cpp build/libMultiScaleBody-dsp.a deps/DPF/distrho/src/DistrhoPlugin.cpp deps/DPF/distrho/src/DistrhoUtils.cpp -DDISTRHO_IS_STANDALONE -o build/test_preset_regression.exe && build/test_preset_regression.exe
 ```
 
-(The modal DSP test must link `MultiScaleBodyEngine.cpp` + `OutputLP.cpp` — engine methods live in the .cpp, not the header.) The preset regression prints two benign DPF assertions ("bufferSize != 0") before passing.
+(The modal DSP test links `MultiScaleBodyEngine.cpp` — engine methods live in the .cpp, not the header. `OutputLP` is header-only.)

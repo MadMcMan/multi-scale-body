@@ -42,13 +42,9 @@ private:
     std::array<float, kParameterCount> paramBase_{};
     // DSP->UI metering values (published as output parameters, polled by DPF per block)
     float vizLevel_=0.f; float vizBins_[16]={};
-    // arpeggiator
-    bool arpOn_=false; int arpSteps_=16; int arpPos_=0;
+    // arpeggiator — fixed up-pattern; pattern/gate tables live at the use site in run()
+    bool arpOn_=false; int arpPos_=0;
     double arpSamplesPerStep_=0.0; double arpCounter_=0.0;
-    int arpPattern_[16]={};
-    int arpGate_[16]={};
-    int arpBaseNote_=60;
-    void applyArpDefaults();
 #ifdef HOST_BINARY
 public:
     void testSetParameterValue(uint32_t i,float v){ setParameterValue(i,v); }

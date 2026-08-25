@@ -36,12 +36,18 @@ inline constexpr float kIrL1Max = 0.85f; // caps wet worst-case gain: |conv| <= 
                                          // so out <= (1-.7)*tanh_bound + L1*tanh_bound
                                          //   = .3*.85 + .85*.85 = 0.978 < 0.98 always
 struct Voice {
-    bool active=false; int midiNote=-1; int midiChannel=0; float vel=0.f; int age=0; int n=0;
+    bool active=false; int midiNote=-1; int midiChannel=0; int age=0; int n=0;
     float freq[kMaxModes]{}; float decay[kMaxModes]{}; float gain[kMaxModes]{};
     float R[kMaxModes]{}; float cosTheta[kMaxModes]{}; float radGain[kMaxModes]{};
     float s1[kMaxModes]{}; float s2[kMaxModes]{};
-    float strikeX=0.5f, strikeY=0.5f; // per-voice strike position (vel-morphed)
     int silenceCount=0;
+    // exciter injection normalizer per mode: (1 - R_i). The raw audio exciter
+    // drives resonators whose peak gain is ~1/(1-R_i), so without this the
+    // sustained-input output scales with resonator Q (measured up to x3500
+    // pre-limiter at long decay = the reported "sometimes very loud").
+    // Multiplying the injected signal by (1-R_i) pins the steady-state modal
+    // amplitude to ~exciterGain*gains[i]/2 regardless of Decay/Q.
+    float excNorm[kMaxModes]{};
     // ADSR per voice
     enum EnvState { Idle, Attack, Decay, Sustain, Release };
     EnvState envState=Idle;
@@ -60,7 +66,6 @@ public:
     void setModeCount(float v);
     void setWidth(float v);
     void setBandTrim(int band,float v);
-    float getBandTrim(int band) const;
     void setRadiationMix(float v);
     void setAttack(float v);
     void setReleaseParam(float v);
@@ -90,9 +95,6 @@ public:
     void allSoundOff();   // CC120 — immediate silence (panic)
     float processSampleMono();
     void processSampleStereo(float &l,float &r);
-    void processBlockStereo(float* outL,float* outR,uint32_t frames);
-    void processBlock(const float** inputs, float** outputs, uint32_t frames);
-    void getDisplayGains(float* out16) const;
     // live analyser: Goertzel magnitudes at current mode freqs (16 bands)
     void analyseBands(float* out16);
     int currentPreset() const { return presetIdx_; }
@@ -100,18 +102,17 @@ public:
     float getPitchScale() const { return pitchScale_; }
     double sampleRate() const { return sampleRate_; }
     const Voice& voice(int i) const { return voices_[i]; }
-    float strikeX() const { return strikeX_; }
-    float strikeY() const { return strikeY_; }
-    float lfoPhase() const { return (float)lfoPhase_; }
     // tests/diagnostics: currently baked reverb IR (populated after any wet render)
     const float* reverbIrL() const { return irL_; }
     const float* reverbIrR() const { return irR_; }
-private:
+    // final-stage limiter telemetry: current gain reduction in dB (<=0) and
+    // algorithmic latency in samples (lookahead depth). Latency is constant
+    // between prepare() calls; report to the host via DPF setLatency().
+    float limiterGainDb() const { return limGainDb_; }
+    uint32_t limiterLatency() const { return limLen_ > 0 ? (uint32_t)(limLen_ - 1) : 0; }
     void recomputeVoiceCoeffs(Voice& v);
     void interpolateGainsFor(float* outGain,float sx,float sy) const;
-    void interpolateGains(float* outGain,float sx,float sy) const { interpolateGainsFor(outGain,sx,sy); }
     static float cubicInterp(float p0,float p1,float p2,float p3,float t);
-    void bakeCurrentIR(); // full synchronous render (offline/tests only)
     void beginIrBake();   // incremental RT-safe baking: a few modes per block
     bool stepIrBake(int budgetModes); // returns true when the IR is complete
     void rebuildDetuneTable();
@@ -150,5 +151,24 @@ private:
     int nextAge_=0;
     OutputLP lpL_, lpR_;
     void updateEnvelope(Voice& v);
+
+    // --- final output stage: look-ahead brickwall limiter -------------------
+    // RT-safe by construction: every state member below is fixed-size, sized
+    // once in prepare(); run()/processSampleStereo() only reads/writes them.
+    static constexpr int   kLimBuf  = 1024;     // pow2 ring; >= lookahead @192 kHz
+    static constexpr float kLimCeil = 0.95f;    // output ceiling (~ -0.45 dBFS)
+    float    limDelayL_[kLimBuf]{}; float limDelayR_[kLimBuf]{};
+    int      limLen_ = 0;                   // lookahead length in samples (3 ms)
+    int      limPos_ = 0;                   // delay-ring write cursor
+    // sliding max over the lookahead window: monotonic wedge (values strictly
+    // decreasing from head to tail), amortized O(1) per sample
+    float    limWedgeV_[kLimBuf]{};
+    unsigned limWedgeI_[kLimBuf]{};         // absolute sample index per entry
+    unsigned limWh_ = 0, limWt_ = 0;        // wedge head/tail counters
+    unsigned limAbs_ = 0;                   // absolute sample counter
+    float    limGainDb_ = 0.f;              // smoothed gain reduction (<=0 dB)
+    float    limRelCoef_ = 0.f;             // release smoothing coef (per sample)
+    void limPrepare(double sr);
+    void limReset();
 };
 }

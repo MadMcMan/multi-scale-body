@@ -5,7 +5,7 @@
 #include "DistrhoPluginInfo.h"
 #include <string>
 START_NAMESPACE_DISTRHO
-// Minimal interface for MultiScaleBody — matches cymbals AbstractCymbalsUI subset we actually use
+// Minimal UI interface consumed by UIWidgets' arc callbacks
 class AbstractMultiScaleBodyUI {
 public:
     virtual ~AbstractMultiScaleBodyUI() {}
@@ -15,37 +15,26 @@ public:
     virtual void syncParamWidget(uint32_t index, float value) = 0;
     virtual std::string parameterName(uint32_t index) const = 0;
 };
-// Alias for compatibility with full cymbals headers if they reference AbstractCymbalsUI
-using AbstractCymbalsUI = AbstractMultiScaleBodyUI;
 
 // === Cymbals palette — exact copy === //
 #define COL_BG         lv_color_hex(0x0D0C0A)
-#define COL_PANEL      lv_color_hex(0x1D2026)
 #define COL_ACCENT     lv_color_hex(0x2B3039)
+#define COL_BTN_HOVER  lv_color_hex(0x3A414C)  // chrome-button hover lift (over COL_ACCENT)
 #define COL_HIGHLIGHT  lv_color_hex(0xFFB020)
 #define COL_TEXT       lv_color_hex(0xE6E0D6)
 #define COL_TEXT_DIM   lv_color_hex(0x99958B)
-#define COL_TITLE      lv_color_hex(0xD3C8AE)
 #define COL_HAIRLINE   lv_color_hex(0x353B45)
 #define COL_KNOB_LABEL lv_color_hex(0x8D877A)
-#define COL_SLIDER     COL_HIGHLIGHT
 #define COL_KNOB       lv_color_hex(0xF2EDE4)
 #define COL_KNOB_LIGHT lv_color_hex(0xE0DAD0)
-#define COL_KNOB_BORDER lv_color_hex(0x383F4A)
 #define COL_WHITE      lv_color_hex(0xFFFFFF)
 #define COL_BLACK      lv_color_hex(0x000000)
-#define COL_CHART      COL_HIGHLIGHT
-#define COL_CHART_BG   COL_PANEL
 #define COL_KNOB_RING_BG    lv_color_hex(0x232830)
 #define COL_KNOB_CAP        lv_color_hex(0x2A2E35)
 #define COL_KNOB_INDICATOR  COL_HIGHLIGHT
 #define COL_PANEL_DARK lv_color_hex(0x131518)
-#define COL_SHADOW     lv_color_hex(0x000000)
 #define COL_BORDER     lv_color_hex(0x383F4A)
 #define COL_CHECKED_BG lv_color_hex(0xC88A1E)
-#define COL_OFF        lv_color_hex(0x32373F)
-#define COL_MOD        lv_color_hex(0x5DDDD0)
-#define COL_MOD_DIM    lv_color_hex(0x1E4A45)
 
 // === STRIKE PLATE palette (MultiScaleBody chassis) === //
 #define PLATE_BG          lv_color_hex(0x0A0908)  // true-black warm chassis
@@ -64,7 +53,7 @@ using AbstractCymbalsUI = AbstractMultiScaleBodyUI;
 #define PLATE_AMBER_PALE  lv_color_hex(0xFFF0C8)  // mallet marker rim
 #define PLATE_LABEL_ACCENT lv_color_hex(0xB49A64) // active group label (BODY)
 #define PLATE_MARK        lv_color_hex(0x4A4234)  // witness marks
-// meter headroom zones (amber COL_HIGHLIGHT is the warn mid-zone)
+#define PLATE_BTN_PRESS    lv_color_hex(0x2A251D)  // flat-button pressed surface (lift over PLATE_WELL)
 #define COL_METER_SAFE    lv_color_hex(0x8FAE5A)  // muted green: nominal level
 #define COL_METER_HOT     lv_color_hex(0xD9534A)  // red: headroom exceeded
 // keyboard well (slightly cool to read as keys, not chassis)
@@ -76,6 +65,13 @@ using AbstractCymbalsUI = AbstractMultiScaleBodyUI;
 #define MAT_GLASS         lv_color_hex(0x7AB8FF)
 #define MAT_MEMBRANE      lv_color_hex(0xFF6B6B)
 #define MAT_STEEL         lv_color_hex(0xA8B0BE)
+// v2 baked bodies (18-preset set)
+#define MAT_HANDPAN       lv_color_hex(0x6B5D52)
+#define MAT_LOGDRUM       lv_color_hex(0x7C5230)
+#define MAT_MARIMBA       lv_color_hex(0x9A4A26)
+#define MAT_COWBELL       lv_color_hex(0xA98B45)
+#define MAT_KALIMBA       lv_color_hex(0x56748A)
+#define MAT_CELESTA       lv_color_hex(0xBFC9D4)
 
 // === LAYOUT TOKENS — chassis arithmetic (base units @ 1440x860, pre-scale) ===
 // Single source of truth for the deterministic grid. Every container in PluginUI.cpp
@@ -117,8 +113,9 @@ namespace lay {
     constexpr int PRESET_ROW_H = 56;             // preview box + dropdown/info column
 
     // analysis tower (right column, fills STAGE_H exactly)
-    constexpr int SPECTRUM_CARD_H = 370;         // 2*12 pad + 22 head + 8 gap + 316 chart
-    constexpr int CHART_H = 316;
+    constexpr int SPECTRUM_CARD_H = 370;         // 2*12 pad + 22 head + 8 + 294 chart + 8 + 14 band ticks
+    constexpr int CHART_H = 294;
+    constexpr int TICKS_H = 14;                  // B1..B16 micro-label strip under the spectrum
     constexpr int SCOPE_CARD_H = 236;            // 2*12 pad + 22 head + 8 + 14 meter + 8 + 160 scope
     constexpr int METER_H = 14;
     constexpr int SCOPE_H = 160;
@@ -127,8 +124,19 @@ namespace lay {
     constexpr int RADIUS = 6, RADIUS_SM = 4;
     constexpr int BTN_H = 22;                    // small square buttons (ARP/octave/randomize)
     constexpr int BTN_W_OCT = 28, ARP_W = 46, OCTLBL_W = 70, RND_W = 96;
-    constexpr int FS_W = 104, FS_H = 30;
     constexpr int DOT = 8;                       // LFO pulse dot
+    // header zoom stepper: [ - ] 100% [ + ]  (replaces the old FULLSCREEN button)
+    constexpr int ZOOM_BTN = 24, ZOOM_LBL_W = 46, ZOOM_LBL_H = 30;
+    // zoom ladder in % of the 1440x860 base plate; +/- walks the ladder,
+    // window keeps the base aspect EXACTLY at every step (w,h scale together)
+    inline constexpr int ZOOM_STEPS[] = {50, 75, 100, 125, 150, 200};
+    inline constexpr int ZOOM_STEP_COUNT = (int)(sizeof(ZOOM_STEPS) / sizeof(ZOOM_STEPS[0]));
+    // preset dropdown list: capped to ~8 visible rows -> scrolling engages
+    constexpr int DROPDOWN_ROW_H = 15, DROPDOWN_MAX_ROWS = 8;
+    // unified drop-shadow direction (one global light, top-left => shadow falls down)
+    constexpr int CARD_SHADOW = 10, SHADOW_OFF_Y = 3;
+    // spectrum peak-hold caps drawn over the bars
+    constexpr int PEAK_CAP_W = 12, PEAK_CAP_H = 2;
     // piano keys: 7 white x 56 + 6 x 2 gap = 404 wide
     constexpr int KEY_W = 56, KEY_H = 80, KEY_BLACK_W = 28, KEY_BLACK_H = 48, KEY_GAP = 2;
 }

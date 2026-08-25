@@ -28,15 +28,6 @@ static float currentSurfaceScale(){
     return std::clamp(nsW<nsH?nsW:nsH,0.5f,2.5f);
 }
 class MultiScaleBodyUI;
-static const char* sParamNames[PluginMultiScaleBody::kParameterCount] = {
-    "Tune","Decay","Bright","Strike X","Strike Y","Modes","Width","Body",
-    "B1","B2","B3","B4","B5","B6","B7","B8","B9","B10","B11","B12","B13","B14","B15","B16",
-    "Radiation","Attack","Release","LFO Rate","LFO Depth",
-    "Exciter","Vel Strike","Imperfect","Glide","Reverb","Mono",
-    "Level Out",
-    "B1 Out","B2 Out","B3 Out","B4 Out","B5 Out","B6 Out","B7 Out","B8 Out",
-    "B9 Out","B10 Out","B11 Out","B12 Out","B13 Out","B14 Out","B15 Out","B16 Out"
-};
 static float peakOf(const float* bins){
     float m=0.f; for(int b=0;b<16;++b) m=std::max(m,bins[b]); return m;
 }
@@ -44,6 +35,9 @@ static float peakOf(const float* bins){
 static void rippleSizeCb(void* var,int32_t v){ lv_obj_t* r=(lv_obj_t*)var; if(r) lv_obj_set_size(r,v,v); }
 static void rippleOpaCb(void* var,int32_t v){ lv_obj_t* r=(lv_obj_t*)var; if(r) lv_obj_set_style_border_opa(r,(lv_opa_t)v,0); }
 static void rippleDelCb(lv_anim_t* a){ lv_obj_t* r=(lv_obj_t*)a->var; if(r) lv_obj_del(r); }
+// mallet glow pulse: quick zoom pop + shadow bloom on the strike marker
+static void pulseZoomCb(void* var,int32_t v){ lv_obj_t* r=(lv_obj_t*)var; if(r) lv_obj_set_style_transform_zoom(r,v,0); }
+static void pulseGlowCb(void* var,int32_t v){ lv_obj_t* r=(lv_obj_t*)var; if(r) lv_obj_set_style_shadow_opa(r,(lv_opa_t)v,0); }
 
 // ============================================================================
 // DETERMINISTIC GEOMETRY REMAKE
@@ -72,7 +66,7 @@ public:
         fLVGL(nullptr){
         // widget maps + param cache MUST be initialized before buildUI():
         // buildUI() reads paramCache (strike dot pos, preset selection) and writes widgets[]
-        for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount;++i){ widgets[i]=nullptr; labels[i]=nullptr; paramCache[i]=0.5f; }
+        clearWidgetRefs();
         paramCache[PluginMultiScaleBody::kParamPitch]=0.5f;
         paramCache[PluginMultiScaleBody::kParamDecay]=0.5f;
         paramCache[PluginMultiScaleBody::kParamBrightness]=0.65f;
@@ -92,18 +86,29 @@ public:
         paramCache[PluginMultiScaleBody::kParamGlide]=0.15f;
         paramCache[PluginMultiScaleBody::kParamWet]=0.f;
         paramCache[PluginMultiScaleBody::kParamMono]=0.f;
-        for(int i=0;i<5;++i) kbBlack[i]=nullptr;
-        for(int i=0;i<7;++i) kbWhite[i]=nullptr;
         setSize(DISTRHO_UI_DEFAULT_WIDTH, DISTRHO_UI_DEFAULT_HEIGHT);
         fLVGL = new DGL_NAMESPACE::LVGLTopLevelWidget(getWindow());
-        styles.init(); spec = normalArcSpec();
+        styles.init();
         // buildUI() is deferred to the first uiIdle(): a tree built inside the
         // constructor (before the first LVGL refresh) settles into a 0x0 layout
         // fixed point that never re-runs; trees built while the refresh loop is
         // alive lay out correctly (same path as the rebuildForScale rescale).
     }
     ~MultiScaleBodyUI() override { if(fSpectrumTimer){ lv_timer_del(fSpectrumTimer); fSpectrumTimer=nullptr; } delete fLVGL; }
-    std::string parameterName(uint32_t i) const override { if(i<PluginMultiScaleBody::kParameterCount) return sParamNames[i]; return {}; }
+    std::string parameterName(uint32_t i) const override {
+        using P=PluginMultiScaleBody;
+        switch(i){
+            case P::kParamPitch: return "Tune";        case P::kParamDecay: return "Decay";
+            case P::kParamBrightness: return "Bright"; case P::kParamModeCount: return "Modes";
+            case P::kParamWidth: return "Width";       case P::kParamRadiation: return "Radiation";
+            case P::kParamAttack: return "Attack";     case P::kParamRelease: return "Release";
+            case P::kParamLFORate: return "LFO Rate";  case P::kParamLFODepth: return "LFO Depth";
+            case P::kParamExciteMix: return "Exciter"; case P::kParamVelStrike: return "Vel Strike";
+            case P::kParamDetune: return "Imperfect";  case P::kParamGlide: return "Glide";
+            case P::kParamWet: return "Reverb";        case P::kParamMono: return "Mono";
+            default: return {}; // bands and metering outputs have no knob title
+        }
+    }
     float getParamValue(uint32_t i) const override { if(i<PluginMultiScaleBody::kParameterCount) return paramCache[i]; return 0.f; }
     void setParamValue(uint32_t i,float v) override {
         if(i>=PluginMultiScaleBody::kParameterCount) return;
@@ -115,7 +120,7 @@ public:
     void syncParamWidget(uint32_t i,float v) override {
         if(i>=PluginMultiScaleBody::kParameterCount) return;
         if(widgets[i]) UIWidgets::syncFromParam(widgets[i],v);
-        if(labels[i]) UIWidgets::updateLabel(labels[i],v);
+
     }
     void parameterChanged(uint32_t i,float v) override {
         // metering outputs arrive here every audio block - the bridge-safe DSP->UI link
@@ -154,27 +159,34 @@ public:
         UI::uiReshape(w,h);
         rebuildForScale(currentSurfaceScale());
     }
+    // Mouse wheel: DPF delivers it to every top-level widget; the LVGL bridge
+    // also queues it as an ENCODER diff (which can only move group focus, never
+    // scroll). While the preset list is open we scroll the LIST here and consume
+    // the event; otherwise we decline it so nothing is swallowed.
+    bool onScroll(const Widget::ScrollEvent& ev) override {
+        if(presetDropdown && lv_dropdown_is_open(presetDropdown)){
+            lv_obj_t* list=lv_dropdown_get_list(presetDropdown);
+            if(list){
+                const float dy=ev.delta.getY();
+                if(dy>0.f||dy<0.f)
+                    lv_obj_scroll_by(list,0,(lv_coord_t)((dy>0.f?1:-1)*scaled(lay::DROPDOWN_ROW_H)),LV_ANIM_OFF);
+                return true;
+            }
+        }
+        return false;
+    }
     void rebuildForScale(float ns){
         if(std::abs(ns-::DISTRHO::gUIScale)<0.01f) return;
         ::DISTRHO::gUIScale=ns;
         if(!fUIBuilt) return;
-        styles.reset(); styles.init(); spec=normalArcSpec();
+        styles.reset(); styles.init();
         if(kbHeldNote>=0 && kbHeldNote<=127){ sendNote(0,(uint8_t)kbHeldNote,0); kbHeldNote=-1; }
         for(int o=0;o<12;++o){ int n=kbBaseNote+o; if(n>=0&&n<=127) sendNote(0,(uint8_t)n,0); }
         lv_obj_t* root=lv_screen_active(); if(root) lv_obj_clean(root);
         fUIBuilt=false;
-        for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount;++i){ widgets[i]=nullptr; labels[i]=nullptr; }
-        strikeDot=nullptr; presetDropdown=nullptr; fSpectrumChart=nullptr; bodySubLabel=nullptr; strikeCoordLabel=nullptr;
-        bodyPreview=nullptr; lfoDot=nullptr;
-        strikeDisc=nullptr; hdrBodyVal=nullptr; hdrMatVal=nullptr; hdrModeVal=nullptr; hdrF0Val=nullptr;
-        fScopeChart=nullptr; fScopeSeries=nullptr;
-        fLevelBar=nullptr; fLevelPeak=nullptr; zoneWarnMark=nullptr; zoneHotMark=nullptr;
+        clearWidgetRefs();
         fPrevEnergy=0.f; fLevelEnv=0.f; fMeterEnv=0.f; fMeterPeak=0.f; fPeakAge=0; gScopeMax=0.05f; fRippleCooldown=0; fStrikeHeld=false;
         fMarkerPlaced=false;
-        arpBtn=nullptr;
-        kbContainer=nullptr; kbOctLabel=nullptr;
-        for(int i=0;i<7;++i) kbWhite[i]=nullptr;
-        for(int i=0;i<5;++i) kbBlack[i]=nullptr;
         buildUI();
         if(fUIBuilt && !fSpectrumTimer){
             fSpectrumTimer = lv_timer_create([](lv_timer_t* t){
@@ -183,6 +195,18 @@ public:
         }
     }
 private:
+    // single owner of every lv_obj_t* member default; ctor and rebuildForScale share it
+    void clearWidgetRefs(){
+        for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount;++i){ widgets[i]=nullptr; paramCache[i]=0.5f; }
+        strikeDisc=strikeDot=strikeCoordLabel=presetDropdown=bodySubLabel=nullptr;
+        bodyPreview=lfoDot=nullptr;
+        hdrBodyVal=hdrMatVal=hdrModeVal=hdrF0Val=nullptr;
+        fSpectrumChart=fScopeChart=fLevelBar=fLevelPeak=zoneWarnMark=zoneHotMark=nullptr;
+        fScopeSeries=nullptr; arpBtn=nullptr;
+        kbContainer=kbOctLabel=zoomMinus=zoomPlus=zoomValLbl=nullptr;
+        for(int i=0;i<7;++i) kbWhite[i]=nullptr;
+        for(int i=0;i<5;++i) kbBlack[i]=nullptr;
+    }
     // ---- shared builder/painter geometry -----------------------------------
     // Body-preview grid math lives HERE ONLY. The builder sizes the box from
     // lay::PREVIEW_*, this function derives cell/gap/inset from the SAME
@@ -206,9 +230,11 @@ private:
         if(n=="WoodBlock" || n=="Squirrel") mat="Pine - Wood";
         else if(n=="Membrane") mat="Membrane";
         else if(n=="Glass") mat="Crystal";
-        else if(n=="Bar" || n=="Chime" || n=="Plate" || n=="Gong") mat="Steel";
-        else if(n=="Bell" || n=="Shell") mat="Bronze";
+        else if(n=="Bar" || n=="Chime" || n=="Plate" || n=="Gong" || n=="Handpan" || n=="Kalimba" || n=="Celesta") mat="Steel";
+        else if(n=="Bell" || n=="Shell" || n=="Cowbell") mat="Bronze";
         else if(n=="Bowl" || n=="Blade") mat="Aluminium";
+        else if(n=="LogDrum") mat="Mahogany";
+        else if(n=="Marimba") mat="Rosewood";
         snprintf(buf,sizeof(buf),"%s  -  %s  -  %d modes  -  %.0f Hz", pr.name, mat, pr.n, pr.freq[0]/(2*3.14159f));
         lv_label_set_text(bodySubLabel, buf);
         if(hdrBodyVal){ char b[32]; snprintf(b,sizeof(b),"%s",pr.name); lv_label_set_text(hdrBodyVal,b); }
@@ -236,9 +262,24 @@ private:
                 else if(name=="Bar"){ occ=(y==1)?1.f:0.f; }
                 else if(name=="Membrane"){ float dx=x-1.5f, dy=y-1.5f; if(dx*dx+dy*dy < 3.2f) occ=1.f; }
                 else if(name=="Bell"){ float dx=x-1.5f, dy=y-1.5f; float r=std::sqrt(dx*dx+dy*dy); if(r>1.f&&r<1.9f) occ=1.f; else if(r>0.9f&&r<2.05f) occ=0.45f; occ = std::max(occ, (y==0?0.6f:0.f)); }
-                else if(name=="Glass"){ bool inner = x>=1&&x<=2&&y>=1&&y<=2; occ = inner?0.08f:1.f; }
-                else if(name=="Chime"){ float dy=y-1.5f; float r=std::abs(dy); if(r>0.7f&&r<1.15f) occ=1.f; else if(r>0.6f&&r<1.25f) occ=0.4f; }
                 else if(name=="Gong"){ float dx=x-1.5f, dy=y-1.5f; float rad=std::sqrt(dx*dx+dy*dy); if(rad<1.9f) occ=1.f; else if(rad<2.08f) occ=0.35f; if(rad<0.88f) occ=1.f; }
+                // v2 baked bodies: declarative 4x4 occupancy matrices (row-major [y][x])
+                else {
+                    static const float kHandpan[16]={0.f,.35f,.35f,0.f, .35f,.85f,.85f,.35f, .35f,.85f,1.f,.35f, 0.f,.35f,.35f,0.f};
+                    static const float kLogDrum[16]={0.f,.15f,.15f,0.f, .55f,.95f,1.f,.95f, .55f,.95f,1.f,.95f, 0.f,.15f,.15f,0.f};
+                    static const float kMarimba[16]={0.f,.25f,.25f,0.f, .40f,.80f,1.f,.80f, .40f,.80f,1.f,.80f, 0.f,.25f,.25f,0.f};
+                    static const float kCowbell[16]={.10f,.20f,.20f,.10f, .90f,.35f,.35f,.90f, .90f,.35f,.35f,.90f, .10f,.20f,.20f,.10f};
+                    static const float kKalimba[16]={0.f,.50f,1.f,.50f, 0.f,.55f,1.f,.55f, 0.f,.45f,.85f,.45f, 0.f,.35f,.65f,.35f};
+                    static const float kCelesta[16]={0.f,.20f,.20f,0.f, .35f,.75f,1.f,.75f, .35f,.75f,1.f,.75f, 0.f,.20f,.20f,0.f};
+                    const float* t=nullptr;
+                    if(name=="Handpan") t=kHandpan;
+                    else if(name=="LogDrum") t=kLogDrum;
+                    else if(name=="Marimba") t=kMarimba;
+                    else if(name=="Cowbell") t=kCowbell;
+                    else if(name=="Kalimba") t=kKalimba;
+                    else if(name=="Celesta") t=kCelesta;
+                    if(t) occ=t[y*4+x];
+                }
                 occ = std::clamp(occ,0.f,1.f);
                 lv_obj_t* cellObj=lv_obj_create(bodyPreview);
                 lv_obj_set_size(cellObj,cell,cell);
@@ -257,6 +298,12 @@ private:
                     else if(name=="Membrane") base = MAT_MEMBRANE;
                     else if(name=="Bell"||name=="Gong"||name=="Shell") base = COL_HIGHLIGHT;
                     else if(name=="Plate"||name=="Bar"||name=="Chime") base = MAT_STEEL;
+                    else if(name=="Handpan") base = MAT_HANDPAN;
+                    else if(name=="LogDrum") base = MAT_LOGDRUM;
+                    else if(name=="Marimba") base = MAT_MARIMBA;
+                    else if(name=="Cowbell") base = MAT_COWBELL;
+                    else if(name=="Kalimba") base = MAT_KALIMBA;
+                    else if(name=="Celesta") base = MAT_CELESTA;
                     lv_obj_set_style_bg_color(cellObj,base,0);
                     lv_obj_set_style_bg_opa(cellObj, (lv_opa_t)(LV_OPA_30 + occ*0.7f*255),0);
                     lv_obj_set_style_shadow_width(cellObj, occ>0.9f?scaled(4):0,0);
@@ -325,6 +372,100 @@ private:
             lv_anim_start(&aO);
         }
     }
+    // mallet marker pop on hit: zoom 256(=1.0) -> ~1.4x -> rest, shadow blooms
+    void spawnMalletPulse(){
+        if(!strikeDot) return;
+        lv_anim_t aZ; lv_anim_init(&aZ);
+        lv_anim_set_var(&aZ,strikeDot);
+        lv_anim_set_exec_cb(&aZ,(lv_anim_exec_xcb_t)pulseZoomCb);
+        lv_anim_set_values(&aZ,256,358);
+        lv_anim_set_time(&aZ,90); lv_anim_set_path_cb(&aZ,lv_anim_path_ease_out);
+        lv_anim_start(&aZ);
+        lv_anim_t aZ2; lv_anim_init(&aZ2);
+        lv_anim_set_var(&aZ2,strikeDot);
+        lv_anim_set_exec_cb(&aZ2,(lv_anim_exec_xcb_t)pulseZoomCb);
+        lv_anim_set_values(&aZ2,358,256);
+        lv_anim_set_time(&aZ2,220); lv_anim_set_delay(&aZ2,95); lv_anim_set_path_cb(&aZ2,lv_anim_path_ease_in_out);
+        lv_anim_start(&aZ2);
+        lv_anim_t aG; lv_anim_init(&aG);
+        lv_anim_set_var(&aG,strikeDot);
+        lv_anim_set_exec_cb(&aG,(lv_anim_exec_xcb_t)pulseGlowCb);
+        lv_anim_set_values(&aG,LV_OPA_60,LV_OPA_COVER);
+        lv_anim_set_time(&aG,90); lv_anim_set_path_cb(&aG,lv_anim_path_ease_out);
+        lv_anim_start(&aG);
+        lv_anim_t aG2; lv_anim_init(&aG2);
+        lv_anim_set_var(&aG2,strikeDot);
+        lv_anim_set_exec_cb(&aG2,(lv_anim_exec_xcb_t)pulseGlowCb);
+        lv_anim_set_values(&aG2,LV_OPA_COVER,LV_OPA_60);
+        lv_anim_set_time(&aG2,260); lv_anim_set_delay(&aG2,95); lv_anim_set_path_cb(&aG2,lv_anim_path_ease_in_out);
+        lv_anim_start(&aG2);
+    }
+    // contextual value formatting (design guidelines: units where they exist).
+    // Mirrors the engine's own denormalization so readouts match the audio:
+    //   Glide v*600 ms - LFO 0.05*240^v Hz - Modes 8+v*120 - Reverb % - Tune +-12 ST
+    void formatParamValue(int pi,float v,char* buf,size_t cap) const {
+        using P=PluginMultiScaleBody;
+        switch(pi){
+            case P::kParamWet:      snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
+            case P::kParamGlide:    snprintf(buf,cap,"%d MS",(int)std::lround(v*600.f)); break;
+            case P::kParamLFORate: {
+                float hz=0.05f*std::pow(240.f,v);
+                if(hz>=10.f) snprintf(buf,cap,"%.0f HZ",hz);
+                else         snprintf(buf,cap,"%.2f HZ",hz);
+                break; }
+            case P::kParamModeCount: snprintf(buf,cap,"%d",8+(int)(v*120.f)); break;
+            case P::kParamPitch:     snprintf(buf,cap,"%+.1f ST",(v-0.5f)*24.f); break;
+            default:                 snprintf(buf,cap,"%.2f",v); break;
+        }
+    }
+    // registered AFTER UIWidgets' own arc handlers (insertion order), so the
+    // formatted text wins over their raw %.2f writes on every drag frame
+    static void valueFormatCb(lv_event_t* e){
+        auto code=lv_event_get_code(e);
+        if(code!=LV_EVENT_VALUE_CHANGED && code!=LV_EVENT_PRESSING) return;
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* arc=(lv_obj_t*)lv_event_get_target(e);
+        if(!ui||!arc) return;
+        int pi=(int)(intptr_t)lv_obj_get_user_data(arc);
+        lv_obj_t* cont=lv_obj_get_parent(arc);
+        if(!cont) return;
+        lv_obj_t* lbl=lv_obj_get_child(cont,lv_obj_get_child_count(cont)-1);
+        if(!lbl||!lv_obj_check_type(lbl,&lv_label_class)) return;
+        char buf[24];
+        ui->formatParamValue(pi,lv_arc_get_value(arc)/1000.f,buf,sizeof(buf));
+        lv_label_set_text(lbl,buf);
+    }
+    // spectrum peak-hold caps: falling-hold markers painted over the bars in
+    // DRAW_POST_END. Peak state lives in fSpecPeaks[]/fSpecHoldAge[]; y-mapping
+    // mirrors the chart's own value->y mapping for range 0..1000.
+    static void spectrumPeakDrawCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* chart=(lv_obj_t*)lv_event_get_target(e);
+        if(!ui||!chart||chart!=ui->fSpectrumChart) return;
+        lv_chart_series_t* s=lv_chart_get_series_next(chart,nullptr);
+        if(!s) return;
+        lv_area_t cc; lv_obj_get_coords(chart,&cc);
+        const lv_coord_t bl=lv_obj_get_style_border_width(chart,LV_PART_MAIN);
+        const lv_coord_t pl=bl+lv_obj_get_style_pad_left(chart,LV_PART_MAIN);
+        const lv_coord_t pt=bl+lv_obj_get_style_pad_top(chart,LV_PART_MAIN);
+        const lv_coord_t pb=bl+lv_obj_get_style_pad_bottom(chart,LV_PART_MAIN);
+        const lv_coord_t h=cc.y2-pt-pb-cc.y1+1;
+        const lv_coord_t contentBottom=cc.y2-pb;
+        lv_layer_t* layer=lv_event_get_layer(e);
+        for(int b=0;b<16;++b){
+            if(ui->fSpecPeaks[b]<=0.003f) continue;
+            lv_point_t p; lv_chart_get_point_pos_by_id(chart,s,b,&p);
+            lv_draw_rect_dsc_t dsc; lv_draw_rect_dsc_init(&dsc);
+            dsc.bg_color=PLATE_AMBER_PALE; dsc.bg_opa=LV_OPA_80;
+            dsc.radius=1; dsc.border_width=0; dsc.shadow_width=0;
+            lv_coord_t w=scaled(lay::PEAK_CAP_W), hh=scaled(lay::PEAK_CAP_H);
+            lv_area_t a;
+            a.x1=(lv_coord_t)(cc.x1+pl+p.x-w/2); a.x2=a.x1+w-1;
+            a.y1=(lv_coord_t)(contentBottom-h*ui->fSpecPeaks[b]-hh/2);
+            a.y2=a.y1+hh-1;
+            lv_draw_rect(layer,&dsc,&a);
+        }
+    }
     // meter zone marks sit at fixed fractions of the measured bar width;
     // called after the tree has settled (positions are meaningless before)
     void layoutMeterMarks(){
@@ -357,6 +498,7 @@ private:
             if(code==LV_EVENT_PRESSED){
                 ui->editParameter(PluginMultiScaleBody::kParamStrikeX,true);
                 ui->editParameter(PluginMultiScaleBody::kParamStrikeY,true);
+                ui->spawnMalletPulse();   // visual hit confirmation
                 // physical hit: strike position first, then trigger the body
                 ui->sendNote(0,(uint8_t)ui->fStrikeNote,100);
                 ui->fStrikeHeld=true;
@@ -383,10 +525,23 @@ private:
         float level = std::clamp(fy,0.f,1.f);
         auto code = lv_event_get_code(e);
         if(code==LV_EVENT_PRESSED || code==LV_EVENT_PRESSING){
-            if(code==LV_EVENT_PRESSED) ui->editParameter(PluginMultiScaleBody::kParamBand0+band,true);
-            ui->setParamValue(PluginMultiScaleBody::kParamBand0+band, level);
-        } else if(code==LV_EVENT_RELEASED){
-            ui->editParameter(PluginMultiScaleBody::kParamBand0+band,false);
+            if(band!=ui->fScrubBand){
+                // drag crossed into another band: close the old edit bracket,
+                // open the new one (RELEASED closes by member, not by position)
+                if(ui->fScrubBand>=0) ui->editParameter(PluginMultiScaleBody::kParamBand0+ui->fScrubBand,false);
+                ui->fScrubBand=band;
+                ui->fScrubLevel=level;
+                ui->editParameter(PluginMultiScaleBody::kParamBand0+band,true);
+                ui->setParamValue(PluginMultiScaleBody::kParamBand0+band, level);
+            } else if(level!=ui->fScrubLevel){   // same band: write only on change
+                ui->fScrubLevel=level;
+                ui->setParamValue(PluginMultiScaleBody::kParamBand0+band, level);
+            }
+        } else if(code==LV_EVENT_RELEASED || code==LV_EVENT_PRESS_LOST){
+            if(ui->fScrubBand>=0){
+                ui->editParameter(PluginMultiScaleBody::kParamBand0+ui->fScrubBand,false);
+                ui->fScrubBand=-1;
+            }
         }
     }
     void updateKeyboardNotes(){
@@ -454,17 +609,30 @@ private:
         ui->arpOnLocal=on;
         ui->setState("arpon",on?"1":"0");
     }
-    void toggleFullscreen(){
-        if(!isFullscreen){
-            preFsSize=getSize();
-            int sw=1920, sh=1080;
-            const double aspect=(double)DISTRHO_UI_DEFAULT_WIDTH/(double)DISTRHO_UI_DEFAULT_HEIGHT;
-            int fsW=int(sh*aspect+0.5), fsH=sh;
-            if(fsW>sw){ fsW=sw; fsH=int(fsW/aspect+0.5); }
-            setSize(fsW,fsH); isFullscreen=true;
-        } else { setSize(preFsSize); isFullscreen=false; }
+    // ---- header zoom control (replaces the old FULLSCREEN path) -----------
+    // Window size = base plate * zoom%, so the 1440:860 aspect holds EXACTLY
+    // at every step. Content rescale is owned by rebuildForScale(), driven by
+    // the real LVGL surface - no double scaling, and repeated toggles are
+    // drift-free because sizes are recomputed from BASE_W/BASE_H, never from
+    // the current window size.
+    void applyZoomStep(int dir){
+        const int idx=std::clamp(fZoomIdx+dir,0,lay::ZOOM_STEP_COUNT-1);
+        if(idx==fZoomIdx) return;
+        fZoomIdx=idx;
+        const float z=(float)lay::ZOOM_STEPS[fZoomIdx]/100.f;
+        setSize((uint)std::lround(lay::BASE_W*z),(uint)std::lround(lay::BASE_H*z));
+        refreshZoomWidgets();
     }
-    static void fsBtnCb(lv_event_t* e){ auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e); if(ui) ui->toggleFullscreen(); }
+    void refreshZoomWidgets(){
+        if(zoomValLbl){ char b[16]; snprintf(b,sizeof(b),"%d%%",lay::ZOOM_STEPS[fZoomIdx]); lv_label_set_text(zoomValLbl,b); }
+        if(zoomMinus){ if(fZoomIdx==0) lv_obj_add_state(zoomMinus,LV_STATE_DISABLED); else lv_obj_clear_state(zoomMinus,LV_STATE_DISABLED); }
+        if(zoomPlus){ if(fZoomIdx==lay::ZOOM_STEP_COUNT-1) lv_obj_add_state(zoomPlus,LV_STATE_DISABLED); else lv_obj_clear_state(zoomPlus,LV_STATE_DISABLED); }
+    }
+    static void zoomBtnCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* btn=(lv_obj_t*)lv_event_get_target(e);
+        if(ui&&btn) ui->applyZoomStep((int)(intptr_t)lv_obj_get_user_data(btn));
+    }
     static void rndBtnCb(lv_event_t* e){
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e); if(!ui) return;
         auto rnd=[](float lo,float hi){ return lo + (hi-lo)*((float)std::rand()/RAND_MAX); };
@@ -520,6 +688,11 @@ private:
         lv_obj_set_style_border_width(c,1,0);
         lv_obj_set_style_radius(c,scaled(lay::RADIUS),0);
         lv_obj_set_style_pad_all(c,scaled(lay::CARD_PAD),0);
+        // unified chassis drop: one global light, shadow falls straight down
+        lv_obj_set_style_shadow_width(c,scaled(lay::CARD_SHADOW),0);
+        lv_obj_set_style_shadow_color(c,COL_BLACK,0);
+        lv_obj_set_style_shadow_opa(c,LV_OPA_30,0);
+        lv_obj_set_style_shadow_offset_y(c,scaled(lay::SHADOW_OFF_Y),0);
         return c;
     }
     lv_obj_t* addLabel(lv_obj_t* parent,const char* txt,const lv_font_t* font,lv_color_t color,int letterSpace){
@@ -551,10 +724,13 @@ private:
         lv_obj_set_style_bg_color(b,PLATE_WELL,0);
         lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);
         lv_obj_set_style_border_color(b,PLATE_EDGE,0);
-        lv_obj_set_style_border_width(b,1,0);
-        lv_obj_set_style_radius(b,scaled(lay::RADIUS_SM),0);
-        lv_obj_set_style_pad_all(b,0,0);
         if(flatShadow) lv_obj_set_style_shadow_width(b,0,0);
+        // feedback ladder: rest PLATE_WELL -> hover lift -> pressed sink
+        lv_obj_set_style_bg_color(b,PLATE_WELL_HI,LV_STATE_HOVERED);
+        lv_obj_set_style_bg_color(b,PLATE_BTN_PRESS,LV_STATE_PRESSED);
+        lv_obj_set_style_translate_y(b,1,LV_STATE_PRESSED);
+        lv_obj_set_style_border_width(b,1,0);
+        lv_obj_set_style_pad_all(b,0,0);
         lv_obj_t* l=addLabel(b,txt,getScaledMicroFont(),txtCol,1);
         lv_obj_center(l);
         return b;
@@ -584,7 +760,7 @@ private:
         lv_obj_set_style_pad_all(arpBtn,0,0);
         lv_obj_add_event_cb(arpBtn,arpBtnCb,LV_EVENT_VALUE_CHANGED,this);
         lv_obj_t* albl=lv_label_create(arpBtn); lv_label_set_text(albl,"ARP"); lv_obj_center(albl);
-        lv_obj_t* octDown=lv_btn_create(octRow); lv_obj_set_size(octDown,scaled(lay::BTN_W_OCT),scaled(lay::BTN_H)); lv_obj_add_style(octDown,&styles.btnMain,0); lv_obj_set_style_radius(octDown,scaled(lay::RADIUS_SM),0); lv_obj_set_style_pad_all(octDown,0,0);
+        lv_obj_t* octDown=lv_btn_create(octRow); lv_obj_set_size(octDown,scaled(lay::BTN_W_OCT),scaled(lay::BTN_H)); lv_obj_add_style(octDown,&styles.btnMain,0); lv_obj_add_style(octDown,&styles.btnHovered,LV_STATE_HOVERED); lv_obj_add_style(octDown,&styles.btnPressed,LV_STATE_PRESSED); lv_obj_set_style_radius(octDown,scaled(lay::RADIUS_SM),0); lv_obj_set_style_pad_all(octDown,0,0);
         lv_obj_set_user_data(octDown,(void*)(intptr_t)-12); lv_obj_add_event_cb(octDown,octaveBtnCb,LV_EVENT_CLICKED,this);
         lv_obj_t* dl=lv_label_create(octDown); lv_label_set_text(dl,"<"); lv_obj_center(dl); lv_obj_set_style_text_color(dl,COL_TEXT,0);
         kbOctLabel=lv_label_create(octRow); lv_label_set_text(kbOctLabel,"C4 - B4");
@@ -592,7 +768,7 @@ private:
         lv_obj_set_style_text_align(kbOctLabel,LV_TEXT_ALIGN_CENTER,0);
         lv_obj_set_style_text_color(kbOctLabel,COL_TEXT_DIM,0);
         lv_obj_set_style_text_font(kbOctLabel,getScaledMicroFont(),0);
-        lv_obj_t* octUp=lv_btn_create(octRow); lv_obj_set_size(octUp,scaled(lay::BTN_W_OCT),scaled(lay::BTN_H)); lv_obj_add_style(octUp,&styles.btnMain,0); lv_obj_set_style_radius(octUp,scaled(lay::RADIUS_SM),0); lv_obj_set_style_pad_all(octUp,0,0);
+        lv_obj_t* octUp=lv_btn_create(octRow); lv_obj_set_size(octUp,scaled(lay::BTN_W_OCT),scaled(lay::BTN_H)); lv_obj_add_style(octUp,&styles.btnMain,0); lv_obj_add_style(octUp,&styles.btnHovered,LV_STATE_HOVERED); lv_obj_add_style(octUp,&styles.btnPressed,LV_STATE_PRESSED); lv_obj_set_style_radius(octUp,scaled(lay::RADIUS_SM),0); lv_obj_set_style_pad_all(octUp,0,0);
         lv_obj_set_user_data(octUp,(void*)(intptr_t)12); lv_obj_add_event_cb(octUp,octaveBtnCb,LV_EVENT_CLICKED,this);
         lv_obj_t* ul=lv_label_create(octUp); lv_label_set_text(ul,">"); lv_obj_center(ul); lv_obj_set_style_text_color(ul,COL_TEXT,0);
         // keys row centers the fixed 404-wide keybed in whatever width remains
@@ -608,7 +784,7 @@ private:
         int bX[5]; int stepW=whiteW+gap; bX[0]=stepW*1-blackW/2; bX[1]=stepW*2-blackW/2; bX[2]=stepW*4-blackW/2; bX[3]=stepW*5-blackW/2; bX[4]=stepW*6-blackW/2;
         for(int i=0;i<7;++i){
             lv_obj_t* w=lv_btn_create(keysBox); lv_obj_set_size(w,whiteW,whiteH); lv_obj_set_pos(w,i*stepW,0);
-            lv_obj_set_style_bg_color(w,COL_KNOB,0); lv_obj_set_style_bg_opa(w,LV_OPA_COVER,0); lv_obj_set_style_border_color(w,COL_HAIRLINE,0); lv_obj_set_style_border_width(w,1,0); lv_obj_set_style_radius(w,scaled(5),0); lv_obj_set_style_pad_all(w,0,0);
+            lv_obj_set_style_bg_color(w,COL_KNOB,0); lv_obj_set_style_bg_color(w,COL_KNOB_LIGHT,LV_STATE_HOVERED); lv_obj_set_style_bg_opa(w,LV_OPA_COVER,0); lv_obj_set_style_border_color(w,COL_HAIRLINE,0); lv_obj_set_style_border_width(w,1,0); lv_obj_set_style_radius(w,scaled(5),0); lv_obj_set_style_pad_all(w,0,0);
             int note=kbBaseNote+whiteOff[i]; lv_obj_set_user_data(w,(void*)(intptr_t)note);
             lv_obj_add_event_cb(w,keyEventCb,LV_EVENT_PRESSED,this); lv_obj_add_event_cb(w,keyEventCb,LV_EVENT_RELEASED,this); lv_obj_add_event_cb(w,keyEventCb,LV_EVENT_PRESS_LOST,this); lv_obj_add_event_cb(w,keyEventCb,LV_EVENT_LEAVE,this);
             kbWhite[i]=w; lv_obj_t* lbl=lv_label_create(w); int oct=note/12-1; char buf[8]; snprintf(buf,sizeof(buf),"%s%d",whiteName[i],oct); lv_label_set_text(lbl,buf);
@@ -616,7 +792,7 @@ private:
         }
         for(int i=0;i<5;++i){
             lv_obj_t* b=lv_btn_create(keysBox); lv_obj_set_size(b,blackW,blackH); lv_obj_set_pos(b,bX[i],0);
-            lv_obj_set_style_bg_color(b,KB_BLACK,0); lv_obj_set_style_bg_grad_color(b,KB_BLACK_HI,0); lv_obj_set_style_bg_grad_dir(b,LV_GRAD_DIR_VER,0); lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);
+            lv_obj_set_style_bg_color(b,KB_BLACK,0); lv_obj_set_style_bg_color(b,KB_BLACK_HI,LV_STATE_HOVERED); lv_obj_set_style_bg_grad_color(b,KB_BLACK_HI,0); lv_obj_set_style_bg_grad_dir(b,LV_GRAD_DIR_VER,0); lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);
             lv_obj_set_style_border_color(b,COL_HAIRLINE,0); lv_obj_set_style_border_width(b,1,0); lv_obj_set_style_radius(b,scaled(lay::RADIUS_SM),0); lv_obj_set_style_pad_all(b,0,0);
             lv_obj_set_style_shadow_width(b,scaled(4),0); lv_obj_set_style_shadow_color(b,COL_BLACK,0); lv_obj_set_style_shadow_opa(b,LV_OPA_30,0);
             int note=kbBaseNote+blackOff[i]; lv_obj_set_user_data(b,(void*)(intptr_t)note);
@@ -643,7 +819,7 @@ private:
         lv_obj_set_style_pad_all(root,scaled(lay::PAD),0);
         lv_obj_set_scrollbar_mode(root,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(root,LV_OBJ_FLAG_SCROLLABLE);
 
-        // --- HEADER (h = 64): title block | divider | fullscreen --------------
+        // --- HEADER (h = 64): title block | divider | zoom stepper -----------
         lv_obj_t* header=makeRow(root,lv_pct(100),scaled(lay::HEADER_H),scaled(12),LV_FLEX_ALIGN_START);
         lv_obj_set_style_bg_color(header,PLATE_PANEL,0); lv_obj_set_style_bg_opa(header,LV_OPA_COVER,0);
         lv_obj_set_style_border_color(header,PLATE_LINE,0); lv_obj_set_style_border_width(header,1,0);
@@ -652,13 +828,23 @@ private:
         lv_obj_t* hLeft=makeCol(header,0,lv_pct(100),scaled(3));       // explicit-height parent: grow legal
         lv_obj_set_flex_grow(hLeft,1);
         lv_obj_set_flex_align(hLeft,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
-        lv_obj_t* title=addLabel(hLeft,"MULTI-SCALE MODAL BODY",gUIScale>=1.2f?getDisplayFont():getScaledFont(),PLATE_TITLE,3);
-        lv_obj_set_width(title,lv_pct(100)); lv_label_set_long_mode(title,LV_LABEL_LONG_CLIP);
-        addLabel(hLeft,"PICARD - FAURE - KRY - DRETTAKIS   -   DAFx-09 PAPER 47",getScaledMicroFont(),PLATE_TEXT_DIM,2);
-        addDivider(header,scaled(34));
-        lv_obj_t* fsBtn=addButton(header,lay::FS_W,lay::FS_H,"FULLSCREEN",PLATE_TEXT_MID);
-        lv_obj_set_style_bg_color(fsBtn,PLATE_PANEL,0);
-        lv_obj_add_event_cb(fsBtn,fsBtnCb,LV_EVENT_CLICKED,this);
+        // display role: product name only; the paper identity demotes to meta
+        addLabel(hLeft,"STRIKE PLATE",gUIScale>=1.2f?getDisplayFont():getScaledFont(),PLATE_TITLE,4);
+        addLabel(hLeft,"MULTI-SCALE MODAL SYNTHESIS   -   PICARD - FAURE - KRY - DRETTAKIS   -   DAFx-09 PAPER 47",
+                 getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        const int clusterW=lay::ZOOM_BTN*2+lay::ZOOM_LBL_W+12;   // btn+gap+label+gap+btn (base px)
+        addDivider(header,scaled(lay::ZOOM_LBL_H));
+        lv_obj_t* zoomRow=makeRow(header,scaled(clusterW),scaled(lay::ZOOM_LBL_H),scaled(4),LV_FLEX_ALIGN_CENTER);
+        zoomMinus=addButton(zoomRow,lay::ZOOM_BTN,lay::ZOOM_LBL_H,"-",PLATE_TEXT_MID);
+        lv_obj_set_user_data(zoomMinus,(void*)(intptr_t)-1);
+        lv_obj_add_event_cb(zoomMinus,zoomBtnCb,LV_EVENT_CLICKED,this);
+        zoomValLbl=addLabel(zoomRow,"100%",getScaledSmallFont(),PLATE_AMBER,1);
+        lv_obj_set_width(zoomValLbl,scaled(lay::ZOOM_LBL_W));
+        lv_obj_set_style_text_align(zoomValLbl,LV_TEXT_ALIGN_CENTER,0);
+        zoomPlus=addButton(zoomRow,lay::ZOOM_BTN,lay::ZOOM_LBL_H,"+",PLATE_TEXT_MID);
+        lv_obj_set_user_data(zoomPlus,(void*)(intptr_t)1);
+        lv_obj_add_event_cb(zoomPlus,zoomBtnCb,LV_EVENT_CLICKED,this);
+        refreshZoomWidgets();
 
         // --- STAGE ROW (h = 616): dial bank | hero plate | analysis tower -----
         lv_obj_t* stage=makeRow(root,lv_pct(100),scaled(lay::STAGE_H),scaled(lay::GUTTER));
@@ -685,10 +871,25 @@ private:
             // size hierarchy: BODY runs full machined size, secondary groups compact
             ArcVisualSpec groupSpec=normalArcSpec();
             if(!primary){ groupSpec.containerW=scaled(lay::KNOB_W_C); groupSpec.containerH=scaled(lay::KNOB_H_C); groupSpec.arcSize=scaled(lay::KNOB_ARC_C); }
-            for(int k=0;k<4;++k)
-                widgets[groupParams[g][k]]=UIWidgets::createArcKnob(grid,groupParams[g][k],this,styles,groupSpec);
-        }
-
+            for(int k=0;k<4;++k){
+                lv_obj_t* arc=UIWidgets::createArcKnob(grid,groupParams[g][k],this,styles,groupSpec);
+                // runs AFTER UIWidgets' own handlers (insertion order) so the
+                // contextual unit formatting wins over their raw %.2f writes
+                lv_obj_add_event_cb(arc,valueFormatCb,LV_EVENT_ALL,this);
+                widgets[groupParams[g][k]]=arc;
+                // initial paint: the label was born with raw %.2f and no event
+                // has fired yet - apply the contextual format once now
+                {
+                    lv_obj_t* cont=lv_obj_get_parent(arc);
+                    lv_obj_t* lbl=cont?lv_obj_get_child(cont,lv_obj_get_child_count(cont)-1):nullptr;
+                    if(lbl&&lv_obj_check_type(lbl,&lv_label_class)){
+                        char b[24];
+                        formatParamValue(groupParams[g][k],paramCache[groupParams[g][k]],b,sizeof(b));
+                        lv_label_set_text(lbl,b);
+                    }
+                }
+            }
+        }   // end of the four knob groups
         // CENTER - THE BODY (hero): playable disc + preset + spec strip
         // inner budget: 592 available vs 22+406+16+56+28=528 fixed rows -> the
         // four inter-row gaps breathe ~16px each via SPACE_BETWEEN
@@ -712,11 +913,30 @@ private:
         lv_obj_set_style_shadow_width(strikeDisc,scaled(26),0);
         lv_obj_set_style_shadow_color(strikeDisc,COL_BLACK,0);
         lv_obj_set_style_shadow_opa(strikeDisc,LV_OPA_50,0);
+        lv_obj_set_style_shadow_offset_y(strikeDisc,scaled(lay::SHADOW_OFF_Y),0);   // one global light
         lv_obj_add_flag(strikeDisc,LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(strikeDisc,padPressCb,LV_EVENT_PRESSED,this);
         lv_obj_add_event_cb(strikeDisc,padPressCb,LV_EVENT_PRESSING,this);
         lv_obj_add_event_cb(strikeDisc,padPressCb,LV_EVENT_RELEASED,this);
         lv_obj_add_event_cb(strikeDisc,padPressCb,LV_EVENT_PRESS_LOST,this);
+        // inner well: a slightly smaller circle with reversed gradient sits
+        // inside the disc rim - cheap radial depth (machined dish) without
+        // LVGL complex gradients
+        lv_coord_t wd=(lv_coord_t)(D*0.86f);
+        lv_obj_t* well=makeBox(strikeDisc,wd,wd);
+        lv_obj_align(well,LV_ALIGN_CENTER,0,scaled(2));
+        lv_obj_set_style_radius(well,LV_RADIUS_CIRCLE,0);
+        lv_obj_set_style_bg_color(well,PLATE_WELL_HI,0);
+        lv_obj_set_style_bg_grad_color(well,PLATE_WELL,0);
+        lv_obj_set_style_bg_grad_dir(well,LV_GRAD_DIR_VER,0);
+        lv_obj_set_style_bg_opa(well,LV_OPA_80,0);
+        lv_obj_set_style_border_color(well,PLATE_LINE,0);
+        lv_obj_set_style_border_width(well,1,0);
+        lv_obj_set_style_border_opa(well,60,0);
+        // decorative overlays must never eat disc clicks: LVGL delivers PRESSED
+        // to the topmost clickable object under the point (lv_indev_search_obj),
+        // and plain lv_obj children are clickable BY DEFAULT (lv_obj ctor).
+        lv_obj_clear_flag(well,LV_OBJ_FLAG_CLICKABLE);
         // concentric modal rings
         for(int r=0;r<3;++r){
             lv_coord_t rd=(lv_coord_t)(D*(0.30f+0.30f*r));
@@ -735,9 +955,11 @@ private:
         lv_obj_t* chH=makeBox(strikeDisc,D,1); lv_obj_set_pos(chH,0,D/2);
         lv_obj_set_style_bg_color(chH,PLATE_LINE,0); lv_obj_set_style_bg_opa(chH,LV_OPA_40,0);
         lv_obj_set_style_radius(chH,0,0);
+        lv_obj_clear_flag(chH,LV_OBJ_FLAG_CLICKABLE);
         lv_obj_t* chV=makeBox(strikeDisc,1,D); lv_obj_set_pos(chV,D/2,0);
         lv_obj_set_style_bg_color(chV,PLATE_LINE,0); lv_obj_set_style_bg_opa(chV,LV_OPA_40,0);
         lv_obj_set_style_radius(chV,0,0);
+        lv_obj_clear_flag(chV,LV_OBJ_FLAG_CLICKABLE);
         // cardinal witness marks
         for(int t=0;t<4;++t){
             lv_obj_t* mk=(t==0||t==1)?makeBox(strikeDisc,2,scaled(10)):makeBox(strikeDisc,scaled(10),2);
@@ -746,6 +968,7 @@ private:
             lv_obj_set_pos(mk,mx,my);
             lv_obj_set_style_bg_color(mk,PLATE_MARK,0); lv_obj_set_style_bg_opa(mk,LV_OPA_COVER,0);
             lv_obj_set_style_radius(mk,0,0);
+            lv_obj_clear_flag(mk,LV_OBJ_FLAG_CLICKABLE);
         }
         // the mallet marker
         strikeDot=makeBox(strikeDisc,scaled(12),scaled(12));
@@ -754,6 +977,7 @@ private:
         lv_obj_set_style_radius(strikeDot,LV_RADIUS_CIRCLE,0);
         lv_obj_set_style_shadow_width(strikeDot,scaled(14),0);
         lv_obj_set_style_shadow_color(strikeDot,COL_HIGHLIGHT,0);
+        lv_obj_clear_flag(strikeDot,LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_style_shadow_opa(strikeDot,LV_OPA_60,0);
         lv_obj_set_pos(strikeDot,(int)(paramCache[PluginMultiScaleBody::kParamStrikeX]*(D-scaled(12))),
                                 (int)((1.f-paramCache[PluginMultiScaleBody::kParamStrikeY])*(D-scaled(12))));
@@ -784,7 +1008,19 @@ private:
         lv_obj_add_style(presetDropdown,&styles.compactSelectMain,0);
         lv_obj_set_style_bg_color(presetDropdown,PLATE_WELL,0);
         lv_obj_set_style_border_color(presetDropdown,PLATE_EDGE,0);
-        lv_obj_t* list=lv_dropdown_get_list(presetDropdown); if(list) lv_obj_add_style(list,&styles.compactSelectListMain,0);
+        lv_obj_t* list=lv_dropdown_get_list(presetDropdown);
+        if(list){
+            lv_obj_add_style(list,&styles.compactSelectListMain,0);
+            // cap the open list to ~8 rows (max_height clamps even the explicit
+            // size lv_dropdown_open sets): content taller than the list makes
+            // it scrollable, so wheel scrolling has something to do
+            lv_obj_set_style_max_height(list,scaled(lay::DROPDOWN_MAX_ROWS*lay::DROPDOWN_ROW_H),0);
+        }
+        // leave the input group: the DPF wheel arrives as an LVGL ENCODER whose
+        // enc_diff moves GROUP FOCUS - with the dropdown in the group, the very
+        // first wheel tick defocused (and closed) the list. Pointer clicks open
+        // it just fine without group membership.
+        lv_group_remove_obj(presetDropdown);
         lv_obj_add_event_cb(presetDropdown,dropdownCb,LV_EVENT_VALUE_CHANGED,this);
         bodySubLabel=lv_label_create(presetCol); lv_label_set_text(bodySubLabel,"");
         lv_obj_set_style_text_font(bodySubLabel,getScaledMicroFont(),0);
@@ -804,7 +1040,8 @@ private:
         lv_obj_t* right=makeCol(stage,0,scaled(lay::STAGE_H),scaled(lay::GUTTER)); // explicit-height parent: grow legal
         lv_obj_set_flex_grow(right,1);   // absorb remaining width (no horizontal overflow)
 
-        // spectrum card: 24 pad + 22 head + 8 + 316 chart = 370
+        // spectrum card: 24 pad + 22 head + 8 + 294 chart + 8 + 14 band ticks = 370
+        // (the B1..B16 strip makes the chart read as an analyzer, not a bar chart)
         lv_obj_t* spectrumCard=makeCard(right,lv_pct(100),scaled(lay::SPECTRUM_CARD_H),scaled(8));
         lv_obj_t* specHead=makeRow(spectrumCard,lv_pct(100),scaled(lay::HEAD_H),scaled(8),LV_FLEX_ALIGN_SPACE_BETWEEN);
         addLabel(specHead,"MODE SPECTRUM",getScaledSmallFont(),COL_HIGHLIGHT,2);
@@ -823,10 +1060,18 @@ private:
         lv_chart_set_series_color(chart,series,COL_HIGHLIGHT); lv_chart_set_update_mode(chart,LV_CHART_UPDATE_MODE_CIRCULAR);
         lv_obj_add_flag(chart,LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(chart,spectrumBandCb,LV_EVENT_PRESSED,this);
-        lv_obj_add_event_cb(chart,spectrumBandCb,LV_EVENT_PRESSING,this);
         lv_obj_add_event_cb(chart,spectrumBandCb,LV_EVENT_RELEASED,this);
+        lv_obj_add_event_cb(chart,spectrumBandCb,LV_EVENT_PRESSING,this);   // drag-scrub across bands
+        lv_obj_add_event_cb(chart,spectrumBandCb,LV_EVENT_PRESS_LOST,this); // close the open bracket
+        // peak-hold caps painted over the bars after the chart finishes drawing
+        lv_obj_add_event_cb(chart,spectrumPeakDrawCb,LV_EVENT_DRAW_POST_END,this);
         fSpectrumChart=chart; for(int i=0;i<16;++i) lv_chart_set_value_by_id(chart,series,i,0);
 
+        lv_obj_t* tickRow=makeRow(spectrumCard,lv_pct(100),scaled(lay::TICKS_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
+        for(int b=0;b<16;++b){
+            char nm[8]; snprintf(nm,sizeof(nm),"B%d",b+1);
+            addLabel(tickRow,nm,getScaledMicroFont(),PLATE_TEXT_DIM,0);
+        }
         // scope card: 24 pad + 22 head + 8 + 14 meter + 8 + 160 scope = 236
         lv_obj_t* scopeCard=makeCard(right,lv_pct(100),scaled(lay::SCOPE_CARD_H),scaled(8));
         lv_obj_t* scopeHead=makeRow(scopeCard,lv_pct(100),scaled(lay::HEAD_H),scaled(8));
@@ -935,6 +1180,9 @@ private:
             env[b]=(target>env[b])?env[b]+(target-env[b])*0.6f:env[b]+(target-env[b])*0.18f;
             int v=(int)std::clamp(env[b]*1000.f,0.f,1000.f);
             lv_chart_set_value_by_id(fSpectrumChart,s,b,v);
+            // peak-hold: instant attack, ~700 ms hold (21 frames @30fps), then decay
+            if(env[b]>fSpecPeaks[b]){ fSpecPeaks[b]=env[b]; fSpecHoldAge[b]=0; }
+            else if(++fSpecHoldAge[b]>21) fSpecPeaks[b]=std::max(0.f,std::max(env[b],fSpecPeaks[b]-0.006f));
         }
         lv_chart_refresh(fSpectrumChart);
         // === STRIKE PLATE aliveness ===
@@ -975,9 +1223,8 @@ private:
         lv_obj_update_layout(lv_screen_active());
     }
     DGL_NAMESPACE::LVGLTopLevelWidget* fLVGL=nullptr;
-    UIStyles styles; ArcVisualSpec spec{};
+    UIStyles styles;
     lv_obj_t* widgets[PluginMultiScaleBody::kParameterCount]={};
-    lv_obj_t* labels[PluginMultiScaleBody::kParameterCount]={};
     float paramCache[PluginMultiScaleBody::kParameterCount]={};
     bool fUIBuilt=false;
     lv_timer_t* fSpectrumTimer=nullptr;
@@ -1010,6 +1257,10 @@ private:
     int fStrikeNote=60;
     bool fStrikeHeld=false;
     bool fMarkerPlaced=false;
+    // spectrum band scrub state: which band's edit bracket is open + last
+    // written level, so PRESSING writes only on real change (no host spam)
+    int fScrubBand=-1;
+    float fScrubLevel=-1.f;
     // live metering cache fed by output parameters (bridge-safe DSP->UI link)
     float fVizLevel=0.f;
     float fVizBins[16]={};
@@ -1024,8 +1275,14 @@ private:
     lv_obj_t* kbOctLabel=nullptr;
     int kbBaseNote=60;
     int kbHeldNote=-1;
-    bool isFullscreen=false;
-    DGL_NAMESPACE::Size<uint> preFsSize{0,0};
+    // header zoom stepper
+    lv_obj_t* zoomMinus=nullptr;
+    lv_obj_t* zoomPlus=nullptr;
+    lv_obj_t* zoomValLbl=nullptr;
+    int fZoomIdx=2;   // 100% (index into lay::ZOOM_STEPS)
+    // spectrum peak-hold caps (falling-hold markers above the bars)
+    float fSpecPeaks[16]={};
+    int fSpecHoldAge[16]={};
 };
 UI* createUI(){ return new MultiScaleBodyUI(); }
 END_NAMESPACE_DISTRHO

@@ -34,7 +34,7 @@ def build_grid(g, preset):
     h = L / g
     occ = np.ones((g,g,g), dtype=float)
     name = preset['name']
-    if name=='Bowl':
+    if name in ('Bowl','LogDrum'):
         inner = np.zeros((g,g,g), dtype=bool)
         if g>=3:
             inner[1:-1,1:-1,1:-1]=True
@@ -71,7 +71,7 @@ def build_grid(g, preset):
                         occ[x,y,z]=1.0
                     elif 1.0 < r < 2.2 and z < g*0.7:
                         occ[x,y,z]=0.5
-    elif name=='Bar':
+    elif name in ('Bar','Marimba','Kalimba','Celesta'):
         occ[:,:,:]=0.0
         occ[:,1:3,1]=1.0
         if g>=4:
@@ -141,6 +141,29 @@ def build_grid(g, preset):
                             occ[x,y,g-3]=0.25
                 elif rad < g*0.52:
                     occ[x,y,g-1]=0.35
+    elif name=='Handpan':
+        occ[:,:,:]=0.0
+        for x in range(g):
+            for y in range(g):
+                dx, dy = x-g/2+0.5, y-g/2+0.5
+                rad = np.sqrt(dx*dx+dy*dy)
+                if rad < 1.75:
+                    occ[x,y,g-1]=1.0
+                    if g>=4: occ[x,y,g-2]=0.55
+                elif rad < 1.95:
+                    occ[x,y,g-1]=0.5
+                if rad < 0.85 and g>=4:
+                    occ[x,y,g-3]=0.35
+    elif name=='Cowbell':
+        occ[:,:,:]=0.0
+        for x in range(g):
+            for y in range(g):
+                for z in range(g):
+                    m = max(abs(y-g/2+0.5), abs(z-g/2+0.5))
+                    if m <= 1.15:
+                        occ[x,y,z] = 1.0 if m >= 0.45 else 0.0
+                    else:
+                        occ[x,y,z] = 0.4
     nn = g+1
     ndof = nn*nn*nn*3
     K = np.zeros((ndof, ndof))
@@ -270,13 +293,20 @@ PRESETS = [
     {'name':'Glass','E':72e9,'nu':0.23,'rho':2500,'alpha1':2.8,'alpha2':7e-8,'L':0.36},
     {'name':'Chime','E':200e9,'nu':0.30,'rho':7850,'alpha1':1.8,'alpha2':6e-8,'L':0.78},
     {'name':'Gong','E':110e9,'nu':0.33,'rho':8600,'alpha1':4.5,'alpha2':2e-7,'L':0.68},
+    {'name':'Handpan','E':200e9,'nu':0.30,'rho':7850,'alpha1':3.0,'alpha2':1.0e-7,'L':2.30},
+    {'name':'LogDrum','E':9e9,'nu':0.32,'rho':650,'alpha1':9,'alpha2':1.4e-6,'L':0.95},
+    {'name':'Marimba','E':14e9,'nu':0.30,'rho':850,'alpha1':9,'alpha2':9e-7,'L':0.93},
+    {'name':'Cowbell','E':105e9,'nu':0.34,'rho':8700,'alpha1':4.5,'alpha2':5e-7,'L':0.62},
+    {'name':'Kalimba','E':200e9,'nu':0.30,'rho':7850,'alpha1':5,'alpha2':3e-6,'L':0.43},
+    {'name':'Celesta','E':200e9,'nu':0.30,'rho':7850,'alpha1':1.4,'alpha2':5e-8,'L':0.29},
 ]
 
 def bake_one(preset, g=4, nmax=128):
     K, M, K_idx, occ, h, nn = build_grid(g, preset)
     freq, vecs, vals, nrigid = compute_modes(K, M, nmax)
     freq = freq * 0.18
-    inharm = {'Bowl':1.02,'WoodBlock':1.08,'Plate':1.18,'Squirrel':1.10,'Blade':1.22,'Shell':1.06,'Bar':1.01,'Membrane':1.15,'Bell':1.04,'Glass':1.12,'Chime':1.015,'Gong':1.09}.get(preset['name'],1.0)
+    inharm = {'Bowl':1.02,'WoodBlock':1.08,'Plate':1.18,'Squirrel':1.10,'Blade':1.22,'Shell':1.06,'Bar':1.01,'Membrane':1.15,'Bell':1.04,'Glass':1.12,'Chime':1.015,'Gong':1.09,
+              'Handpan':1.03,'LogDrum':1.07,'Marimba':1.05,'Cowbell':1.13,'Kalimba':1.16,'Celesta':1.008}.get(preset['name'],1.0)
     for i in range(len(freq)):
         stretch = 1.0 + (inharm-1.0) * (i/max(1,len(freq)-1)) * 1.5
         freq[i] *= stretch
@@ -306,13 +336,23 @@ def bake_one(preset, g=4, nmax=128):
         decays *= (0.5 + 0.5 * (1.0 - np.linspace(0,1,len(decays))))
     elif preset['name']=='Gong':
         decays *= (0.72 + 0.28 * (1.0 - np.linspace(0,1,len(decays))))
-    return {'freq':freq, 'decays':decays, 'gains':gains, 'n':n, 'vals':vals, 'nrigid':nrigid}
+    elif preset['name']=='Handpan':
+        decays *= (0.72 + 0.28 * (1.0 - np.linspace(0,1,len(decays))))
+    elif preset['name']=='LogDrum':
+        decays *= (1.08 - 0.38 * np.linspace(0,1,len(decays)))
+    elif preset['name']=='Marimba':
+        decays *= (1.15 - 0.65 * np.linspace(0,1,len(decays))**0.8)
+    elif preset['name']=='Kalimba':
+        decays *= (1.0 - 0.3 * np.linspace(0,1,len(decays)))
+    elif preset['name']=='Celesta':
+        decays *= (0.6 + 0.4 * (1.0 - np.linspace(0,1,len(decays))))
+    return {'freq':freq, 'decays':decays, 'gains':gains, 'n':n, 'nrigid':nrigid}
 
 def emit_header(results, out_path):
     with open(out_path,'w') as f:
         f.write("#pragma once\n#include <array>\nnamespace modal {\n")
         f.write(f"inline constexpr int kNumPresets = {len(results)};\ninline constexpr int kMaxModes = 128;\ninline constexpr int kGainGrid = 16;\n")
-        f.write("struct PresetData {\n const char* name;\n int n;\n float freq[128];\n float decay[128];\n float gain[128][16][16];\n double E, nu, rho, alpha1, alpha2;\n};\n")
+        f.write("struct PresetData {\n const char* name;\n int n;\n float freq[128];\n float decay[128];\n float gain[128][16][16];\n};\n")
         f.write("inline constexpr PresetData kPresets[kNumPresets] = {\n")
         for r, preset in zip(results, PRESETS):
             f.write(f"  {{\n   \"{preset['name']}\",\n   {r['n']},\n")
@@ -345,13 +385,11 @@ def emit_header(results, out_path):
                 if m!=127: f.write(",")
                 f.write("\n")
             f.write("   },\n")
-            f.write(f"   {preset['E']}, {preset['nu']}, {preset['rho']}, {preset['alpha1']}, {preset['alpha2']}\n")
             f.write("  },\n")
         f.write("};\n}\n")
         print(f"Wrote {out_path}")
 
 if __name__=="__main__":
-    import argparse
     ap=argparse.ArgumentParser()
     ap.add_argument("-o","--out", default="plugins/MultiScaleBody/src/ModalData.hpp")
     ap.add_argument("-g","--grid", type=int, default=4)

@@ -18,6 +18,7 @@ void MultiScaleBodyEngine::prepare(double sr) {
     rebuildDetuneTable();
     interpolateGainsFor(nextGain_, strikeX_, strikeY_);
     for (auto& v : voices_) if (v.active) recomputeVoiceCoeffs(v);
+    limPrepare(sr);
 }
 
 void MultiScaleBodyEngine::reset() {
@@ -29,8 +30,7 @@ void MultiScaleBodyEngine::reset() {
     monoTopVoice_=-1;
     lpL_.reset(); lpR_.reset();
     nextAge_=0; lfoPhase_=0; lfoUpdateCounter_=0; irBakeGate_=0; sustainPedal_=false;
-    irBaking_=false; irDirty_=true;
-    for(int i=0;i<kIrLen*2;++i){ wetBufL_[i]=0.f; wetBufR_[i]=0.f; }
+    limReset();
     widthCur_=width_; wetCur_=reverbWet_; exMixCur_=exciteMix_;
 }
 
@@ -49,6 +49,13 @@ void MultiScaleBodyEngine::interpolateGainsFor(float* out, float sx, float sy) c
     int ix = (int)std::floor(fx); int iy = (int)std::floor(fy);
     float tx = fx - ix; float ty = fy - iy;
     int n = std::min(p.n, modeCount_);
+    // Static gain staging (measured): 8-voice vel-127 chords at Modes/Bright
+    // maxed peak 1.0..3.1 pre-limiter because per-mode gains stack with mode
+    // count. Trim above 64 modes by sqrt(64/n) (-3 dB at 128 modes, unity
+    // below) so the output limiter only engages on the hardest corner hits;
+    // normal play (measured 0.45 peak pre-limiter) is unaffected beyond the
+    // ~1 dB this costs at the default 80-mode bodies.
+    const float densTrim = n > 64 ? 1.f / std::sqrt((float)n / 64.f) : 1.f;
     for (int m=0;m<n;++m) {
         float col[4];
         for(int j=0;j<4;++j){
@@ -62,7 +69,7 @@ void MultiScaleBodyEngine::interpolateGainsFor(float* out, float sx, float sy) c
         float base = cubicInterp(col[0],col[1],col[2],col[3],ty);
         base = std::clamp(base, -0.08f, 0.08f);
         int band = (m*16)/std::max(1,modeCount_);
-        out[m] = base * bandTrim_[std::clamp(band,0,15)];
+        out[m] = base * bandTrim_[std::clamp(band,0,15)] * densTrim;
     }
     for (int m=n;m<kMaxModes;++m) out[m]=0.f;
 }
@@ -71,18 +78,6 @@ void MultiScaleBodyEngine::setBandTrim(int band,float v){
     bandTrim_[band]=v;
     interpolateGainsFor(nextGain_, strikeX_, strikeY_);
     irDirty_=true;
-}
-float MultiScaleBodyEngine::getBandTrim(int band) const {
-    band=std::clamp(band,0,15); return bandTrim_[band];
-}
-void MultiScaleBodyEngine::getDisplayGains(float* out16) const {
-    for(int b=0;b<16;++b) out16[b]=0.f;
-    for(int i=0;i<modeCount_ && i<kMaxModes;++i){
-        int b = (i*16)/std::max(1,modeCount_);
-        out16[b] += std::abs(nextGain_[i]);
-    }
-    float mx=0; for(int b=0;b<16;++b) mx=std::max(mx,out16[b]);
-    if(mx>1e-9f) for(int b=0;b<16;++b) out16[b]/=mx;
 }
 // live analyser: Goertzel over recent output isn't stored, so approximate by
 // per-mode resonator energy envelope — each active voice's s1 state IS the
@@ -108,8 +103,14 @@ void MultiScaleBodyEngine::analyseBands(float* out16){
     if(mx>1e-9f) for(int b=0;b<16;++b) out16[b]/=mx; else for(int b=0;b<16;++b) out16[b]*=0.f;
 }
 void MultiScaleBodyEngine::recomputeVoiceCoeffs(Voice& v) {
-    static const double presetRad[12]={0.1125,0.07,0.1625,0.08,0.125,0.12,0.175,0.15,0.13,0.09,0.195,0.17};
-    double a = presetRad[std::clamp(presetIdx_,0,11)];
+    // Radiation aperture per body (~L/4). Sized implicitly: adding/removing a preset
+    // in ModalData.hpp without updating this list now fails to compile instead of
+    // silently clamping new bodies onto an old radius.
+    static const double presetRad[] = {0.1125,0.07,0.1625,0.08,0.125,0.12,0.175,0.15,0.13,0.09,0.195,0.17,
+                                       0.15,   0.16,  0.13,  0.10, 0.08,  0.07};
+    static_assert(int(sizeof(presetRad)/sizeof(presetRad[0])) == kNumPresets,
+                  "presetRad out of sync with modal::kNumPresets");
+    double a = presetRad[presetIdx_];
     const double c = 343.0;
     // channel bend (MPE)
     float bend = bendSemitones_[std::clamp(v.midiChannel,0,15)];
@@ -136,6 +137,10 @@ void MultiScaleBodyEngine::recomputeVoiceCoeffs(Voice& v) {
         rad = (1.0 - radiationMix_) + radiationMix_*rad;
         if(f>8000) rad *= (1.0 - 0.18* std::min(1.0,(f-8000)/7000.0) * radiationMix_);
         v.radGain[i]=(float)std::clamp(rad,0.05,1.0);
+        // exciter Q-compensation: injection scaled by (1-R_i) so the
+        // steady-state driven amplitude ~ exciterGain*gains[i]/2 is
+        // independent of Decay/Q (see Voice::excNorm comment).
+        v.excNorm[i]=(float)(1.0 - R);
     }
     double lpHz = 400.0 + brightness_ * 17600.0;
     if(lfoDepth_>1e-4f) lpHz += std::sin(lfoPhase_)*lfoDepth_*800.0;
@@ -246,10 +251,6 @@ bool MultiScaleBodyEngine::stepIrBake(int budgetModes){
     if(inv>0.f){ for(int i=0;i<kIrLen;++i){ irL_[i]*=inv; irR_[i]*=inv; } }
     return irBakeCursor_>=n;
 }
-void MultiScaleBodyEngine::bakeCurrentIR(){
-    beginIrBake();
-    while(!stepIrBake(kMaxModes)) {}
-}
 
 void MultiScaleBodyEngine::setPreset(int idx) {
     idx = std::clamp(idx, 0, kNumPresets-1);
@@ -265,7 +266,14 @@ void MultiScaleBodyEngine::setPitchScale(float v) {
 }
 void MultiScaleBodyEngine::setDecayScale(float v) {
     v = std::clamp(v,0.f,1.f);
-    decayScale_ = 0.1f * std::pow(100.f, v);
+    // Per-mode pole radius is R = exp(-(decay[i]*decayScale_)/sr): decayScale_
+    // multiplies the decay RATE, so a larger scale SHORTENS the tail. Invert
+    // the knob curve so turning Decay UP lengthens the ring (user-reported:
+    // "decay is reversed"). v=0.5 still maps to 1.0, so the default sound and
+    // the 0.1x..10x range are unchanged — only the direction is mirrored.
+    // stepIrBake() shares these semantics via the same decayScale_ multiply,
+    // so the reverb send tracks the knob identically.
+    decayScale_ = 0.1f * std::pow(100.f, 1.f - v);
     for (auto& voice : voices_) if (voice.active) recomputeVoiceCoeffs(voice);
     irDirty_=true;
 }
@@ -338,7 +346,7 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
 
     if(monoMode_ && monoTopVoice_>=0 && voices_[monoTopVoice_].active){
         Voice& v=voices_[monoTopVoice_];
-        v.midiNote=midiNote; v.midiChannel=channel; v.vel=vel01; v.sustainHold=false;
+        v.midiNote=midiNote; v.midiChannel=channel; v.sustainHold=false;
         const auto& p=kPresets[presetIdx_];
         float noteShift=std::pow(2.f,(midiNote-60)/12.f);
         // velocity morph strike position
@@ -358,7 +366,6 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
             } else v.freq[i]=targetF;
             v.gain[i]=tmp[i]*vel01;
         }
-        v.vel=vel01; v.strikeX=vx; v.strikeY=vy;
         recomputeVoiceCoeffs(v);
         return;
     }
@@ -381,7 +388,6 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
     v.midiNote = midiNote;
     v.sustainHold=false;
     v.midiChannel = channel;
-    v.vel = vel01;
     v.age = nextAge_++;
     v.n = modeCount_;
     const auto& p = kPresets[presetIdx_];
@@ -390,7 +396,6 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
     float vx = strikeX_ + (vel01-0.5f)*velStrike_*0.6f;      // X spreads with velocity
     float vy = strikeY_ + (vel01-0.5f)*velStrike_*0.5f;      // Y drifts up (brighter rim)
     vx=std::clamp(vx,0.f,1.f); vy=std::clamp(vy,0.f,1.f);
-    v.strikeX=vx; v.strikeY=vy;
     float gains[kMaxModes];
     interpolateGainsFor(gains,vx,vy);
     float noteShift = std::pow(2.f, (midiNote - 60) / 12.f);
@@ -482,8 +487,10 @@ void MultiScaleBodyEngine::processSampleStereo(float &outL, float &outR) {
             float a2 = -R * R;
             float exc;
             if(exMixCur_>1e-4f){
-                // audio exciter: input drives modes through their gain weights
-                exc = excite * v.gain[i] * 40.f;
+                // audio exciter: input drives modes through their gain weights,
+                // normalized by (1-R_i) so sustained-input loudness does not
+                // scale with resonator Q (Decay knob / preset decay table).
+                exc = excite * v.gain[i] * v.excNorm[i] * 40.f;
                 if(impulse) exc += v.gain[i]; // keep click transient on noteOn
             } else {
                 exc = impulse ? v.gain[i] : 0.f;
@@ -512,10 +519,12 @@ void MultiScaleBodyEngine::processSampleStereo(float &outL, float &outR) {
             if(v.env<=1e-4f){ v.active=false; v.midiNote=-1; v.envState=Voice::Idle; }
         }
     }
+    // Tone LP last on the dry path (unchanged). The old tanh(1.2x)*0.85
+    // soft-clip is REMOVED: it was the distortion the user reported when the
+    // engine ran hot. Level safety now belongs entirely to the look-ahead
+    // limiter at the very end of the signal chain.
     outL = lpL_.process(outL);
     outR = lpR_.process(outR);
-    outL = std::tanh(outL * 1.2f) * 0.85f;
-    outR = std::tanh(outR * 1.2f) * 0.85f;
 
     // === convolution reverb send (cheap block-free overlap via running tail) ===
     if(wetCur_>1e-4f){
@@ -537,20 +546,72 @@ void MultiScaleBodyEngine::processSampleStereo(float &outL, float &outR) {
         outR = outR*(1.f-wetCur_*0.7f) + wr*wetCur_;
         wetPos_=(wetPos_+1)%(kIrLen*2);
     }
-}
-void MultiScaleBodyEngine::processBlockStereo(float* outL, float* outR, uint32_t frames) {
-    for (uint32_t i=0;i<frames;++i) {
-        float l,r; processSampleStereo(l,r);
-        outL[i]=l; outR[i]=r;
+    // === final stage: look-ahead brickwall limiter (stereo-linked) ====
+    {
+        // 1) slide the sample into the delay ring; the stereo-linked peak of
+        //    the FRESH input feeds the detector
+        limDelayL_[limPos_] = outL;
+        limDelayR_[limPos_] = outR;
+        const float x = std::max(std::abs(outL), std::abs(outR));
+        // 2) monotonic wedge push: pop smaller-or-equal values off the back,
+        //    then expire entries that fell out of the lookahead window.
+        //    Amortized O(1): every index enters/leaves the wedge once.
+        while (limWh_ > limWt_ && limWedgeV_[(limWh_ - 1u) & (unsigned)(kLimBuf - 1)] <= x)
+            --limWh_;
+        limWedgeV_[limWh_ & (unsigned)(kLimBuf - 1)] = x;
+        limWedgeI_[limWh_ & (unsigned)(kLimBuf - 1)] = limAbs_;
+        ++limWh_;
+        while ((unsigned)(limAbs_ - limWedgeI_[limWt_ & (unsigned)(kLimBuf - 1)]) >= (unsigned)limLen_)
+            ++limWt_;
+        const float winPk = limWedgeV_[limWt_ & (unsigned)(kLimBuf - 1)];
+        ++limAbs_;
+        // 3) log-domain gain smoothing: instant attack (the lookahead window
+        //    already contains everything this gain will be applied to),
+        //    ~120 ms release toward unity. Below the ceiling the requested
+        //    gain is exactly 1.0, so normal play is bit-transparent apart
+        //    from the constant lookahead delay.
+        const float gReqDb = (winPk > kLimCeil)
+            ? 20.f * std::log10(kLimCeil / winPk) : 0.f;
+        if (gReqDb < limGainDb_) limGainDb_ = gReqDb;
+        else {
+            limGainDb_ += (0.f - limGainDb_) * limRelCoef_;
+            if (limGainDb_ > -1e-5f) limGainDb_ = 0.f; // denormal-safe snap
+        }
+        const float g = std::exp(limGainDb_ * 0.11512925464970229f); // ln(10)/20
+        // 4) apply to the delayed signal: y[n] = g[n] * x[n-(len-1)]. The
+        //    detector window ends at n and reaches back len samples, so every
+        //    potentially clipping sample is attenuated by a gain computed
+        //    AFTER it entered the window — mathematically bounded output.
+        const unsigned mask = (unsigned)(kLimBuf - 1);
+        const int rd = (int)(((unsigned)limPos_ + 1u - (unsigned)limLen_) & mask);
+        outL = limDelayL_[rd] * g;
+        outR = limDelayR_[rd] * g;
+        limPos_ = (int)(((unsigned)limPos_ + 1u) & mask);
+        // True-peak clamp at 0.98, kept AFTER the limiter purely as belt-and-
+        // braces: it only ever engages on float rounding at the ceiling and
+        // guarantees the hard 0.98 contract even if a future change breaks
+        // the window/gain invariant. It is NOT a soft-clipper; no drive.
+        outL = std::clamp(outL, -0.98f, 0.98f);
+        outR = std::clamp(outR, -0.98f, 0.98f);
     }
 }
-void MultiScaleBodyEngine::processBlock(const float** inputs, float** outputs, uint32_t frames){
-    const float* in = (inputs&&inputs[0])?inputs[0]:nullptr;
-    for(uint32_t i=0;i<frames;++i){
-        if(in) setExciterSample(in[i]);
-        float l,r; processSampleStereo(l,r);
-        if(outputs){ outputs[0][i]=l; outputs[1][i]=r; }
-    }
+
+// Limiter sizing/state reset. Called from prepare() (any SR change) — the only
+// place allocation-free fixed state is re-derived; run() never allocates.
+void MultiScaleBodyEngine::limPrepare(double sr) {
+    // 3 ms lookahead: inside the 1..5 ms spec, covers the fastest modal
+    // strike rise while keeping latency low. kLimBuf=1024 covers 192 kHz.
+    int len = (int)std::ceil(0.003 * sr);
+    limLen_ = std::clamp(len, 8, kLimBuf - 1);
+    limRelCoef_ = 1.f - std::exp(-1.f / (0.120f * (float)sr)); // 120 ms release
+    limReset();
+}
+
+void MultiScaleBodyEngine::limReset() {
+    for (int i = 0; i < kLimBuf; ++i) { limDelayL_[i] = 0.f; limDelayR_[i] = 0.f; limWedgeV_[i] = 0.f; }
+    for (int i = 0; i < kLimBuf; ++i) limWedgeI_[i] = 0u;
+    limPos_ = 0; limWh_ = 0; limWt_ = 0; limAbs_ = 0;
+    limGainDb_ = 0.f;
 }
 
 } // namespace modal

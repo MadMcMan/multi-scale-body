@@ -13,6 +13,7 @@
 #include "../deps/DPF/distrho/src/DistrhoUIInternal.hpp"
 #include "lvgl.h"
 #include "ui/UICommon.hpp"
+#include "PluginMultiScaleBody.hpp"
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -23,10 +24,17 @@ static FILE* gLog=nullptr;
 
 START_NAMESPACE_DISTRHO
 
+// interaction-proof counters: every UI->plugin route lands in one of these
+static int gNoteOns=0,gNoteOffs=0,gParamWrites=0,gStrikeWrites=0,gPresetWrites=0,gBandWrites=0;
 static void stubEditParam(void*, uint32_t, bool) {}
-static void stubSetParam(void*, uint32_t, float) {}
+static void stubSetParam(void*, uint32_t i, float){
+    ++gParamWrites;
+    if(i==PluginMultiScaleBody::kParamStrikeX||i==PluginMultiScaleBody::kParamStrikeY) ++gStrikeWrites;
+    else if(i==PluginMultiScaleBody::kParamPreset) ++gPresetWrites;
+    else if(i>=PluginMultiScaleBody::kParamBand0&&i<PluginMultiScaleBody::kParamBand0+16) ++gBandWrites;
+}
 static void stubSetState(void*, const char*, const char*) {}
-static void stubSendNote(void*, uint8_t, uint8_t, uint8_t) {}
+static void stubSendNote(void*, uint8_t, uint8_t, uint8_t v){ if(v) ++gNoteOns; else ++gNoteOffs; }
 static void stubSetSize(void*, uint, uint) {}
 static bool stubFileRequest(void*, const char*) { return false; }
 
@@ -189,16 +197,101 @@ static void presentKick(HWND hwnd, DISTRHO::UIExporter* exp)
     idleFrames(exp,80);
 }
 
+// ---- task-specific verification helpers ------------------------------------
+static int gTestFails=0;
+#define EXPECT(cond,msg) do{ if(cond) LOGF("PASS %s\n",msg); else { LOGF("FAIL %s\n",msg); ++gTestFails; } }while(0)
+
+static void pumpMsgs()
+{
+    MSG msg;
+    while(PeekMessage(&msg,NULL,0,0,PM_REMOVE)){ TranslateMessage(&msg); DispatchMessage(&msg); }
+}
+
+static lv_obj_t* findByClass(lv_obj_t* root,const char* cls)
+{
+    if(root->class_p && 0==std::strcmp(root->class_p->name,cls)) return root;
+    const uint32_t n=lv_obj_get_child_count(root);
+    for(uint32_t i=0;i<n;++i){ lv_obj_t* r=findByClass(lv_obj_get_child(root,i),cls); if(r) return r; }
+    return nullptr;
+}
+
+static lv_obj_t* findButtonByUserData(lv_obj_t* root,intptr_t ud)
+{
+    if(root->class_p && 0==std::strcmp(root->class_p->name,"lv_button")
+       && (intptr_t)lv_obj_get_user_data(root)==ud) return root;
+    const uint32_t n=lv_obj_get_child_count(root);
+    for(uint32_t i=0;i<n;++i){ lv_obj_t* r=findButtonByUserData(lv_obj_get_child(root,i),ud); if(r) return r; }
+    return nullptr;
+}
+
+static bool resizeWindow(HWND hwnd,DISTRHO::UIExporter* exp,int w,int h,bool& first)
+{
+    RECT r{0,0,w,h};
+    AdjustWindowRect(&r,(DWORD)GetWindowLongPtr(hwnd,GWL_STYLE),FALSE);
+    const int wx=(w>1800)?0:40, wy=(h>1000)?0:40;
+    SetWindowPos(hwnd,NULL,wx,wy,r.right-r.left,r.bottom-r.top,SWP_NOZORDER);
+    idleFrames(exp,first?60:120); pumpMsgs();
+    presentKick(hwnd,exp);
+    first=false;
+    RECT cr; GetClientRect(hwnd,&cr);
+    return (cr.right-cr.left)==w && (cr.bottom-cr.top)==h;
+}
+
+
+static DISTRHO::UIExporter* gExp=nullptr;
+
+// topmost DIRECT clickable child covering a point - mirrors what
+// lv_indev_search_obj picks among the disc's own children
+static lv_obj_t* clickableCoverChild(lv_obj_t* disc,int px,int py)
+{
+    const uint32_t n=lv_obj_get_child_count(disc);
+    for(uint32_t i=n;i>0;--i){
+        lv_obj_t* c=lv_obj_get_child(disc,i-1);
+        lv_area_t a; lv_obj_get_coords(c,&a);
+        if(px>=a.x1&&px<=a.x2&&py>=a.y1&&py<=a.y2&&lv_obj_is_clickable(c)) return c;
+    }
+    return nullptr;
+}
+static lv_coord_t wellSize(){ const lv_coord_t D=scaled(lay::DISC_D); return (lv_coord_t)(D*0.86f); }
+static lv_obj_t* findFirstChildBySize(lv_obj_t* p,lv_coord_t s)
+{
+    const uint32_t n=lv_obj_get_child_count(p);
+    for(uint32_t i=0;i<n;++i){
+        lv_obj_t* c=lv_obj_get_child(p,i);
+        if(lv_obj_get_width(c)==s&&lv_obj_get_height(c)==s) return c;
+    }
+    return nullptr;
+}
+// the playable disc: the one square plain-obj of DISC_D size with children
+static lv_obj_t* findDisc(lv_obj_t* root)
+{
+    const lv_coord_t want=scaled(lay::DISC_D);
+    if(root->class_p && 0==std::strcmp(root->class_p->name,"lv_obj")
+       && lv_obj_get_width(root)==want && lv_obj_get_height(root)==want
+       && lv_obj_get_child_count(root)>=5) return root;
+    const uint32_t n=lv_obj_get_child_count(root);
+    for(uint32_t i=0;i<n;++i){ lv_obj_t* r=findDisc(lv_obj_get_child(root,i)); if(r) return r; }
+    return nullptr;
+}
+static void wheelAt(HWND hwnd,int clientX,int clientY,double delta)
+{
+    POINT p{clientX,clientY}; ClientToScreen(hwnd,&p);
+    const WPARAM wp=(WPARAM)((int)(delta*120)<<16);
+    PostMessage(hwnd,WM_MOUSEWHEEL,wp,MAKELPARAM(p.x,p.y));
+}
 END_NAMESPACE_DISTRHO
 
-int main()
+int main(int argc,char** argv)
 {
     SetProcessDPIAware(); // 1:1 physical pixels: no DWM scaling in screen blits
+    // disc capture name: pass ui_disc_before.png while reproducing the bug
+    const char* discShot=(argc>1)?argv[1]:"ui_disc_after.png";
     gLog=fopen("ui_verify_log.txt","w");
     DISTRHO::UIExporter* exp=new DISTRHO::UIExporter(
         nullptr, 0, 48000.0,
         &DISTRHO::stubEditParam, &DISTRHO::stubSetParam, &DISTRHO::stubSetState,
         &DISTRHO::stubSendNote,  &DISTRHO::stubSetSize,  &DISTRHO::stubFileRequest);
+    gExp=exp;
 
     HWND hwnd=(HWND)exp->getNativeWindowHandle();
     if(!hwnd){ LOGF("no native handle\n"); return 1; }
@@ -211,27 +304,141 @@ int main()
     presentKick(hwnd,exp);
 
     struct Sz{ int w,h; const char* bmp; const char* tag; };
-    const Sz sizes[]={{1440,860,"ui_remake_1440.bmp","default"},
-                      {1100,700,"ui_remake_1100.bmp","small"},
-                      {2028,1104,"ui_remake_2048.bmp","large"}}; // screen 2048x1152: largest client that fits incl. frame
+    const Sz sizes[]={{1440,860,"ui_zoom_1440.bmp","default"},
+                      {1100,700,"ui_zoom_1100.bmp","small"},
+                      {2028,1104,"ui_zoom_2048.bmp","large"}}; // screen 2048x1152: largest client that fits incl. frame
     bool first=true;
     for(const Sz& s:sizes){
-        RECT r{0,0,s.w,s.h};
-        AdjustWindowRect(&r,(DWORD)GetWindowLongPtr(hwnd,GWL_STYLE),FALSE);
-        const int wx=(s.w>1800)?0:40, wy=(s.w>1800)?0:40; // large pins to origin so the blit never leaves the desktop
-        SetWindowPos(hwnd,NULL,wx,wy,r.right-r.left,r.bottom-r.top,SWP_NOZORDER);
-        idleFrames(exp,first?60:240);
-        presentKick(hwnd,exp); // GL surface needs a WM_SIZE nudge to present the resized frame
-        first=false;
+        resizeWindow(hwnd,exp,s.w,s.h,first);
         LOGF("=== %s ===\n",s.tag);
         logState(exp,s.tag);
         checkLayout(s.tag);
-        LOGF("=== %s raw (no update_layout) ===\n",s.tag);
-        dumpTree(lv_screen_active(),2); // raw coords as the renderer sees them
         idleFrames(exp,90);             // render the settled layout before grabbing
         writeBMP(hwnd,s.bmp);
     }
 
+    // ---- T1b: exercise one zoom step (125%) and prove aspect-locked rescale -
+    LOGF("=== zoom-step test ===\n");
+    first=false;
+    EXPECT(resizeWindow(hwnd,exp,1440,860,first),"back-to-base-1440x860");
+    lv_obj_t* zPlus=findButtonByUserData(lv_screen_active(),1);
+    lv_obj_t* zMinus=findButtonByUserData(lv_screen_active(),-1);
+    EXPECT(zPlus!=nullptr,"zoom-plus-found"); EXPECT(zMinus!=nullptr,"zoom-minus-found");
+    if(zPlus){
+        lv_obj_send_event(zPlus,LV_EVENT_CLICKED,nullptr);   // 100% -> 125%
+        idleFrames(exp,120); pumpMsgs(); presentKick(hwnd,exp); idleFrames(exp,90);
+        lv_display_t* d=lv_display_get_default();
+        const long dw=lv_display_get_horizontal_resolution(d), dh=lv_display_get_vertical_resolution(d);
+        LOGF("[zoom125] display=%ldx%ld gUIScale=%.3f\n",dw,dh,(double)DISTRHO::gUIScale);
+        EXPECT(dw==1800&&dh==1075,"display-exactly-1800x1075");
+        EXPECT(dw*860==dh*1440,"aspect-ratio-exact");
+        checkLayout("zoom125");
+        presentKick(hwnd,exp); idleFrames(exp,90); writeBMP(hwnd,"ui_zoom_step_125.bmp");
+        // drift/stability: + then - twice must return to the EXACT base size
+        lv_obj_t* zm=findButtonByUserData(lv_screen_active(),-1);
+        if(zm){ lv_obj_send_event(zm,LV_EVENT_CLICKED,nullptr); }              // -> 100%
+        idleFrames(exp,120); pumpMsgs(); presentKick(hwnd,exp); idleFrames(exp,90);
+        d=lv_display_get_default();
+        const long dw2=lv_display_get_horizontal_resolution(d), dh2=lv_display_get_vertical_resolution(d);
+        LOGF("[zoom-back] display=%ldx%ld gUIScale=%.3f\n",dw2,dh2,(double)DISTRHO::gUIScale);
+        presentKick(hwnd,exp); idleFrames(exp,90); writeBMP(hwnd,"ui_zoom_back_100.bmp");
+        EXPECT(DISTRHO::gUIScale>0.995f&&DISTRHO::gUIScale<1.005f,"scale-no-drift");
+        checkLayout("zoom-back");
+    }
+
+    // ---- T2: dropdown open + mouse-wheel scrolling of the list --------------
+    LOGF("=== dropdown-wheel test ===\n");
+    lv_obj_t* dd=findByClass(lv_screen_active(),"lv_dropdown");
+    EXPECT(dd!=nullptr,"dropdown-found");
+    if(dd){
+        lv_dropdown_open(dd);
+        idleFrames(exp,30); pumpMsgs(); lv_obj_update_layout(lv_screen_active());
+        lv_obj_t* list=lv_dropdown_get_list(dd);
+        EXPECT(list!=nullptr,"list-open");
+        if(list){
+            const long lh=lv_obj_get_height(list);
+            const bool capped=lh<=scaled(8*15)+2;   // DROPDOWN_MAX_ROWS*DROPDOWN_ROW_H
+            LOGF("[dropdown] rows=18 listH=%ld cap=%d scrollable=%d scrollY=%ld\n",
+                lh,(int)scaled(8*15),(int)lv_obj_has_flag(list,LV_OBJ_FLAG_SCROLLABLE),
+                (long)lv_obj_get_scroll_y(list));
+            EXPECT(capped,"list-height-capped(~8rows)");
+            EXPECT(lv_obj_has_flag(list,LV_OBJ_FLAG_SCROLLABLE),"list-is-scrollable");
+            checkLayout("dropdown-open");
+            presentKick(hwnd,exp); idleFrames(exp,90); writeBMP(hwnd,"ui_dropdown_open.bmp");
+
+            lv_area_t lc; lv_obj_get_coords(list,&lc);
+            const int cx=(lc.x1+lc.x2)/2, cy=(lc.y1+lc.y2)/2;
+            const long s0=lv_obj_get_scroll_y(list);
+            wheelAt(hwnd,cx,cy,-1.0);   // one notch DOWN
+            pumpMsgs(); idleFrames(exp,40); pumpMsgs();
+            const long s1=lv_obj_get_scroll_y(list);
+            LOGF("[wheel-down] %ld -> %ld\n",s0,s1);
+            EXPECT(s1>s0,"wheel-down-scrolls-list");
+            for(int i=0;i<5;++i){ wheelAt(hwnd,cx,cy,-1.0); }
+            pumpMsgs(); idleFrames(exp,50); pumpMsgs();
+            const long s2=lv_obj_get_scroll_y(list);
+            wheelAt(hwnd,cx,cy,+1.0);   // one notch UP
+            pumpMsgs(); idleFrames(exp,40); pumpMsgs();
+            const long s3=lv_obj_get_scroll_y(list);
+            LOGF("[more-down] %ld ; [wheel-up] %ld -> %ld\n",s2,s2,s3);
+            EXPECT(s3<s2,"wheel-up-scrolls-back");
+            lv_dropdown_close(dd);
+            idleFrames(exp,20);
+        }
+    }
+
+
+    // ---- T3: STRIKE DISC click-to-hit regression proof ----------------------
+    // LVGL delivers a click to the TOPMOST clickable object under the point
+    // (lv_indev_search_obj). Before the fix the clickable inner-well overlay
+    // (86% of the disc) won that search and strikeDisc's padPressCb never saw
+    // PRESSED. Proof: every decorative child non-clickable + dispatch resolves
+    // to strikeDisc at an off-center well point and at dead center.
+    LOGF("=== strike-disc click test ===\n");
+    first=false;
+    EXPECT(resizeWindow(hwnd,exp,1440,860,first),"base-size-for-click-test");
+    lv_obj_t* disc=findDisc(lv_screen_active());
+    EXPECT(disc!=nullptr,"disc-found");
+    if(disc){
+        lv_obj_update_layout(lv_screen_active());
+        lv_obj_t* well=findFirstChildBySize(disc,wellSize());
+        if(well) LOGF("[disc] well %ldx%ld clickable=%d\n",(long)lv_obj_get_width(well),
+            (long)lv_obj_get_height(well),(int)lv_obj_is_clickable(well));
+        lv_area_t dc; lv_obj_get_coords(disc,&dc);
+
+        // probe 1: off-center point inside the inner well (fx=.25 fy=.25)
+        {
+            const int px=dc.x1+(dc.x2-dc.x1+1)/4, py=dc.y1+3*(dc.y2-dc.y1+1)/4;
+            lv_obj_t* thief=clickableCoverChild(disc,px,py);
+            LOGF("[probe1] point=(%d,%d) topmost-clickable-child=%s\n",px,py,
+                thief?(thief->class_p?thief->class_p->name:"?"):"<none - reaches disc>");
+            lv_point_t sp{(lv_coord_t)px,(lv_coord_t)py};
+            lv_obj_t* hit=lv_indev_search_obj(lv_screen_active(),&sp);
+            LOGF("[probe1] lv_indev_search_obj -> %s\n",hit==disc?"strikeDisc (click path OK)"
+                :(hit&&hit->class_p?hit->class_p->name:"null"));
+            EXPECT(hit==disc,"P1-dispatch-reaches-disc");
+        }
+        // probe 2: dead center
+        {
+            const int px=(dc.x1+dc.x2)/2, py=(dc.y1+dc.y2)/2;
+            lv_obj_t* thief=clickableCoverChild(disc,px,py);
+            LOGF("[probe2] point=(%d,%d) topmost-clickable-child=%s\n",px,py,
+                thief?(thief->class_p?thief->class_p->name:"?"):"<none - reaches disc>");
+            lv_point_t sp{(lv_coord_t)px,(lv_coord_t)py};
+            lv_obj_t* hit=lv_indev_search_obj(lv_screen_active(),&sp);
+            LOGF("[probe2] lv_indev_search_obj -> %s\n",hit==disc?"strikeDisc (click path OK)"
+                :(hit&&hit->class_p?hit->class_p->name:"null"));
+            EXPECT(hit==disc,"P2-dispatch-reaches-disc");
+        }
+        // NOTE: padPressCb counter evidence (note-on/off, StrikeX/Y writes)
+        // needs a real indev-driven press; neither posted messages nor
+        // SendInput reach the LVGL pointer indev in this harness environment
+        // (hover never asserts), so the dispatch assertions above are the
+        // click-path proof here. Human/host confirmation is the final gate.
+        idleFrames(exp,30);
+        writeBMP(hwnd,discShot);
+    }
+    LOGF("=== RESULT fails=%d bounds/overlap reported above ===\n",gTestFails);
     exp->quit();
     delete exp;
     if(gLog) fclose(gLog);
