@@ -47,6 +47,8 @@ public:
 #define PLATE_EMPTY       lv_color_hex(0x0A0E14)  // unoccupied preview cells
 #define PLATE_TITLE       lv_color_hex(0xF2EDE4)  // title white
 #define PLATE_TEXT        lv_color_hex(0xC9C1B2)  // primary spec text
+#define PLATE_TEXT_MID    lv_color_hex(0x8A8272)  // secondary text
+#define PLATE_TEXT_DIM    lv_color_hex(0x655F51)  // tertiary/label text
 #define PLATE_AMBER_DIM   lv_color_hex(0xC9A05A)  // desaturated amber for value labels (one-accent discipline: only the arc + mallet stay full-amber)
 #define PLATE_AMBER       lv_color_hex(0xFFCE6B)  // bright amber readout
 #define PLATE_AMBER_PALE  lv_color_hex(0xFFF0C8)  // mallet marker rim
@@ -55,7 +57,6 @@ public:
 #define PLATE_BTN_PRESS    lv_color_hex(0x2A251D)  // flat-button pressed surface (lift over PLATE_WELL)
 #define COL_METER_SAFE    lv_color_hex(0x8FAE5A)  // muted green: nominal level
 #define COL_METER_HOT     lv_color_hex(0xD9534A)  // red: headroom exceeded
-// keyboard well (slightly cool to read as keys, not chassis)
 #define KB_WELL           lv_color_hex(0x0F131A)
 #define KB_BLACK          lv_color_hex(0x121110)
 #define KB_BLACK_HI       lv_color_hex(0x1C1915)
@@ -195,4 +196,5 @@ inline const lv_font_t* getDisplayFont() {
 // piece-4: title bumped +2px (24 -> 26). Letter-space stays +2 for the
 // wide-set headline feel that makes the brand read as a primary identity.
 inline const lv_font_t* getDisplayFont26() { return &lv_font_montserrat_26; }
+END_NAMESPACE_DISTRHO
 #endif

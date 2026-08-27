@@ -1,4 +1,7 @@
 #include "DistrhoPluginInfo.h"
+#include <unordered_map>  // pulled in before DistrhoUI.hpp so std:: is fully populated when DPF's
+                          // `namespace std { ... }` opens inside DISTRHO (otherwise <unordered_map>
+                          // ends up parsed under DISTRHO::std, which has no iterator_traits, forward, pair)
 #include "DistrhoUI.hpp"
 #include "LVGL.hpp"
 #include "lvgl.h"
@@ -553,7 +556,7 @@ private:
     static void presetArrowCb(lv_event_t* e){
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
         if(!ui||!ui->presetDropdown) return;
-        int dir=(int)(intptr_t)lv_obj_get_user_data(lv_event_get_target(e));
+        int dir=(int)(intptr_t)lv_obj_get_user_data((lv_obj_t*)lv_event_get_target(e));
         if(dir==0) return;
         int mx = modal::kNumPresets - 1;
         int cur=lv_dropdown_get_selected(ui->presetDropdown);
@@ -956,10 +959,11 @@ private:
         lv_obj_set_style_border_color(topbar,PLATE_LINE,0); lv_obj_set_style_border_width(topbar,1,0);
         lv_obj_set_style_radius(topbar,scaled(lay::RADIUS),0);
         lv_obj_set_style_pad_hor(topbar,scaled(16),0); lv_obj_set_style_pad_ver(topbar,scaled(10),0);
-        // brand mark - bold, monospaced-feel, two-line: product | class
         // piece-4: title bumped +2px (24 -> 26) via the new getDisplayFont26().
         // Letter-space +2 (was 4) keeps the headline tight; the authors line
         // drops to 50% opacity + 1px smaller so it recedes and lets the title own the bar.
+        // brand mark - bold, monospaced-feel, two-line: product | class
+        lv_obj_t* brandCol=makeCol(topbar,scaled(240),lv_pct(100),scaled(2));
         lv_obj_t* titleLbl=addLabel(brandCol,"MULTI-SCALE BODY",gUIScale>=1.2f?getDisplayFont26():getDisplayFont(),PLATE_TITLE,2);
         lv_obj_set_style_text_letter_space(titleLbl,4,0);
         lv_obj_t* authorsLbl=addLabel(brandCol,"MODAL SYNTH   -   DAFX-09 / 47",getScaledMicroFont(),PLATE_TEXT_DIM,1);
