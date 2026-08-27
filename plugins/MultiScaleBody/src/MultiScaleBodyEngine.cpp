@@ -8,14 +8,16 @@ void MultiScaleBodyEngine::prepare(double sr) {
     sampleRate_ = sr;
     lpL_.prepare(sr); lpR_.prepare(sr);
     lpL_.setCutoffHz(18000); lpR_.setCutoffHz(18000);
-    attackMs_ = 1.f + std::pow(attackNorm_,1.5f)*799.f;
+    setAttack(attackNorm_); // attack knob->ms curve lives only in setAttack()
     releaseMs_ = 20.f + std::pow(releaseNorm_,1.2f)*7980.f;
     lfoHz_ = 0.05 * std::pow(240.f, lfoRateNorm_);
     glideMs_ = glideNorm_*600.f;
     rtSmCoef_ = 1.f - std::exp(-1.0f/(0.02f*(float)sampleRate_)); // ~20ms param smoothing
+    exFollowRel_ = std::exp(-1.f/(0.080f*(float)sampleRate_)); // ~80 ms follower release
     widthCur_=width_; wetCur_=reverbWet_; exMixCur_=exciteMix_;   // start settled, no ramp-in
     irDirty_=true; irBaking_=false;
     rebuildDetuneTable();
+    computeDecayRef(); // uniform-damping ring anchor for the current preset
     interpolateGainsFor(nextGain_, strikeX_, strikeY_);
     for (auto& v : voices_) if (v.active) recomputeVoiceCoeffs(v);
     limPrepare(sr);
@@ -24,12 +26,14 @@ void MultiScaleBodyEngine::prepare(double sr) {
 void MultiScaleBodyEngine::reset() {
     for (auto& v : voices_) {
         v.active=false; v.midiNote=-1; v.silenceCount=0; v.sustainHold=false;
+        v.burstLen=0; v.burstLeft=0; v.transLen=0; v.transLeft=0; v.transLP=0.f;
         for (int i=0;i<kMaxModes;++i) v.s1[i]=v.s2[i]=0.f;
         v.envState=Voice::Idle; v.env=0.f;
     }
     monoTopVoice_=-1;
     lpL_.reset(); lpR_.reset();
-    nextAge_=0; lfoPhase_=0; lfoUpdateCounter_=0; irBakeGate_=0; sustainPedal_=false;
+    nextAge_=0; lfoPhase_=0; lfoUpdateCounter_=0; irBakeGate_=0; sustainPedal_=false; exFollow_=0.f;
+    strikeSeq_=0; transPeak_=0.f; // fresh deterministic transient sequence + telemetry per reset
     limReset();
     widthCur_=width_; wetCur_=reverbWet_; exMixCur_=exciteMix_;
 }
@@ -102,6 +106,107 @@ void MultiScaleBodyEngine::analyseBands(float* out16){
     float mx=0; for(int b=0;b<16;++b) mx=std::max(mx,out16[b]);
     if(mx>1e-9f) for(int b=0;b<16;++b) out16[b]/=mx; else for(int b=0;b<16;++b) out16[b]*=0.f;
 }
+// Ring-shaping anchor: the slowest baked rate of THIS preset divided by a
+// fixed factor. Paper 47 (sec 3.2) damps each sounding object uniformly; our
+// bake stores strongly varying per-mode rates, so fast modes die long before
+// the body's defining slow ring. Anchoring below dmin lets every mode be
+// pulled toward a longer, more uniform ring without touching ModalData.hpp.
+void MultiScaleBodyEngine::computeDecayRef(){
+    const auto& p=kPresets[presetIdx_];
+    float mn=p.decay[0];
+    for(int i=1;i<p.n;++i) if(p.decay[i]<mn) mn=p.decay[i];
+    presetDecayRef_=mn/kDecayAnchorDiv;
+}
+// Geometric pull of a baked decay RATE toward the anchor: monotone in d, and
+// <= d whenever d >= anchor, so rings only lengthen, the relative order of
+// mode lifetimes is preserved, and the Decay-knob direction law (applied
+// afterwards as a pure multiplier) is untouched. Shared by voice setup and
+// the reverb IR bake so both paths carry the same decay character.
+float MultiScaleBodyEngine::shapeDecayRate(float d) const {
+    if(!(d>0.f)) return d;
+    return std::pow(d,1.f-kDecayPullBeta)*std::pow(presetDecayRef_,kDecayPullBeta);
+}
+// Arm the finite mallet-contact pulse (replaces the literal single-sample
+// Dirac injection). Rim strikes = harder contact => shorter, brighter force
+// pulse; center hits get the softest, longest one. Net impulse area stays
+// unity like the old Dirac (raised cosine sums to len/2, amplitude 2/len),
+// so low-frequency excitation is unchanged. Velocity-independent BY DESIGN:
+// the limiter-transparency contract requires output to scale exactly with
+// velocity below threshold, which forbids velocity-dependent spectra.
+void MultiScaleBodyEngine::startStrikeBurst(Voice& v,float vx,float vy){
+    float edge = std::max(std::fabs(vx-0.5f),std::fabs(vy-0.5f))*2.f; // 0 center..1 rim
+    int bl=(int)std::lround(kStrikeBurstS*(float)sampleRate_*(1.25f-0.5f*edge));
+    v.burstLen=std::clamp(bl,4,32);
+    // --- pulse-shape compensation (round A3; see kStrikeProbeSafe) --------
+    // Re-run every mode's exact 2-pole recursion driven by THIS strike's
+    // raised-cosine burst (unit amplitude: kStrikeTrim/gain/strikeNorm are
+    // linear factors that cancel in a normalizer) and take the effective
+    // strike normalization from the MEASURED response peak, so each mode's
+    // summit contribution equals |gain[i]| for the real drive — the same
+    // pinned-summit guarantee the analytic 1/M(R,th) only provided for a
+    // literal Dirac. Scan window = burstLen + quarter period (+ safety),
+    // which is exactly where the burst response of a decaying resonator
+    // peaks (the last drive sample rings up within one quarter cycle);
+    // capped at 4 bursts because a mode whose quarter period exceeds that
+    // cannot distinguish this unity-area pulse from a Dirac and KEEPS the
+    // analytic value (low end bit-comparable to before). Runs once per
+    // strike at event rate; <= ~5*burstLen iterations/mode, no allocation.
+    {
+        const int L=v.burstLen;
+        const float invL=1.f/(float)L;
+        for(int i=0;i<v.n;++i){
+            const float c=std::clamp(v.cosTheta[i],-1.f,1.f);
+            const float th=std::acos(c);
+            const float qp=(th>1e-9f)?(0.5f*(float)M_PI)/th:1e9f;
+            const float R=v.R[i];
+            if(!(qp<4.f*(float)L) || !(R>0.f) || !(R<1.f)) continue;
+            const int tail=(int)std::min(qp,4.f*(float)L)+kStrikeProbeSafe;
+            const float a1=2.f*R*c, a2=-R*R;
+            float s1=0.f,s2=0.f,pk=0.f;
+            for(int m=0;m<L+tail;++m){
+                const float u=(m<L)?(2.f*invL*(0.5f-0.5f*std::cos((float)(2.0*M_PI)*(float)m*invL))):0.f;
+                const float y=a1*s1+a2*s2+u;
+                s2=s1; s1=y;
+                pk=std::max(pk,std::fabs(y));
+            }
+            if(pk>1e-9f) v.strikeEff[i]=1.f/pk;
+        }
+    }
+    // Contact-transient layer (DELIBERATE extension beyond paper Eq. (1)'s
+    // Dirac strike; consistent with the finite-contact-pulse deviation
+    // above): real mallet contact radiates a few ms of broadband chatter
+    // co-incident with the force pulse. Length scales with edge like the
+    // pulse (rim = harder contact = shorter); amplitude is a SMALL FRACTION
+    // of the tonal excitation (kContactTrim x mean |mode gain| of this very
+    // strike, so it tracks velocity/position/preset automatically); the
+    // one-pole LP coefficient shapes bandwidth by strike position
+    // (center = dark, rim = bright). Noise source: xorshift32 seeded from a
+    // monotonic strike counter — fully deterministic, RT-safe, no allocation.
+    int tl=(int)std::lround(kContactTransS*(float)sampleRate_*(1.15f-0.3f*edge));
+    // clamp ceiling 800 samples: 10 ms base x (1.15..0.85) needs headroom at
+    // 96/192 kHz too (the old 192-sample cap silently re-shortened the layer)
+    v.transLen=std::clamp(tl,32,800);
+    v.transLeft=v.transLen;
+    v.transLP=0.f;
+    float gsum=0.f;
+    for(int i=0;i<v.n;++i) gsum+=std::fabs(v.gain[i]);
+    v.transAmp=kContactTrim*(v.n>0? gsum/(float)v.n : 0.f);
+    // one-pole LP for y+=a*(x-y): a = 1-exp(-2*pi*fc/sr) puts -3 dB at fc.
+    // Round A3 re-staging: the old 1.2k center left default (center-ish)
+    // strikes with nothing above ~4 kHz — onsets could not carry the
+    // measurable 4-12 kHz content that makes a strike "land". The baked
+    // Bowl body has no tonal modes above ~2.9 kHz, so this layer IS the
+    // instrument's onset brightness carrier: 4.2 kHz center / 11 kHz rim
+    // keeps the position law (rim = brighter) while putting real energy in
+    // the 4-12 kHz band (rig: hf8k_frac 0 -> measurable), still an octave
+    // below hi-hat brightness.
+    float lpHz=4800.f+edge*6200.f; // center ~4.8 kHz .. rim ~11 kHz
+    v.transCoef=1.f-(float)std::exp(-2.0*M_PI*(double)lpHz/(double)sampleRate_);
+    uint32_t seed=(uint32_t)++strikeSeq_;
+    seed^=seed>>16; seed*=2654435761u; seed^=seed>>16;   // splitmix-style scramble
+    v.rngState=seed|1u;                                  // xorshift32 state must be nonzero
+    v.burstLeft=v.burstLen;
+}
 void MultiScaleBodyEngine::recomputeVoiceCoeffs(Voice& v) {
     // Radiation aperture per body (~L/4). Sized implicitly: adding/removing a preset
     // in ModalData.hpp without updating this list now fails to compile instead of
@@ -141,6 +246,30 @@ void MultiScaleBodyEngine::recomputeVoiceCoeffs(Voice& v) {
         // steady-state driven amplitude ~ exciterGain*gains[i]/2 is
         // independent of Decay/Q (see Voice::excNorm comment).
         v.excNorm[i]=(float)(1.0 - R);
+        // strike Q-compensation (audit #7, DELIBERATE paper-alignment):
+        // the mallet force pulse is impulsive, so each mode's summitscale
+        // is the peak of its impulse response h[n]=R^n*sin((n+1)t)/sin(t),
+        // NOT 1/(1-R): closed-form maximum at (n*+1)t = atan2(t, eps)
+        // (eps=-ln R), falling back to h[0]=1 when that lands before n=0.
+        // Injecting the pulse through 1/M pins every mode's summit
+        // contribution regardless of Decay/Q; plain excNorm would
+        // over-attenuate long-decay modes (measured 29.7 dB spread).
+        {
+            const double eps = -std::log(R);
+            const double phi = std::atan2(theta, eps);
+            double m = 1.0; // impulse-response peak (h[0] = 1 fallback)
+            if(phi > theta){
+                const double nStar = phi/theta - 1.0;
+                m = std::exp(-eps*nStar)*std::sin(phi)/std::sin(theta);
+            }
+            v.strikeNorm[i]=(float)(m > 1e-9 ? 1.0/m : 0.0);
+            // Seed the effective normalizer with the analytic Dirac value.
+            // startStrikeBurst() refines it per mode for the real pulse at
+            // arm time; refreshing here (every coeff recompute: note-on,
+            // pitch bend, decay/brightness/LFO changes) guarantees a stale
+            // measured value can never survive a coefficient change.
+            v.strikeEff[i]=v.strikeNorm[i];
+        }
     }
     double lpHz = 400.0 + brightness_ * 17600.0;
     if(lfoDepth_>1e-4f) lpHz += std::sin(lfoPhase_)*lfoDepth_*800.0;
@@ -217,7 +346,7 @@ bool MultiScaleBodyEngine::stepIrBake(int budgetModes){
         float g=cubicInterp(col[0],col[1],col[2],col[3],ty);
         float f=p.freq[m]*pitchScale_;
         if(f<20.f||f>18000.f){ continue; }
-        float d=p.decay[m]*decayScale_;
+        float d=shapeDecayRate(p.decay[m])*decayScale_; // same ring shaping as voices
         double w=f/sampleRate_;
         double rEnv=std::exp(-(double)d/sampleRate_);
         float envl=1.f;
@@ -255,12 +384,17 @@ bool MultiScaleBodyEngine::stepIrBake(int budgetModes){
 void MultiScaleBodyEngine::setPreset(int idx) {
     idx = std::clamp(idx, 0, kNumPresets-1);
     presetIdx_ = idx;
+    computeDecayRef(); // ring anchor is per-body — must follow the preset
     interpolateGainsFor(nextGain_, strikeX_, strikeY_);
     irDirty_=true;
 }
 void MultiScaleBodyEngine::setPitchScale(float v) {
     v = std::clamp(v,0.f,1.f);
-    pitchScale_ = std::pow(2.f, (v - 0.5f) * 2.f);
+    // Tune knob curve: +-24 ST total span (v=0.5 stays unity). The old +-12 ST
+    // span (x2) rendered each body's ABSOLUTE modal spectrum at note 60 --
+    // Bowl's lowest tonal mode is 559.6 Hz, so scored C4 was unreachable on
+    // every preset (it needs -13.2..-17.7 ST; x4 reaches it at v=0.2256).
+    pitchScale_ = std::pow(2.f, (v - 0.5f) * 4.f);
     for (auto& voice : voices_) if (voice.active) recomputeVoiceCoeffs(voice);
     irDirty_=true;
 }
@@ -307,7 +441,14 @@ void MultiScaleBodyEngine::setRadiationMix(float v){
 void MultiScaleBodyEngine::setWidth(float v){ width_ = std::clamp(v,0.f,1.f); irDirty_=true; }
 void MultiScaleBodyEngine::setAttack(float v){
     attackNorm_=std::clamp(v,0.f,1.f);
-    attackMs_=1.f + std::pow(attackNorm_,1.5f)*799.f;
+    // Quartic taper (round A3): the DEFAULT position (0.15) lands at
+    // ~1.40 ms. The paper's modal response (Eq. 1) has no VCA ramp — all
+    // modes speak as soon as they are struck — and the bar render's onsets
+    // rise in 0-0.9 ms; the round-2 cubic taper put the default at 3.7 ms,
+    // which dominated the measured onset-rise metric (2.5-3.8 ms) even after
+    // the drive itself was sharpened. Knob span unchanged: 1..800 ms,
+    // strictly increasing, so every position keeps a useable time.
+    attackMs_=1.f + std::pow(attackNorm_,4.f)*799.f;
 }
 void MultiScaleBodyEngine::setReleaseParam(float v){
     releaseNorm_=std::clamp(v,0.f,1.f);
@@ -332,6 +473,16 @@ void MultiScaleBodyEngine::updateEnvelope(Voice& v){
             break;
         case Voice::Sustain: break;
         case Voice::Release:
+            // DELIBERATE DEVIATION from paper 47 Eq. (1), documented (audit
+            // #12b): the modeled body is free-ringing — nothing in the paper
+            // damps it at note-off. As a PLAYABLE instrument we shape the
+            // ring with a percussive release gate here: note-off ramps env
+            // to zero over the Release knob time (20 ms..8 s, default
+            // ~900 ms). The modes themselves keep ringing underneath; only
+            // this VCA closes. Free-ring character survives via long
+            // Release settings, CC64 sustain deferral and CC123 tails;
+            // CC120 (allSoundOff) stays the hard mute. Chosen over removing
+            // the gate because MIDI keyboards expect note-off to matter.
             v.env -= (float)(dtMs / std::max(5.0,(double)releaseMs_));
             if(v.env<=0.f){ v.env=0.f; v.envState=Voice::Idle; v.active=false; v.midiNote=-1; }
             break;
@@ -367,6 +518,7 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
             v.gain[i]=tmp[i]*vel01;
         }
         recomputeVoiceCoeffs(v);
+        startStrikeBurst(v,vx,vy); // re-strike the contact pulse on mono retrigger
         return;
     }
 
@@ -401,17 +553,23 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
     float noteShift = std::pow(2.f, (midiNote - 60) / 12.f);
     for (int i=0;i<v.n;++i) {
         v.freq[i] = p.freq[i]*noteShift;
-        v.decay[i] = p.decay[i];
+        v.decay[i] = shapeDecayRate(p.decay[i]); // uniform-damping ring pull
         v.gain[i] = gains[i] * vel01;
         v.s1[i]=v.s2[i]=0.f;
     }
     for (int i=v.n;i<kMaxModes;++i) { v.gain[i]=0.f; v.s1[i]=v.s2[i]=0.f; }
     v.env=0.f; v.envState=Voice::Attack;
     recomputeVoiceCoeffs(v);
-    v.silenceCount = -1;
+    startStrikeBurst(v,vx,vy);
+    v.silenceCount = 0; // strike is carried by the force pulse, not a Dirac flag
     monoTopVoice_=target;
 }
 
+    // DELIBERATE DEVIATION from paper 47 Eq. (1) (audit #12b): the paper's
+    // body rings freely — a strike simply excites Eq. (1) and physical
+    // damping ends it. Here note-off arms the percussive Release VCA (see
+    // updateEnvelope, Voice::Release): a documented playability feature,
+    // not an oversight. The ring itself is untouched below the gate.
 void MultiScaleBodyEngine::noteOff(int midiNote, int channel) {
     for(auto& v:voices_){
         if(!v.active) continue;
@@ -435,6 +593,7 @@ void MultiScaleBodyEngine::allNotesOff() {
 void MultiScaleBodyEngine::allSoundOff() {
     for(auto& v:voices_){
         v.active=false; v.midiNote=-1; v.envState=Voice::Idle; v.env=0.f; v.silenceCount=0; v.sustainHold=false;
+        v.burstLen=0; v.burstLeft=0; v.transLen=0; v.transLeft=0; v.transLP=0.f;
         for(int i=0;i<kMaxModes;++i){ v.s1[i]=0.f; v.s2[i]=0.f; }
     }
     monoTopVoice_=-1;
@@ -471,13 +630,31 @@ void MultiScaleBodyEngine::processSampleStereo(float &outL, float &outR) {
         for(auto& v:voices_) if(v.active) recomputeVoiceCoeffs(v);
     }
     float excite = exciterIn_ * exMixCur_;
+    // Exciter transient tracking into the Q-compensated resonators: a
+    // peak-holding follower (instant attack, ~80 ms release) raises the drive
+    // for the moment after an input rise, so percussive material kicks the
+    // modes harder than steady tone. Deliberate extension beyond paper 47
+    // (internal impulsive strikes only); bounded to (1+kExciteTrk)x.
+    {
+        const float ax = std::fabs(exciterIn_);
+        exFollow_ = (ax>=exFollow_) ? ax : exFollow_*exFollowRel_;
+    }
+    const float exDrive = 1.f + kExciteTrk*exFollow_;
     for (auto& v : voices_) {
         if (!v.active) continue;
         updateEnvelope(v);
         if(!v.active) continue;
         float env = v.env;
         float voiceL=0.f, voiceR=0.f;
-        bool impulse = (v.silenceCount==-1);
+        // finite mallet-contact force pulse: raised cosine over burstLen
+        // samples, unit net area (identical LF kick to the old Dirac, gently
+        // band-limited top end = physical contact-time filtering)
+        float force = 0.f;
+        if(v.burstLeft>0){
+            float ph = 1.f - (float)v.burstLeft/(float)v.burstLen; // 0..<1
+            force = kStrikeTrim*(2.f/(float)v.burstLen)*(0.5f-0.5f*std::cos((float)(2.0*M_PI)*ph));
+            --v.burstLeft;
+        }
         int vIdx=0; for(int k=0;k<kVoiceCount;++k) if(&voices_[k]==&v) vIdx=k;
         float voicePan = ((float)vIdx / (kVoiceCount-1) - 0.5f) * widthCur_ * 0.6f;
         for (int i=0;i<v.n;++i) {
@@ -486,14 +663,29 @@ void MultiScaleBodyEngine::processSampleStereo(float &outL, float &outR) {
             float a1 = 2.f * R * c;
             float a2 = -R * R;
             float exc;
+            // Mallet-contact pulse: injected through the per-mode impulsive
+            // summit normalizer (audit #7 fix, DELIBERATE paper-alignment).
+            // A raw pulse into a high-Q resonator builds a summit
+            // proportional to the modal impulse-response peak, coupling
+            // loudness to the Decay knob / preset decay table — the same bug
+            // class cured on the exciter path. Round A3: the RT path uses
+            // v.strikeEff[i], the pulse-shape-compensated normalizer that
+            // startStrikeBurst() MEASURED from this very burst, so the
+            // pinned-summit guarantee holds for the real raised-cosine
+            // drive (v.strikeNorm[i] remains the analytic Dirac base value
+            // strikeEff is seeded from). kStrikeTrim stages it once for
+            // every Decay position. (excNorm=(1-R) is the SUSTAINED-drive
+            // normalizer and would overshoot here by ~26 dB.)
+            const float strikeExc = force * v.gain[i] * v.strikeEff[i];
             if(exMixCur_>1e-4f){
                 // audio exciter: input drives modes through their gain weights,
                 // normalized by (1-R_i) so sustained-input loudness does not
                 // scale with resonator Q (Decay knob / preset decay table).
-                exc = excite * v.gain[i] * v.excNorm[i] * 40.f;
-                if(impulse) exc += v.gain[i]; // keep click transient on noteOn
+                // exDrive layers the transient tracking boost on top.
+                exc = excite * v.gain[i] * v.excNorm[i] * 40.f * exDrive;
+                exc += strikeExc; // mallet-contact pulse rides the same modes
             } else {
-                exc = impulse ? v.gain[i] : 0.f;
+                exc = strikeExc;
             }
             float y = a1 * v.s1[i] + a2 * v.s2[i] + exc;
             v.s2[i] = v.s1[i];
@@ -507,7 +699,25 @@ void MultiScaleBodyEngine::processSampleStereo(float &outL, float &outR) {
             voiceL += y * gl * rad * env;
             voiceR += y * gr * rad * env;
         }
-        if (impulse) v.silenceCount = 0;
+        // Contact-transient layer: xorshift32 white noise -> one-pole LP
+        // (bandwidth set by strike position at arm time) -> linear fade,
+        // added to the voice sum co-incident with the force pulse. Gated by
+        // the same env as the modes so release/steal also mutes it. Bounded
+        // by construction (|tr| <= transAmp = kContactTrim*mean|gain|);
+        // telemetry peak feeds contactTransientPeak() for tests.
+        if(v.transLeft>0){
+            uint32_t s=v.rngState; s^=s<<13; s^=s>>17; s^=s<<5; v.rngState=s;
+            const float nz=(float)s*(1.f/2147483648.f)-1.f; // [-1,1)
+            v.transLP+=v.transCoef*(nz-v.transLP);
+            const float fade=(float)v.transLeft/(float)v.transLen;
+            const float tr=v.transAmp*v.transLP*fade;
+            const float atr=std::fabs(tr);
+            if(atr>transPeak_) transPeak_=atr;
+            const float angV=(voicePan+1.f)*0.25f*(float)M_PI;
+            voiceL+=tr*std::cos(angV)*env;
+            voiceR+=tr*std::sin(angV)*env;
+            --v.transLeft;
+        }
         outL += voiceL;
         outR += voiceR;
         float e = (voiceL*voiceL+voiceR*voiceR)*0.5f;
@@ -527,6 +737,7 @@ void MultiScaleBodyEngine::processSampleStereo(float &outL, float &outR) {
     outR = lpR_.process(outR);
 
     // === convolution reverb send (cheap block-free overlap via running tail) ===
+    // Deliberate extension beyond paper 47: the body's own modal response doubles as the space IR - see README, Reverb as self-IR convolution.
     if(wetCur_>1e-4f){
         if(irDirty_){ beginIrBake(); irDirty_=false; irBaking_=true; irBakeGate_=0; }
         // budgeted: <=16 modes per ~256-sample window, never per sample — a full
