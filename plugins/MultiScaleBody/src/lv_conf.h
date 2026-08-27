@@ -43,6 +43,7 @@
 #define LV_FONT_MONTSERRAT_16 1
 #define LV_FONT_MONTSERRAT_20 1
 #define LV_FONT_MONTSERRAT_24 1
+#define LV_FONT_MONTSERRAT_26 1
 #define LV_FONT_DEFAULT &lv_font_montserrat_14
 #define LV_TXT_ENC LV_TXT_ENC_UTF8
 #define LV_TXT_BREAK_CHARS " ,.;:-_)]}"

@@ -47,8 +47,7 @@ public:
 #define PLATE_EMPTY       lv_color_hex(0x0A0E14)  // unoccupied preview cells
 #define PLATE_TITLE       lv_color_hex(0xF2EDE4)  // title white
 #define PLATE_TEXT        lv_color_hex(0xC9C1B2)  // primary spec text
-#define PLATE_TEXT_MID    lv_color_hex(0x8A8272)  // secondary text
-#define PLATE_TEXT_DIM    lv_color_hex(0x655F51)  // tertiary/label text
+#define PLATE_AMBER_DIM   lv_color_hex(0xC9A05A)  // desaturated amber for value labels (one-accent discipline: only the arc + mallet stay full-amber)
 #define PLATE_AMBER       lv_color_hex(0xFFCE6B)  // bright amber readout
 #define PLATE_AMBER_PALE  lv_color_hex(0xFFF0C8)  // mallet marker rim
 #define PLATE_LABEL_ACCENT lv_color_hex(0xB49A64) // active group label (BODY)
@@ -77,22 +76,36 @@ public:
 // Single source of truth for the deterministic grid. Every container in PluginUI.cpp
 // derives its size from these numbers via scaled(); painters read the same constants
 // the builders do, so nothing can assume a stale container size (the old body-preview
-// clip bug: 52px box painted with 72px-era math). Vertical budget, base scale:
-//   2*PAD + HEADER_H + ROW_GAP + STAGE_H + ROW_GAP + KB_STRIP_H = 16+64+10+616+10+128 = 860  (exact)
+// clip bug: 52px box painted with 72px-era math).
+//
+// Round-2 (piece 1) rebalance — the round-1 critic read "wall of knobs first, disc
+// second" and "duplicated M1-M8 strip competes with the 4 dial groups". Rescues the
+// disc as the visual hero (smaller + denser markings + last-strike marker) and
+// demotes the 8-knob macro rack to a thin 8-dot LED status row at the bottom of
+// the nav strip (12px instead of 72px). 60px of vertical room flows into the stage.
+//
+// Vertical budget, base scale:
+//   2*PAD + HEADER_H + NAV_H(28) + MACRO_LED_H(12) + 4*ROW_GAP + STAGE_H + KB_STRIP_H
+//   = 16 + 72 + 28 + 12 + 24 + 568 + 128 + 16 = 864  (base_h 860 -> 4px slack)
 // Horizontal budget (stage inner = 1440-2*16 = 1408):
-//   LEFT_W + CENTER_W + RIGHT(grow) + 2*GUTTER = 392 + 430 + 566 + 20 = 1408                 (exact)
+//   LEFT_W + CENTER_W + RIGHT(grow) + 2*GUTTER = 392 + 480 + 516 + 20 = 1408  (exact)
 namespace lay {
     constexpr int BASE_W = 1440, BASE_H = 860;
     constexpr int PAD = 16;                      // chassis inset on all sides
-    constexpr int ROW_GAP = 10;                  // vertical gap between header/stage/keyboard
-    constexpr int HEADER_H = 64;                 // title strip
+    constexpr int ROW_GAP = 6;                   // vertical gap between regions
+    constexpr int HEADER_H = 72;                 // identity bar: brand | preset | master | menu | zoom
+    // NAV (h = 28): section chips + paper identity; the macro-LED row lives in
+    // the same nav-strip flex column underneath (12px) so it reads as a status
+    // annotation, not a control region competing for primary attention.
+    constexpr int NAV_H = 28;
+    constexpr int MACRO_LED_H = 12;              // 8 thin status dots: lit when param != default
     constexpr int KB_STRIP_H = 128;              // 8 pad + 22 head + 6 gap + 80 keys + 8 pad (+4 slack)
-    constexpr int STAGE_H = BASE_H - 2 * PAD - HEADER_H - KB_STRIP_H - 2 * ROW_GAP;  // = 616
+    constexpr int STAGE_H = BASE_H - 2 * PAD - HEADER_H - NAV_H - MACRO_LED_H - KB_STRIP_H - 4 * ROW_GAP;  // = 568
     constexpr int GUTTER = 10;                   // horizontal gap between stage columns
 
     constexpr int LEFT_W = 392;                  // dial bank: 4 knobs x 92 + 3 x 8 gutters
-    constexpr int CENTER_W = 430;                // hero plate
-    // right analysis column absorbs what remains: 1408 - 392 - 430 - 20 = 566
+    constexpr int CENTER_W = 480;                // hero plate (widened 430 -> 480; 280 disc + body info breathe)
+    // right analysis column: 1408 - 392 - 480 - 20 = 516 (was 566)
 
     // machined knobs (containers; arc/cap/needle internals live in UIWidgets law)
     constexpr int KNOB_W_N = 92, KNOB_H_N = 116, KNOB_ARC_N = 76;   // primary group (BODY)
@@ -101,24 +114,29 @@ namespace lay {
     constexpr int SEC_LABEL_H = 16;              // group caption row
     constexpr int SEC_GAP = 6;                   // caption -> knob grid
     constexpr int COORD_H = 20;                  // strike coordinate readout
-    // hero strike plate
+    // hero strike plate - round-2 shrink: 280px (was 406) so it stops dominating
+    // the stage as a dark empty area; the freed width flows to the spectrum panel
+    // and the freed height inside the center column lets body-info + spec-strip
+    // spread out beside the disc instead of below it.
     constexpr int CARD_PAD = 12;
     constexpr int HEAD_H = 22;                   // card caption rows
-    constexpr int DISC_D = CENTER_W - 2 * CARD_PAD;                                  // 406, width-exact
-    constexpr int SPEC_STRIP_H = 34;             // body spec cells (BODY/MATERIAL/MODES/F0)
+    constexpr int DISC_D = 280;                  // round-2: shrunk from 406
+    constexpr int SPEC_STRIP_H = 32;             // body spec cells (BODY/MATERIAL/MODES/F0)
 
-    // body preset preview — builder and painter share these (clip-bug killer):
+    // body preset preview - builder and painter share these (clip-bug killer):
     //   inner = BOX - 2*PAD = 48; cell = (inner - 3*GAP)/4 = 10; grid = 4*10+3*2 = 46 <= 48
-    constexpr int PREVIEW_BOX = 56, PREVIEW_PAD = 4, PREVIEW_GAP = 2;
-    constexpr int PRESET_ROW_H = 56;             // preview box + dropdown/info column
+    constexpr int PREVIEW_BOX = 52, PREVIEW_PAD = 4, PREVIEW_GAP = 2;
+    constexpr int PRESET_ROW_H = 52;             // preview box + dropdown/info column
 
-    // analysis tower (right column, fills STAGE_H exactly)
-    constexpr int SPECTRUM_CARD_H = 370;         // 2*12 pad + 22 head + 8 + 294 chart + 8 + 14 band ticks
-    constexpr int CHART_H = 294;
-    constexpr int TICKS_H = 14;                  // B1..B16 micro-label strip under the spectrum
-    constexpr int SCOPE_CARD_H = 236;            // 2*12 pad + 22 head + 8 + 14 meter + 8 + 160 scope
-    constexpr int METER_H = 14;
-    constexpr int SCOPE_H = 160;
+    // analysis tower (right column, fills STAGE_H exactly).
+    // 568 - 8 (top inter-card) = 560; spectrum 360 + scope 196 (widened ~30px so
+    // the chart reads as an analyzer, not a bar chart)
+    constexpr int SPECTRUM_CARD_H = 360;         // 2*10 + 22 head + 8 + 280 chart + 8 + 12 band ticks
+    constexpr int CHART_H = 280;
+    constexpr int TICKS_H = 12;                  // B1..B16 micro-label strip under the spectrum
+    constexpr int SCOPE_CARD_H = 196;            // 2*10 + 22 head + 8 + 14 meter + 8 + 134 scope
+    constexpr int METER_H = 12;
+    constexpr int SCOPE_H = 134;
 
     // shared control chrome
     constexpr int RADIUS = 6, RADIUS_SM = 4;
@@ -135,10 +153,24 @@ namespace lay {
     constexpr int DROPDOWN_ROW_H = 15, DROPDOWN_MAX_ROWS = 8;
     // unified drop-shadow direction (one global light, top-left => shadow falls down)
     constexpr int CARD_SHADOW = 10, SHADOW_OFF_Y = 3;
-    // spectrum peak-hold caps drawn over the bars
-    constexpr int PEAK_CAP_W = 12, PEAK_CAP_H = 2;
-    // piano keys: 7 white x 56 + 6 x 2 gap = 404 wide
+    // spectrum peak-hold caps drawn over the bars (piece-3: thinner/taller tick)
+    constexpr int PEAK_CAP_W = 1, PEAK_CAP_H = 6;
     constexpr int KEY_W = 56, KEY_H = 80, KEY_BLACK_W = 28, KEY_BLACK_H = 48, KEY_GAP = 2;
+    // === ROUND-2: macro strip demoted to LED row ===========================
+    // 8 small status dots in a single thin row; each lights amber when its
+    // kMacroParams[m] is non-default. inner = 1408 - 7*8 = 1352; cell = 169.
+    constexpr int MACRO_LED_GAP = 8;
+    constexpr int MACRO_LED_CELL_W = (BASE_W - 2*PAD - 7*MACRO_LED_GAP) / 8;  // 169 @s=1
+    constexpr int MACRO_LED_DOT = 4;             // dot diameter (subtle, not a knob)
+    // === ROUND-2: disc guide rings =========================================
+    // two concentric amber hairlines (center/rim zones) and a small filled
+    // last-strike marker that persists for ~0.5s after each hit
+    constexpr int DISC_RING_SOFT = 50;           // inner-zone ring radius (relative 0..100, % of DISC_D)
+    constexpr int DISC_RING_HARD = 84;           // outer-zone ring radius
+    constexpr int DISC_STRIKE_MARKER = 6;        // last-strike marker dot diameter
+    constexpr int DISC_STRIKE_HOLD_MS = 500;     // last-strike marker lifetime
+    // top-bar identity cluster: brand mark | preset dropdown | master knob | zoom
+    constexpr int NAV_CHIP_W = 86, NAV_CHIP_GAP = 6;
 }
 
  extern float gUIScale;
@@ -160,5 +192,7 @@ inline const lv_font_t* getScaledMicroFont() {
 inline const lv_font_t* getDisplayFont() {
     return &lv_font_montserrat_24;  // display role: title only, largest baked size
 }
-END_NAMESPACE_DISTRHO
+// piece-4: title bumped +2px (24 -> 26). Letter-space stays +2 for the
+// wide-set headline feel that makes the brand read as a primary identity.
+inline const lv_font_t* getDisplayFont26() { return &lv_font_montserrat_26; }
 #endif

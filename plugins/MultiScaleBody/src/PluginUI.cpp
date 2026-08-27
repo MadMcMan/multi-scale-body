@@ -62,6 +62,9 @@ static void pulseGlowCb(void* var,int32_t v){ lv_obj_t* r=(lv_obj_t*)var; if(r) 
 // ============================================================================
 class MultiScaleBodyUI : public UI, public AbstractMultiScaleBodyUI {
 public:
+    // auditioning a body - the BODY group's four + four secondaries that change
+    // the perceived voice most. Shared between buildUI() and parameterChanged().
+    static const uint32_t kMacroParams[8];
     MultiScaleBodyUI(): UI(DISTRHO_UI_DEFAULT_WIDTH, DISTRHO_UI_DEFAULT_HEIGHT),
         fLVGL(nullptr){
         // widget maps + param cache MUST be initialized before buildUI():
@@ -117,22 +120,36 @@ public:
         if(i==PluginMultiScaleBody::kParamPreset){ syncPresetDropdown(v); if(bodySubLabel) updateBodyInfo(); updateBodyPreview(); }
     }
     void editParameter(uint32_t i,bool s) override { if(i<PluginMultiScaleBody::kParameterCount) UI::editParameter(i,s); }
+    // duplicate parameter widgets - macros + master arc replicate the same
+    // param as a knob in the dial bank; the host->UI sync must update every
+    // visible instance, not just the last-created one in widgets[]
+    static constexpr uint32_t kMaxExtraWidgets=8;   // 8 macros (master shares the dial-bank Wet)
+    struct ExtraRef{ uint32_t pi; lv_obj_t* arc; };
+    ExtraRef extraWidgets[kMaxExtraWidgets];
+    int extraWidgetCount=0;
     void syncParamWidget(uint32_t i,float v) override {
         if(i>=PluginMultiScaleBody::kParameterCount) return;
         if(widgets[i]) UIWidgets::syncFromParam(widgets[i],v);
-
+        for(int e=0;e<extraWidgetCount;++e) if(extraWidgets[e].pi==i && extraWidgets[e].arc)
+            UIWidgets::syncFromParam(extraWidgets[e].arc,v);
+    }
+    void regExtraWidget(uint32_t pi, lv_obj_t* arc){
+        if(extraWidgetCount>=kMaxExtraWidgets) return;
+        extraWidgets[extraWidgetCount++]={pi,arc};
     }
     void parameterChanged(uint32_t i,float v) override {
         // metering outputs arrive here every audio block - the bridge-safe DSP->UI link
-        if(i==PluginMultiScaleBody::kParamOutLevel){ fVizLevel=v; return; }
         if(i>=PluginMultiScaleBody::kParamOutBand0 && i<PluginMultiScaleBody::kParameterCount){
             fVizBins[i-PluginMultiScaleBody::kParamOutBand0]=v;
             fGotLiveViz=true;
             return;
         }
         if(i<PluginMultiScaleBody::kParameterCount){ paramCache[i]=v; syncParamWidget(i,v);
+            // round-2: LED row mirrors the dial-bank knob for the same param
+            for(int m=0;m<8;++m) if(i==kMacroParams[m]) updateMacroLed(m);
             if(i==PluginMultiScaleBody::kParamStrikeX || i==PluginMultiScaleBody::kParamStrikeY) updateStrikeMarker();
-            if(i==PluginMultiScaleBody::kParamPreset){ syncPresetDropdown(v); if(bodySubLabel) updateBodyInfo(); updateBodyPreview(); } }
+            if(i==PluginMultiScaleBody::kParamPreset){ syncPresetDropdown(v); if(bodySubLabel) updateBodyInfo(); updateBodyPreview(); }
+        }
     }
     void stateChanged(const char* key,const char* value) override {
         if(key && std::strcmp(key,"arpon")==0){
@@ -198,15 +215,20 @@ private:
     // single owner of every lv_obj_t* member default; ctor and rebuildForScale share it
     void clearWidgetRefs(){
         for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount;++i){ widgets[i]=nullptr; paramCache[i]=0.5f; }
+        extraWidgetCount=0; for(uint32_t i=0;i<kMaxExtraWidgets;++i) extraWidgets[i]={0,nullptr};
         strikeDisc=strikeDot=strikeCoordLabel=presetDropdown=bodySubLabel=nullptr;
-        bodyPreview=lfoDot=nullptr;
+        // piece-6: preset browser prev/next arrows
+        presetPrevBtn=presetNextBtn=nullptr;
+        bodyPreview=lfoDot=strikeLastMark=nullptr;
         hdrBodyVal=hdrMatVal=hdrModeVal=hdrF0Val=nullptr;
         fSpectrumChart=fScopeChart=fLevelBar=fLevelPeak=zoneWarnMark=zoneHotMark=nullptr;
         fScopeSeries=nullptr; arpBtn=nullptr;
         kbContainer=kbOctLabel=zoomMinus=zoomPlus=zoomValLbl=nullptr;
         for(int i=0;i<7;++i) kbWhite[i]=nullptr;
         for(int i=0;i<5;++i) kbBlack[i]=nullptr;
+        for(int i=0;i<8;++i) macroLedDots[i]=nullptr;
     }
+
     // ---- shared builder/painter geometry -----------------------------------
     // Body-preview grid math lives HERE ONLY. The builder sizes the box from
     // lay::PREVIEW_*, this function derives cell/gap/inset from the SAME
@@ -292,11 +314,16 @@ private:
                 lv_obj_clear_flag(cellObj,LV_OBJ_FLAG_CLICKABLE);
                 if(occ<0.02f){ lv_obj_set_style_bg_color(cellObj,PLATE_EMPTY,0); lv_obj_set_style_bg_opa(cellObj,LV_OPA_60,0); }
                 else {
-                    lv_color_t base = COL_HIGHLIGHT;
+                    // piece-5: body preview grid - one-accent discipline. The
+                    // material swatch color already exists per material (Wood,
+                    // Glass, Steel, etc). For the Bell/Gong/Shell fall-through
+                    // we previously defaulted to COL_HIGHLIGHT (full amber);
+                    // demote that to PLATE_TEXT_MID so the only full-amber mark
+                    // on the chassis is the indicator arc + mallet.
+                    lv_color_t base = PLATE_TEXT_MID;
                     if(name=="WoodBlock"||name=="Squirrel") base = MAT_WOOD;
                     else if(name=="Glass") base = MAT_GLASS;
                     else if(name=="Membrane") base = MAT_MEMBRANE;
-                    else if(name=="Bell"||name=="Gong"||name=="Shell") base = COL_HIGHLIGHT;
                     else if(name=="Plate"||name=="Bar"||name=="Chime") base = MAT_STEEL;
                     else if(name=="Handpan") base = MAT_HANDPAN;
                     else if(name=="LogDrum") base = MAT_LOGDRUM;
@@ -318,6 +345,43 @@ private:
         int mx = modal::kNumPresets - 1;
         int idx = (int)std::round(v*(float)mx); idx=std::clamp(idx,0,mx);
         lv_dropdown_set_selected(presetDropdown, idx);
+    }
+    // ---- round-2 helpers (LED row + disc info) ----------------------------
+    // An LED is "lit" when its macro param is non-default (anything but 0.5
+    // for normalized; except Wet=0 / Mono=0 which are themselves the default).
+    // We compare against a small epsilon to absorb host round-trip quantization.
+    void updateMacroLed(int m){
+        if(m<0||m>=8||!macroLedDots[m]) return;
+        const float v=paramCache[kMacroParams[m]];
+        // 0.0 is the true default for: Wet (0%), Mono (off).
+        // For everything else 0.5 is the true default (per PluginUI ctor).
+        const float defv=(kMacroParams[m]==PluginMultiScaleBody::kParamWet
+                       ||kMacroParams[m]==PluginMultiScaleBody::kParamMono) ? 0.f : 0.5f;
+        const bool lit=std::fabs(v-defv)>0.01f;
+        lv_obj_set_style_bg_color(macroLedDots[m], lit?COL_HIGHLIGHT:PLATE_MARK, 0);
+    }
+    // last-strike marker: a small filled amber dot at the click position that
+    // persists for ~0.5s after the hit and then fades. Visual feedback the
+    // disc actually registered the strike (the dynamic mallet marker
+    // also pops on hit, but the persistent mark is the "audit trail").
+    void placeLastStrike(int px,int py){
+        if(!strikeDisc) return;
+        if(!strikeLastMark){
+            strikeLastMark=makeBox(strikeDisc,scaled(lay::DISC_STRIKE_MARKER),scaled(lay::DISC_STRIKE_MARKER));
+            lv_obj_set_style_radius(strikeLastMark,LV_RADIUS_CIRCLE,0);
+            lv_obj_set_style_bg_color(strikeLastMark,COL_HIGHLIGHT,0);
+            lv_obj_set_style_bg_opa(strikeLastMark,LV_OPA_COVER,0);
+            lv_obj_set_style_border_color(strikeLastMark,PLATE_AMBER_PALE,0);
+            lv_obj_set_style_border_width(strikeLastMark,1,0);
+            lv_obj_set_style_shadow_width(strikeLastMark,scaled(8),0);
+            lv_obj_set_style_shadow_color(strikeLastMark,COL_HIGHLIGHT,0);
+            lv_obj_set_style_shadow_opa(strikeLastMark,LV_OPA_60,0);
+            lv_obj_clear_flag(strikeLastMark,LV_OBJ_FLAG_CLICKABLE);
+        }
+        const int m=(int)lv_obj_get_width(strikeLastMark);
+        lv_obj_set_pos(strikeLastMark, px-m/2, py-m/2);
+        lv_obj_set_style_bg_opa(strikeLastMark,LV_OPA_COVER,0);
+        fLastStrikeAgeMs=0;
     }
     void updateStrikeMarker(){
         if(!strikeDisc || !strikeDot) return;
@@ -402,7 +466,7 @@ private:
     }
     // contextual value formatting (design guidelines: units where they exist).
     // Mirrors the engine's own denormalization so readouts match the audio:
-    //   Glide v*600 ms - LFO 0.05*240^v Hz - Modes 8+v*120 - Reverb % - Tune +-12 ST
+    //   Glide v*600 ms - LFO 0.05*240^v Hz - Modes 8+v*120 - Reverb % - Tune +-24 ST
     void formatParamValue(int pi,float v,char* buf,size_t cap) const {
         using P=PluginMultiScaleBody;
         switch(pi){
@@ -414,7 +478,7 @@ private:
                 else         snprintf(buf,cap,"%.2f HZ",hz);
                 break; }
             case P::kParamModeCount: snprintf(buf,cap,"%d",8+(int)(v*120.f)); break;
-            case P::kParamPitch:     snprintf(buf,cap,"%+.1f ST",(v-0.5f)*24.f); break;
+            case P::kParamPitch:     snprintf(buf,cap,"%+.1f ST",(v-0.5f)*48.f); break;
             default:                 snprintf(buf,cap,"%.2f",v); break;
         }
     }
@@ -483,6 +547,26 @@ private:
         float v = mx ? (float)sel/(float)mx : 0.f;
         if(ui){ ui->editParameter(PluginMultiScaleBody::kParamPreset,true); ui->setParamValue(PluginMultiScaleBody::kParamPreset, v); ui->editParameter(PluginMultiScaleBody::kParamPreset,false); }
     }
+    // piece-6: preset browser prev/next arrow click. Cycles the selected
+    // preset by +/-1 (with wrap) and writes through setParamValue so the
+    // existing dropdown sync + body info + body preview paths all fire.
+    static void presetArrowCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        if(!ui||!ui->presetDropdown) return;
+        int dir=(int)(intptr_t)lv_obj_get_user_data(lv_event_get_target(e));
+        if(dir==0) return;
+        int mx = modal::kNumPresets - 1;
+        int cur=lv_dropdown_get_selected(ui->presetDropdown);
+        int nxt=std::clamp(cur+dir, 0, mx);
+        if(nxt==cur && ((dir<0 && cur==0) || (dir>0 && cur==mx))){
+            // wrap at the end
+            nxt = (dir<0) ? mx : 0;
+        }
+        float v = mx ? (float)nxt/(float)mx : 0.f;
+        ui->editParameter(PluginMultiScaleBody::kParamPreset,true);
+        ui->setParamValue(PluginMultiScaleBody::kParamPreset, v);
+        ui->editParameter(PluginMultiScaleBody::kParamPreset,false);
+    }
     static void padPressCb(lv_event_t* e){
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
         if(!ui||!ui->strikeDisc) return;
@@ -499,6 +583,9 @@ private:
                 ui->editParameter(PluginMultiScaleBody::kParamStrikeX,true);
                 ui->editParameter(PluginMultiScaleBody::kParamStrikeY,true);
                 ui->spawnMalletPulse();   // visual hit confirmation
+                // round-2 audit trail: a small amber dot persists at the
+                // strike point for ~0.5s, fading out via the spectrum timer
+                ui->placeLastStrike(p.x - coords.x1, p.y - coords.y1);
                 // physical hit: strike position first, then trigger the body
                 ui->sendNote(0,(uint8_t)ui->fStrikeNote,100);
                 ui->fStrikeHeld=true;
@@ -713,7 +800,9 @@ private:
     // engineering spec cell: caption over value (documentation, not marketing)
     lv_obj_t* addSpecCell(lv_obj_t* parent,const char* lab,lv_obj_t** valOut,lv_color_t valCol,int wBase){
         lv_obj_t* cell=makeCol(parent,scaled(wBase),lv_pct(100),scaled(2),LV_FLEX_ALIGN_CENTER);
-        addLabel(cell,lab,getScaledMicroFont(),PLATE_TEXT_DIM,2);
+        // piece-4: spec caption letter-space +2 (was 2 -> 4) so the engineering
+        // cells read as a uniform wide-set strip under the body info.
+        addLabel(cell,lab,getScaledMicroFont(),PLATE_TEXT_DIM,4);
         lv_obj_t* v=addLabel(cell,"-",getScaledFont(),valCol,0);
         *valOut=v;
         return cell;
@@ -733,6 +822,36 @@ private:
         lv_obj_set_style_pad_all(b,0,0);
         lv_obj_t* l=addLabel(b,txt,getScaledMicroFont(),txtCol,1);
         lv_obj_center(l);
+        return b;
+    }
+    // piece-6: preset browser prev/next mini arrow. 1.2em amber chevron in a
+    // flat well button. Returns a clickable btn whose user_data carries +1/-1
+    // (consumed by presetArrowCb). The dir arg is also passed back as user_data
+    // for handler dispatch.
+    lv_obj_t* addPresetArrowBtn(lv_obj_t* parent,int dir){
+        lv_obj_t* b=lv_btn_create(parent);
+        // 24x24 mini button, same height as the dropdown's 22px well
+        const int w=24, h=24;
+        lv_obj_set_size(b,scaled(w),scaled(h));
+        lv_obj_set_style_bg_color(b,PLATE_WELL,0);
+        lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);
+        lv_obj_set_style_border_color(b,PLATE_EDGE,0);
+        lv_obj_set_style_border_width(b,1,0);
+        lv_obj_set_style_radius(b,scaled(lay::RADIUS_SM),0);
+        lv_obj_set_style_shadow_width(b,0,0);
+        // hover/pressed feedback ladder
+        lv_obj_set_style_bg_color(b,PLATE_WELL_HI,LV_STATE_HOVERED);
+        lv_obj_set_style_bg_color(b,PLATE_BTN_PRESS,LV_STATE_PRESSED);
+        lv_obj_set_style_translate_y(b,1,LV_STATE_PRESSED);
+        lv_obj_set_style_pad_all(b,0,0);
+        // 1.2em amber chevron - U+2039 / U+203A SINGLE LEFT/RIGHT-POINTING
+        // ANGLE QUOTATION MARK. Dim-amber to keep the one-accent discipline
+        // (only the indicator arc + mallet use full amber).
+        const char* sym=(dir<0)?"\u2039":"\u203A";
+        lv_obj_t* l=addLabel(b,sym,getScaledSmallFont(),PLATE_AMBER_DIM,0);
+        lv_obj_set_style_text_letter_space(l,0,0);
+        lv_obj_center(l);
+        lv_obj_set_user_data(b,(void*)(intptr_t)dir);
         return b;
     }
 
@@ -803,6 +922,17 @@ private:
     }
 
     // ==== BUILD =============================================================
+    // Layout hierarchy (matches Serum 2 main-view grammar, paper-faithful):
+    //   ROOT  (PLATE_BG)
+    //   +-- TOP-BAR  (identity: brand mark | preset browser | master knob | zoom)
+    //   +-- NAV-STRIP  (section chips + paper identity, single horizontal rule)
+    //   +-- MACRO-RACK  (8 quick-access slots: the dial bank's most-touched params)
+    //   +-- STAGE
+    //   |   +-- LEFT  (4 dial groups: BODY/RESONATE/EXCITER/SPACE)
+    //   |   +-- CENTER  (hero strike disc + preset row + spec strip)
+    //   |   +-- RIGHT  (spectrum card + scope card)
+    //   +-- KEYBOARD  (octave + keys + ARP)
+    // vertical budget @s=1: 16+72+6+28+6+72+6+504+6+128+16 = 860 (exact).
     void buildUI(){
         lv_obj_t* root=lv_screen_active();
         if(!root){ lv_display_t* d=lv_display_get_default(); if(d) root=lv_display_get_screen_active(d); }
@@ -810,8 +940,7 @@ private:
         fUIBuilt=true; fMarkerPlaced=false;
 
         // --- ROOT COLUMN -----------------------------------------------------
-        // vertical budget @s: 2*sPAD + 64 + 10 + STAGE 616 + 10 + KB 128 = 860 (exact).
-        // SPACE_BETWEEN absorbs sub-threshold resize drift into the two row gaps
+        // SPACE_BETWEEN absorbs sub-threshold resize drift into the row gaps
         // instead of clipping the keyboard bottom before the rescale rebuild fires.
         lv_obj_set_style_bg_color(root,PLATE_BG,0); lv_obj_set_style_bg_opa(root,LV_OPA_COVER,0);
         lv_obj_set_layout(root,LV_LAYOUT_FLEX); lv_obj_set_flex_flow(root,LV_FLEX_FLOW_COLUMN);
@@ -819,22 +948,98 @@ private:
         lv_obj_set_style_pad_all(root,scaled(lay::PAD),0);
         lv_obj_set_scrollbar_mode(root,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(root,LV_OBJ_FLAG_SCROLLABLE);
 
-        // --- HEADER (h = 64): title block | divider | zoom stepper -----------
-        lv_obj_t* header=makeRow(root,lv_pct(100),scaled(lay::HEADER_H),scaled(12),LV_FLEX_ALIGN_START);
-        lv_obj_set_style_bg_color(header,PLATE_PANEL,0); lv_obj_set_style_bg_opa(header,LV_OPA_COVER,0);
-        lv_obj_set_style_border_color(header,PLATE_LINE,0); lv_obj_set_style_border_width(header,1,0);
-        lv_obj_set_style_radius(header,scaled(lay::RADIUS),0);
-        lv_obj_set_style_pad_hor(header,scaled(14),0); lv_obj_set_style_pad_ver(header,scaled(8),0);
-        lv_obj_t* hLeft=makeCol(header,0,lv_pct(100),scaled(3));       // explicit-height parent: grow legal
-        lv_obj_set_flex_grow(hLeft,1);
-        lv_obj_set_flex_align(hLeft,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
-        // display role: product name only; the paper identity demotes to meta
-        addLabel(hLeft,"STRIKE PLATE",gUIScale>=1.2f?getDisplayFont():getScaledFont(),PLATE_TITLE,4);
-        addLabel(hLeft,"MULTI-SCALE MODAL SYNTHESIS   -   PICARD - FAURE - KRY - DRETTAKIS   -   DAFx-09 PAPER 47",
-                 getScaledMicroFont(),PLATE_TEXT_DIM,1);
-        const int clusterW=lay::ZOOM_BTN*2+lay::ZOOM_LBL_W+12;   // btn+gap+label+gap+btn (base px)
-        addDivider(header,scaled(lay::ZOOM_LBL_H));
-        lv_obj_t* zoomRow=makeRow(header,scaled(clusterW),scaled(lay::ZOOM_LBL_H),scaled(4),LV_FLEX_ALIGN_CENTER);
+        // --- TOP-BAR (h = 72): brand | preset browser | master | zoom --------
+        // Same role Serum 2 fills with SERUM 2 / preset / MASTER / MENU.
+        // Horizontal split:  brand(220) | preset(0,grow) | master(140) | zoom(116).
+        lv_obj_t* topbar=makeRow(root,lv_pct(100),scaled(lay::HEADER_H),scaled(10),LV_FLEX_ALIGN_START);
+        lv_obj_set_style_bg_color(topbar,PLATE_PANEL,0); lv_obj_set_style_bg_opa(topbar,LV_OPA_COVER,0);
+        lv_obj_set_style_border_color(topbar,PLATE_LINE,0); lv_obj_set_style_border_width(topbar,1,0);
+        lv_obj_set_style_radius(topbar,scaled(lay::RADIUS),0);
+        lv_obj_set_style_pad_hor(topbar,scaled(16),0); lv_obj_set_style_pad_ver(topbar,scaled(10),0);
+        // brand mark - bold, monospaced-feel, two-line: product | class
+        // piece-4: title bumped +2px (24 -> 26) via the new getDisplayFont26().
+        // Letter-space +2 (was 4) keeps the headline tight; the authors line
+        // drops to 50% opacity + 1px smaller so it recedes and lets the title own the bar.
+        lv_obj_t* titleLbl=addLabel(brandCol,"MULTI-SCALE BODY",gUIScale>=1.2f?getDisplayFont26():getDisplayFont(),PLATE_TITLE,2);
+        lv_obj_set_style_text_letter_space(titleLbl,4,0);
+        lv_obj_t* authorsLbl=addLabel(brandCol,"MODAL SYNTH   -   DAFX-09 / 47",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        lv_obj_set_style_text_opa(authorsLbl,LV_OPA_50,0);
+        lv_obj_set_style_text_letter_space(authorsLbl,1,0);
+        // preset browser - move from the center to the top bar so the hero gets air
+        lv_obj_t* presetBar=makeCol(topbar,0,lv_pct(100),scaled(3));
+        lv_obj_set_flex_grow(presetBar,1);
+        lv_obj_set_style_pad_hor(presetBar,scaled(10),0);
+        lv_obj_set_flex_align(presetBar,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
+        addLabel(presetBar,"PRESET   -   BAKED MODAL PRESETS",getScaledMicroFont(),PLATE_TEXT_DIM,2);
+        // piece-6: preset browser now has prev/next mini arrows around the
+        // dropdown. The dropdown itself carries a small caret (LV_PART_INDICATOR)
+        // styled as a chevron. Layout: [<] [dropdown  -  caret  -  NAME] [>].
+        // Wrap the dropdown in a row so the arrows flank it on both sides at
+        // the same height. The arrows are simple text buttons using Unicode
+        // chevrons (U+2039 / U+203A) in the amber dim palette.
+        lv_obj_t* ddRow=makeRow(presetBar,lv_pct(100),0,scaled(6),LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_flex_grow(ddRow,1);
+        // prev arrow
+        presetPrevBtn=addPresetArrowBtn(ddRow,-1);
+        // dropdown moved to the top bar (was the center card's preset row)
+        presetDropdown=lv_dropdown_create(ddRow);
+        {
+            std::string opts; for(int i=0;i<modal::kNumPresets;++i){ if(i) opts+="\n"; opts+=modal::kPresets[i].name; }
+            lv_dropdown_set_options(presetDropdown,opts.c_str());
+        }
+        int mxp=modal::kNumPresets-1;
+        int selp=(int)std::round(paramCache[PluginMultiScaleBody::kParamPreset]*(float)mxp);
+        lv_dropdown_set_selected(presetDropdown,std::clamp(selp,0,mxp));
+        lv_obj_set_flex_grow(presetDropdown,1);
+        lv_obj_add_style(presetDropdown,&styles.compactSelectMain,0);
+        lv_obj_set_style_bg_color(presetDropdown,PLATE_WELL,0);
+        lv_obj_set_style_border_color(presetDropdown,PLATE_EDGE,0);
+        lv_obj_set_style_radius(presetDropdown,scaled(lay::RADIUS_SM),0);
+        // piece-6: dropdown caret - style the indicator (the built-in arrow on
+        // the right edge) as a 1.2em amber chevron. The default is a generic
+        // downward triangle; we replace it with the U+25BE BLACK DOWN-POINTING
+        // SMALL TRIANGLE rendered in PLATE_AMBER so the dropdown clearly reads
+        // as a browser selector, not a generic field.
+        {
+            lv_obj_t* list=lv_dropdown_get_list(presetDropdown);
+            if(list){
+                lv_obj_add_style(list,&styles.compactSelectListMain,0);
+                lv_obj_set_style_max_height(list,scaled(lay::DROPDOWN_MAX_ROWS*lay::DROPDOWN_ROW_H),0);
+            }
+        }
+        // next arrow
+        presetNextBtn=addPresetArrowBtn(ddRow,+1);
+        // piece-6: dropdown group/keyboard handling. Dropdown must NOT be in
+        // the group (wheel = encoder; group focus defocuses + closes).
+        lv_group_remove_obj(presetDropdown);
+        lv_obj_add_event_cb(presetDropdown,dropdownCb,LV_EVENT_VALUE_CHANGED,this);
+        // wire the prev/next arrows: click cycles the preset by 1
+        if(presetPrevBtn) lv_obj_add_event_cb(presetPrevBtn,presetArrowCb,LV_EVENT_CLICKED,this);
+        if(presetNextBtn) lv_obj_add_event_cb(presetNextBtn,presetArrowCb,LV_EVENT_CLICKED,this);
+        // master knob - synthesized for piece-1 (paper's modal energy level),
+        // small 56px arc, the "MAIN" knob analogue on the right of the brand
+        lv_obj_t* masterCol=makeCol(topbar,scaled(140),lv_pct(100),scaled(2));
+        lv_obj_set_flex_align(masterCol,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);
+        addLabel(masterCol,"MASTER",getScaledMicroFont(),PLATE_LABEL_ACCENT,3);
+        {
+            ArcVisualSpec mSpec=normalArcSpec();
+            lv_obj_t* masterArc=UIWidgets::createArcKnob(masterCol,PluginMultiScaleBody::kParamWet,this,styles,mSpec);
+            regExtraWidget(PluginMultiScaleBody::kParamWet, masterArc);
+            lv_obj_add_event_cb(masterArc,valueFormatCb,LV_EVENT_ALL,this);
+            {
+                lv_obj_t* cont=lv_obj_get_parent(masterArc);
+                lv_obj_t* lbl=cont?lv_obj_get_child(cont,lv_obj_get_child_count(cont)-1):nullptr;
+                if(lbl&&lv_obj_check_type(lbl,&lv_label_class)){
+                    char b[24];
+                    formatParamValue(PluginMultiScaleBody::kParamWet,paramCache[PluginMultiScaleBody::kParamWet],b,sizeof(b));
+                    lv_label_set_text(lbl,b);
+                }
+            }
+        }
+        // zoom stepper - the rightmost cluster, vertical divider before it
+        addDivider(topbar,scaled(lay::HEADER_H-20));
+        const int clusterW=lay::ZOOM_BTN*2+lay::ZOOM_LBL_W+12;
+        lv_obj_t* zoomRow=makeRow(topbar,scaled(clusterW),scaled(lay::ZOOM_LBL_H),scaled(4),LV_FLEX_ALIGN_CENTER);
         zoomMinus=addButton(zoomRow,lay::ZOOM_BTN,lay::ZOOM_LBL_H,"-",PLATE_TEXT_MID);
         lv_obj_set_user_data(zoomMinus,(void*)(intptr_t)-1);
         lv_obj_add_event_cb(zoomMinus,zoomBtnCb,LV_EVENT_CLICKED,this);
@@ -844,11 +1049,74 @@ private:
         zoomPlus=addButton(zoomRow,lay::ZOOM_BTN,lay::ZOOM_LBL_H,"+",PLATE_TEXT_MID);
         lv_obj_set_user_data(zoomPlus,(void*)(intptr_t)1);
         lv_obj_add_event_cb(zoomPlus,zoomBtnCb,LV_EVENT_CLICKED,this);
-        refreshZoomWidgets();
-
-        // --- STAGE ROW (h = 616): dial bank | hero plate | analysis tower -----
+        // --- NAV-STRIP (h = NAV_H + MACRO_LED_H = 40) -----------------------
+        // Round-2: the section chips + paper identity live in a top flex row,
+        // and an 8-slot LED status row hangs below (replaces the old 72px
+        // MACRO-RACK of duplicate knobs). Net -60px; flows into the stage so
+        // the disc can keep its 280px diameter with breathing room. Each LED
+        // lights AMBER when its kMacroParams[m] is non-default - the param
+        // value still lives in the dial bank and is editable there.
+        // outer = makeCol so chips on top, LEDs on bottom share one panel/border
+        lv_obj_t* nav=makeCol(root,lv_pct(100),scaled(lay::NAV_H+lay::MACRO_LED_H+6),0);
+        lv_obj_set_style_bg_color(nav,PLATE_PANEL,0); lv_obj_set_style_bg_opa(nav,LV_OPA_COVER,0);
+        lv_obj_set_style_border_color(nav,PLATE_LINE,0); lv_obj_set_style_border_width(nav,1,0);
+        lv_obj_set_style_radius(nav,scaled(lay::RADIUS),0);
+        // navTop: chips + paper identity
+        lv_obj_t* navTop=makeRow(nav,lv_pct(100),scaled(lay::NAV_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
+        lv_obj_set_style_pad_hor(navTop,scaled(8),0); lv_obj_set_style_pad_ver(navTop,scaled(3),0);
+        // left chip cluster
+        lv_obj_t* navChips=makeRow(navTop,0,scaled(lay::NAV_H-6),scaled(lay::NAV_CHIP_GAP),LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_flex_grow(navChips,1);
+        static const char* navLabels[5]={"BODY","RESONATE","EXCITER","SPACE","MOD"};
+        for(int n=0;n<5;++n){
+            const bool active=(n==0);   // piece-1: BODY is the visual lead
+            lv_obj_t* chip=makeBox(navChips,scaled(lay::NAV_CHIP_W),scaled(lay::NAV_H-6));
+            lv_obj_set_layout(chip,LV_LAYOUT_FLEX);
+            lv_obj_set_flex_flow(chip,LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(chip,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);
+            if(active){
+                // BODY chip: amber border + slight amber wash so it reads as
+                // the active section (mirrors the brighter BODY group label
+                // in the dial bank - one visual lead, two echo points)
+                lv_obj_set_style_bg_color(chip,COL_HIGHLIGHT,0);
+                lv_obj_set_style_bg_opa(chip,LV_OPA_20,0);
+                lv_obj_set_style_border_color(chip,COL_HIGHLIGHT,0);
+                lv_obj_set_style_border_opa(chip,LV_OPA_80,0);
+            } else {
+                lv_obj_set_style_bg_color(chip,PLATE_WELL,0);
+                lv_obj_set_style_bg_opa(chip,LV_OPA_60,0);
+                lv_obj_set_style_border_color(chip,PLATE_LINE,0);
+            }
+            lv_obj_set_style_border_width(chip,1,0);
+            lv_obj_set_style_radius(chip,scaled(lay::RADIUS_SM),0);
+            lv_obj_clear_flag(chip,LV_OBJ_FLAG_SCROLLABLE);
+            addLabel(chip,navLabels[n],getScaledMicroFont(),active?PLATE_AMBER:PLATE_TEXT_DIM,2);
+        }
+        // right paper identity - width-capped to guarantee no overflow at 1440
+        lv_obj_t* navRight=makeRow(navTop,scaled(180),scaled(lay::NAV_H-6),0,LV_FLEX_ALIGN_END);
+        addLabel(navRight,"DAFX-09  /  PAPER 47",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        // navBottom: 8-slot LED macro strip - thin status row, each dot lit
+        // when its kMacroParams[m] is non-default. Sync from parameterChanged
+        // updates on every value change so the LEDs stay live.
+        lv_obj_t* navLedRow=makeRow(nav,lv_pct(100),scaled(lay::MACRO_LED_H),scaled(lay::MACRO_LED_GAP),LV_FLEX_ALIGN_SPACE_BETWEEN);
+        lv_obj_set_style_pad_hor(navLedRow,scaled(8),0); lv_obj_set_style_pad_ver(navLedRow,0,0);
+        for(int m=0;m<8;++m){
+            lv_obj_t* cell=makeRow(navLedRow,scaled(lay::MACRO_LED_CELL_W),scaled(lay::MACRO_LED_H),scaled(4),LV_FLEX_ALIGN_START);
+            // M<n> caption (subtle)
+            char num[8]; snprintf(num,sizeof(num),"M%d",m+1);
+            addLabel(cell,num,getScaledMicroFont(),PLATE_TEXT_DIM,0);
+            // the dot itself - dim when default, amber when non-default
+            lv_obj_t* dot=makeBox(cell,scaled(lay::MACRO_LED_DOT),scaled(lay::MACRO_LED_DOT));
+            lv_obj_set_style_radius(dot,LV_RADIUS_CIRCLE,0);
+            lv_obj_set_style_bg_opa(dot,LV_OPA_COVER,0);
+            macroLedDots[m]=dot;
+            updateMacroLed(m);   // initial state from current paramCache
+            // trailing label - the macro's param name in micro font so the LED
+            // row reads as "M1 TUNE    [.]" instead of an anonymous strip
+            addLabel(cell,parameterName(kMacroParams[m]).c_str(),getScaledMicroFont(),PLATE_TEXT_DIM,0);
+        }   // end macros-as-LEDs
+        // --- STAGE ROW (h = 504): dial bank | hero plate | analysis tower -----
         lv_obj_t* stage=makeRow(root,lv_pct(100),scaled(lay::STAGE_H),scaled(lay::GUTTER));
-
         // LEFT - FORGE: four labeled knob clusters, spread over the full column
         // heights: BODY 16+6+116=138, others 16+6+98=120; SPACE_BETWEEN spreads
         // the leftover 118 across three inter-cluster gaps (~39) - deliberate air
@@ -865,7 +1133,10 @@ private:
             const int kh=primary?lay::KNOB_H_N:lay::KNOB_H_C;
             lv_obj_t* sec=makeCol(left,scaled(lay::LEFT_W),scaled(lay::SEC_LABEL_H+lay::SEC_GAP+kh),scaled(lay::SEC_GAP));
             lv_obj_set_flex_align(sec,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
-            addLabel(sec,groupNames[g],getScaledMicroFont(),primary?PLATE_LABEL_ACCENT:PLATE_TEXT_DIM,3);
+            // piece-4: section captions letter-space +2 (was 3) -> consistent
+            // wide-set feel with the title and spec-strip cells. The active
+            // BODY row keeps the accent color so it still reads as the lead.
+            addLabel(sec,groupNames[g],getScaledMicroFont(),primary?PLATE_LABEL_ACCENT:PLATE_TEXT_DIM,5);
             // knob grid: explicit single-row width so nothing ever wraps
             lv_obj_t* grid=makeRow(sec,scaled(lay::LEFT_W),scaled(kh),scaled(lay::GRID_GUT_X));
             // size hierarchy: BODY runs full machined size, secondary groups compact
@@ -890,17 +1161,29 @@ private:
                 }
             }
         }   // end of the four knob groups
-        // CENTER - THE BODY (hero): playable disc + preset + spec strip
-        // inner budget: 592 available vs 22+406+16+56+28=528 fixed rows -> the
-        // four inter-row gaps breathe ~16px each via SPACE_BETWEEN
-        lv_obj_t* center=makeCard(stage,scaled(lay::CENTER_W),scaled(lay::STAGE_H),scaled(8),LV_FLEX_ALIGN_SPACE_BETWEEN);
-        lv_obj_set_flex_align(center,LV_FLEX_ALIGN_SPACE_BETWEEN,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_START);
-        lv_obj_t* cHead=makeRow(center,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
+        // === CENTER - HERO (round-2 re-anchor) =============================
+        // Body-of-the-control panel: disc on the LEFT, body-info / spec-strip
+        // cluster on the RIGHT (was a vertical stack below the disc in r1).
+        // The disc shrinks to 280px (was 406) so it stops dominating the
+        // stage as a dark empty area; the freed column width flows to the
+        // spectrum panel (516 instead of 566) - actually, the freed column
+        // is the CENTER being wider (480), so the right column stays the
+        // same; the disc gets shorter, the body-info gets more vertical air
+        // beside it. Net result: the eye lands on BODY (dial bank) first,
+        // then the playable disc, then spectrum, then keyboard.
+        lv_obj_t* center=makeRow(stage,scaled(lay::CENTER_W),scaled(lay::STAGE_H),scaled(lay::GUTTER));
+        // disc column: 280px wide, fills the column height (top-aligned)
+        lv_obj_t* discCol=makeCol(center,scaled(lay::DISC_D),scaled(lay::STAGE_H),scaled(6),LV_FLEX_ALIGN_START);
+        // info column: takes the remaining width (480-280-10=190px)
+        lv_obj_t* infoCol=makeCol(center,0,scaled(lay::STAGE_H),scaled(6),LV_FLEX_ALIGN_START);
+        lv_obj_set_flex_grow(infoCol,1);
+        // ---- disc col head + disc ----
+        lv_obj_t* cHead=makeRow(discCol,scaled(lay::DISC_D),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         addLabel(cHead,"STRIKE THE BODY",getScaledSmallFont(),COL_HIGHLIGHT,2);
-        addLabel(cHead,"CLICK TO HIT",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        addLabel(cHead,"CLICK",getScaledMicroFont(),PLATE_TEXT_DIM,1);
         // The disc - top view of the resonant body (hero element)
         const lv_coord_t D=scaled(lay::DISC_D);
-        strikeDisc=makeBox(center,D,D);
+        strikeDisc=makeBox(discCol,D,D);
         lv_obj_set_layout(strikeDisc,LV_LAYOUT_NONE);
         lv_obj_set_style_radius(strikeDisc,LV_RADIUS_CIRCLE,0);
         lv_obj_set_style_bg_color(strikeDisc,PLATE_WELL,0);
@@ -910,19 +1193,18 @@ private:
         lv_obj_set_style_border_color(strikeDisc,PLATE_EDGE,0);
         lv_obj_set_style_border_width(strikeDisc,1,0);
         lv_obj_set_style_border_opa(strikeDisc,70,0);
-        lv_obj_set_style_shadow_width(strikeDisc,scaled(26),0);
+        lv_obj_set_style_shadow_width(strikeDisc,scaled(18),0);
         lv_obj_set_style_shadow_color(strikeDisc,COL_BLACK,0);
         lv_obj_set_style_shadow_opa(strikeDisc,LV_OPA_50,0);
-        lv_obj_set_style_shadow_offset_y(strikeDisc,scaled(lay::SHADOW_OFF_Y),0);   // one global light
+        lv_obj_set_style_shadow_offset_y(strikeDisc,scaled(lay::SHADOW_OFF_Y),0);
         lv_obj_add_flag(strikeDisc,LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(strikeDisc,padPressCb,LV_EVENT_PRESSED,this);
         lv_obj_add_event_cb(strikeDisc,padPressCb,LV_EVENT_PRESSING,this);
         lv_obj_add_event_cb(strikeDisc,padPressCb,LV_EVENT_RELEASED,this);
         lv_obj_add_event_cb(strikeDisc,padPressCb,LV_EVENT_PRESS_LOST,this);
-        // inner well: a slightly smaller circle with reversed gradient sits
-        // inside the disc rim - cheap radial depth (machined dish) without
-        // LVGL complex gradients
-        lv_coord_t wd=(lv_coord_t)(D*0.86f);
+        // inner well: a smaller circle (80% of disc) with reversed gradient -
+        // cheap radial depth (machined dish) without LVGL complex gradients
+        lv_coord_t wd=(lv_coord_t)(D*0.80f);
         lv_obj_t* well=makeBox(strikeDisc,wd,wd);
         lv_obj_align(well,LV_ALIGN_CENTER,0,scaled(2));
         lv_obj_set_style_radius(well,LV_RADIUS_CIRCLE,0);
@@ -937,21 +1219,36 @@ private:
         // to the topmost clickable object under the point (lv_indev_search_obj),
         // and plain lv_obj children are clickable BY DEFAULT (lv_obj ctor).
         lv_obj_clear_flag(well,LV_OBJ_FLAG_CLICKABLE);
-        // concentric modal rings
-        for(int r=0;r<3;++r){
-            lv_coord_t rd=(lv_coord_t)(D*(0.30f+0.30f*r));
-            lv_obj_t* ring=lv_obj_create(strikeDisc);
-            lv_obj_set_size(ring,rd,rd);
-            lv_obj_align(ring,LV_ALIGN_CENTER,0,0);
-            lv_obj_set_style_radius(ring,LV_RADIUS_CIRCLE,0);
-            lv_obj_set_style_bg_opa(ring,LV_OPA_TRANSP,0);
-            lv_obj_set_style_border_color(ring,PLATE_LINE,0);
-            lv_obj_set_style_border_width(ring,1,0);
-            lv_obj_set_style_border_opa(ring,(lv_opa_t)(70-r*15),0);
-            lv_obj_set_style_pad_all(ring,0,0);
-            lv_obj_clear_flag(ring,LV_OBJ_FLAG_CLICKABLE); lv_obj_clear_flag(ring,LV_OBJ_FLAG_SCROLLABLE);
+        // === ROUND-2: TWO AMBER GUIDE RINGS (visual hero information) =======
+        // r1 only had 3 dim grey concentric rings that read as decoration.
+        // r2 keeps 1 dim outer witness + adds 2 amber hairlines (center zone
+        // + rim zone) so the disc carries real information: the soft inner
+        // ring marks the body's central sweet spot, the hard outer ring
+        // marks the rim - the difference is the modal-density shift.
+        {
+            const int ringDiam[3]={
+                (int)(D*0.92f),                                 // outer witness (grey)
+                (int)((lay::DISC_RING_SOFT*2*D)/100),          // soft zone (amber)
+                (int)((lay::DISC_RING_HARD*2*D)/100),          // hard zone (amber)
+            };
+            const lv_color_t ringCol[3]={ PLATE_LINE, COL_HIGHLIGHT, COL_HIGHLIGHT };
+            const int ringW[3]={ 1, 1, 1 };
+            const int ringOpa[3]={ 80, 100, 60 };
+            for(int r=0;r<3;++r){
+                lv_obj_t* ring=lv_obj_create(strikeDisc);
+                lv_obj_set_size(ring,(lv_coord_t)ringDiam[r],(lv_coord_t)ringDiam[r]);
+                lv_obj_align(ring,LV_ALIGN_CENTER,0,0);
+                lv_obj_set_style_radius(ring,LV_RADIUS_CIRCLE,0);
+                lv_obj_set_style_bg_opa(ring,LV_OPA_TRANSP,0);
+                lv_obj_set_style_border_color(ring,ringCol[r],0);
+                lv_obj_set_style_border_width(ring,ringW[r],0);
+                lv_obj_set_style_border_opa(ring,(lv_opa_t)ringOpa[r],0);
+                lv_obj_set_style_pad_all(ring,0,0);
+                lv_obj_clear_flag(ring,LV_OBJ_FLAG_CLICKABLE); lv_obj_clear_flag(ring,LV_OBJ_FLAG_SCROLLABLE);
+            }
         }
-        // crosshair
+        // crosshair (kept - it was already there and is a real "playable
+        // surface" affordance)
         lv_obj_t* chH=makeBox(strikeDisc,D,1); lv_obj_set_pos(chH,0,D/2);
         lv_obj_set_style_bg_color(chH,PLATE_LINE,0); lv_obj_set_style_bg_opa(chH,LV_OPA_40,0);
         lv_obj_set_style_radius(chH,0,0);
@@ -960,17 +1257,25 @@ private:
         lv_obj_set_style_bg_color(chV,PLATE_LINE,0); lv_obj_set_style_bg_opa(chV,LV_OPA_40,0);
         lv_obj_set_style_radius(chV,0,0);
         lv_obj_clear_flag(chV,LV_OBJ_FLAG_CLICKABLE);
-        // cardinal witness marks
-        for(int t=0;t<4;++t){
-            lv_obj_t* mk=(t==0||t==1)?makeBox(strikeDisc,2,scaled(10)):makeBox(strikeDisc,scaled(10),2);
-            lv_coord_t mx=(t==0||t==1)?D/2-1:(t==2?scaled(6):D-scaled(16));
-            lv_coord_t my=(t<=1)?(t==0?scaled(6):D-scaled(16)):D/2-1;
-            lv_obj_set_pos(mk,mx,my);
+        // 8-way cardinal witness marks (more directions than r1's 4) - small
+        // ticks on the rim help read the strike position against the rings
+        for(int t=0;t<8;++t){
+            const float ang = t * (2.f*(float)M_PI/8.f);
+            const int rOuter = D/2 - scaled(2);
+            const int cx = D/2 + (int)(std::cos(ang)*rOuter) - 1;
+            const int cy = D/2 + (int)(std::sin(ang)*rOuter) - scaled(4);
+            lv_obj_t* mk=makeBox(strikeDisc,2,scaled(8));
+            lv_obj_set_pos(mk,cx,cy);
+            lv_obj_set_style_transform_pivot_x(mk,1,0);
+            lv_obj_set_style_transform_pivot_y(mk,scaled(4),0);
+            // rotate each tick so it points outward from center
+            const int deg = (int)((ang*180.f/(float)M_PI) + 90.f) * 10;
+            lv_obj_set_style_transform_angle(mk,deg,0);
             lv_obj_set_style_bg_color(mk,PLATE_MARK,0); lv_obj_set_style_bg_opa(mk,LV_OPA_COVER,0);
             lv_obj_set_style_radius(mk,0,0);
             lv_obj_clear_flag(mk,LV_OBJ_FLAG_CLICKABLE);
         }
-        // the mallet marker
+        // the mallet marker (dynamic - follows the param)
         strikeDot=makeBox(strikeDisc,scaled(12),scaled(12));
         lv_obj_set_style_bg_color(strikeDot,COL_HIGHLIGHT,0); lv_obj_set_style_bg_opa(strikeDot,LV_OPA_COVER,0);
         lv_obj_set_style_border_color(strikeDot,PLATE_AMBER_PALE,0); lv_obj_set_style_border_width(strikeDot,1,0);
@@ -981,60 +1286,50 @@ private:
         lv_obj_set_style_shadow_opa(strikeDot,LV_OPA_60,0);
         lv_obj_set_pos(strikeDot,(int)(paramCache[PluginMultiScaleBody::kParamStrikeX]*(D-scaled(12))),
                                 (int)((1.f-paramCache[PluginMultiScaleBody::kParamStrikeY])*(D-scaled(12))));
-        // coordinate readout
-        lv_obj_t* coordWrap=makeRow(center,lv_pct(100),scaled(lay::COORD_H),0);
+        // === INFO COL (right of the disc) ================================
+        // The body-info cluster spread to the right of the disc instead of
+        // below - this is the r1->r2 anchor shift that puts the disc in
+        // dialog with the body it represents, not stacked over a cramped 3-label
+        // caption row. Also hosts the coord readout.
+        // section header
+        lv_obj_t* infoHead=makeRow(infoCol,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_START);
+        addLabel(infoHead,"BODY",getScaledSmallFont(),PLATE_LABEL_ACCENT,2);
+        addLabel(infoHead,"   -   PRESET / MATERIAL / MODES",getScaledMicroFont(),PLATE_TEXT_DIM,0);
+        // coordinate readout (the live "X 0.50  Y 0.50" line - now prominent)
+        lv_obj_t* coordWrap=makeRow(infoCol,lv_pct(100),scaled(lay::COORD_H),0);
         strikeCoordLabel=addLabel(coordWrap,"X 0.50  -  Y 0.50",getScaledSmallFont(),PLATE_AMBER,1);
-        // preset row: material jewel (preview) + selector + info line
-        lv_obj_t* presetRow=makeRow(center,lv_pct(100),scaled(lay::PRESET_ROW_H),scaled(10));
+        // divider hairline
+        addDivider(infoCol,scaled(1));
+        // body-info row: material jewel (preview) + spec line
+        lv_obj_t* infoRow=makeRow(infoCol,lv_pct(100),scaled(lay::PRESET_ROW_H),scaled(8));
         // builder side of the shared preview geometry (painter: previewGeometry())
-        bodyPreview=makeBox(presetRow,scaled(lay::PREVIEW_BOX),scaled(lay::PREVIEW_BOX));
+        bodyPreview=makeBox(infoRow,scaled(lay::PREVIEW_BOX),scaled(lay::PREVIEW_BOX));
         lv_obj_set_style_bg_color(bodyPreview,PLATE_PREVIEW_BG,0); lv_obj_set_style_bg_opa(bodyPreview,LV_OPA_COVER,0);
         lv_obj_set_style_border_color(bodyPreview,PLATE_EDGE,0); lv_obj_set_style_border_width(bodyPreview,1,0);
         lv_obj_set_style_radius(bodyPreview,scaled(8),0);
         lv_obj_set_style_pad_all(bodyPreview,scaled(lay::PREVIEW_PAD),0);
         lv_obj_set_layout(bodyPreview,LV_LAYOUT_NONE);
-        lv_obj_t* presetCol=makeCol(presetRow,0,scaled(lay::PRESET_ROW_H),scaled(4)); // explicit-height parent: grow legal
-        lv_obj_set_flex_grow(presetCol,1);
-        lv_obj_set_flex_align(presetCol,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
-        presetDropdown=lv_dropdown_create(presetCol);
-        {
-            std::string opts; for(int i=0;i<modal::kNumPresets;++i){ if(i) opts+="\n"; opts+=modal::kPresets[i].name; }
-            lv_dropdown_set_options(presetDropdown,opts.c_str());
-        }
-        int mxp=modal::kNumPresets-1;
-        int selp=(int)std::round(paramCache[PluginMultiScaleBody::kParamPreset]*(float)mxp);
-        lv_dropdown_set_selected(presetDropdown,std::clamp(selp,0,mxp));
-        lv_obj_set_width(presetDropdown,lv_pct(100));
-        lv_obj_add_style(presetDropdown,&styles.compactSelectMain,0);
-        lv_obj_set_style_bg_color(presetDropdown,PLATE_WELL,0);
-        lv_obj_set_style_border_color(presetDropdown,PLATE_EDGE,0);
-        lv_obj_t* list=lv_dropdown_get_list(presetDropdown);
-        if(list){
-            lv_obj_add_style(list,&styles.compactSelectListMain,0);
-            // cap the open list to ~8 rows (max_height clamps even the explicit
-            // size lv_dropdown_open sets): content taller than the list makes
-            // it scrollable, so wheel scrolling has something to do
-            lv_obj_set_style_max_height(list,scaled(lay::DROPDOWN_MAX_ROWS*lay::DROPDOWN_ROW_H),0);
-        }
-        // leave the input group: the DPF wheel arrives as an LVGL ENCODER whose
-        // enc_diff moves GROUP FOCUS - with the dropdown in the group, the very
-        // first wheel tick defocused (and closed) the list. Pointer clicks open
-        // it just fine without group membership.
-        lv_group_remove_obj(presetDropdown);
-        lv_obj_add_event_cb(presetDropdown,dropdownCb,LV_EVENT_VALUE_CHANGED,this);
-        bodySubLabel=lv_label_create(presetCol); lv_label_set_text(bodySubLabel,"");
-        lv_obj_set_style_text_font(bodySubLabel,getScaledMicroFont(),0);
-        lv_obj_set_style_text_color(bodySubLabel,PLATE_TEXT_MID,0);
-        lv_label_set_long_mode(bodySubLabel,LV_LABEL_LONG_CLIP);
+        lv_obj_t* infoTextCol=makeCol(infoRow,0,scaled(lay::PRESET_ROW_H),scaled(2));
+        lv_obj_set_flex_grow(infoTextCol,1);
+        lv_obj_set_flex_align(infoTextCol,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
+        bodySubLabel=lv_label_create(infoTextCol); lv_label_set_text(bodySubLabel,"");
+        lv_obj_set_style_text_font(bodySubLabel,getScaledSmallFont(),0);
+        lv_obj_set_style_text_color(bodySubLabel,PLATE_TEXT,0);
+        lv_label_set_long_mode(bodySubLabel,LV_LABEL_LONG_WRAP);
         lv_obj_set_width(bodySubLabel,lv_pct(100));
-        // spec strip: what this body IS (moved beside the thing it describes)
-        lv_obj_t* specStrip=makeRow(center,lv_pct(100),scaled(lay::SPEC_STRIP_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
-        addDivider(specStrip,scaled(lay::SPEC_STRIP_H));
-        addSpecCell(specStrip,"BODY",&hdrBodyVal,PLATE_AMBER,86);
-        addSpecCell(specStrip,"MATERIAL",&hdrMatVal,PLATE_TEXT,96);
-        addSpecCell(specStrip,"MODES",&hdrModeVal,PLATE_TEXT,62);
-        addSpecCell(specStrip,"F0",&hdrF0Val,PLATE_AMBER,70);
-        addDivider(specStrip,scaled(lay::SPEC_STRIP_H));
+        addLabel(infoTextCol,"MATERIAL JEWEL   -   OCCUPANCY MAP",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        // divider hairline
+        addDivider(infoCol,scaled(1));
+        // spec strip: BODY / MATERIAL / MODES / F0 in a 2x2 grid so it
+        // fits the narrow 190px info column without the r1 truncated captions
+        lv_obj_t* specStrip=makeCol(infoCol,lv_pct(100),0,scaled(2));
+        lv_obj_t* specRow1=makeRow(specStrip,lv_pct(100),scaled(16),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
+        addSpecCell(specRow1,"BODY",&hdrBodyVal,PLATE_AMBER,80);
+        addSpecCell(specRow1,"MODES",&hdrModeVal,PLATE_TEXT,56);
+        lv_obj_t* specRow2=makeRow(specStrip,lv_pct(100),scaled(16),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
+        addSpecCell(specRow2,"MAT",&hdrMatVal,PLATE_TEXT,80);
+        addSpecCell(specRow2,"F0",&hdrF0Val,PLATE_AMBER,56);
+
 
         // RIGHT - ANALYSIS TOWER: spectrum card 370 + gutter 10 + scope card 236 = 616 exact
         lv_obj_t* right=makeCol(stage,0,scaled(lay::STAGE_H),scaled(lay::GUTTER)); // explicit-height parent: grow legal
@@ -1054,7 +1349,10 @@ private:
         lv_obj_set_style_border_color(chart,PLATE_LINE,0); lv_obj_set_style_border_width(chart,1,0);
         lv_obj_set_style_radius(chart,scaled(lay::RADIUS),0);
         lv_obj_set_style_pad_all(chart,scaled(8),0); lv_obj_set_style_pad_column(chart,scaled(4),0);
-        lv_chart_set_div_line_count(chart,4,12);
+        // piece-3: one vertical gridline per band (16) so the analyzer reads as
+        // 16 discrete mode bins, not 12 generic column dividers. Opacity stays
+        // at OPA_30 below; the per-band peak tick is what carries the highlight.
+        lv_chart_set_div_line_count(chart,4,16);
         lv_obj_set_style_line_color(chart,PLATE_LINE,LV_PART_MAIN); lv_obj_set_style_line_width(chart,1,LV_PART_MAIN); lv_obj_set_style_line_opa(chart,LV_OPA_30,LV_PART_MAIN);
         lv_chart_series_t* series=lv_chart_add_series(chart,COL_HIGHLIGHT,LV_CHART_AXIS_PRIMARY_Y);
         lv_chart_set_series_color(chart,series,COL_HIGHLIGHT); lv_chart_set_update_mode(chart,LV_CHART_UPDATE_MODE_CIRCULAR);
@@ -1067,10 +1365,14 @@ private:
         lv_obj_add_event_cb(chart,spectrumPeakDrawCb,LV_EVENT_DRAW_POST_END,this);
         fSpectrumChart=chart; for(int i=0;i<16;++i) lv_chart_set_value_by_id(chart,series,i,0);
 
+        // piece-3: B1..B16 micro-legend; B1 is the lead (selected band hairline at
+        // 100% alpha amber), the rest are dim. The dim labels still anchor the eye
+        // to a 16-step analyzer; the bright B1 is what the operator reads as "the band".
         lv_obj_t* tickRow=makeRow(spectrumCard,lv_pct(100),scaled(lay::TICKS_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         for(int b=0;b<16;++b){
             char nm[8]; snprintf(nm,sizeof(nm),"B%d",b+1);
-            addLabel(tickRow,nm,getScaledMicroFont(),PLATE_TEXT_DIM,0);
+            lv_obj_t* lbl=addLabel(tickRow,nm,getScaledMicroFont(),b==0?PLATE_AMBER:PLATE_TEXT_DIM,b==0?1:0);
+            if(b==0) lv_obj_set_style_text_opa(lbl,LV_OPA_COVER,0);
         }
         // scope card: 24 pad + 22 head + 8 + 14 meter + 8 + 160 scope = 236
         lv_obj_t* scopeCard=makeCard(right,lv_pct(100),scaled(lay::SCOPE_CARD_H),scaled(8));
@@ -1185,11 +1487,22 @@ private:
             else if(++fSpecHoldAge[b]>21) fSpecPeaks[b]=std::max(0.f,std::max(env[b],fSpecPeaks[b]-0.006f));
         }
         lv_chart_refresh(fSpectrumChart);
-        // === STRIKE PLATE aliveness ===
         if(fRippleCooldown>0) --fRippleCooldown;
         bool onset=(totalE>fPrevEnergy+std::max(0.02f,fPrevEnergy*1.1f)) && totalE>0.04f;
         fPrevEnergy=std::max(totalE,fPrevEnergy*0.90f);
         if(onset && fRippleCooldown==0 && fGotLiveViz){ spawnRipple(); fRippleCooldown=9; }
+        // round-2: fade out the persistent last-strike marker after ~0.5s.
+        // The timer fires every 33ms; 15 ticks ~= 500ms.
+        if(strikeLastMark && fLastStrikeAgeMs>=0){
+            fLastStrikeAgeMs += 33;
+            if(fLastStrikeAgeMs >= (int)lay::DISC_STRIKE_HOLD_MS){
+                lv_opa_t opa=(lv_opa_t)std::max(0, 255 - (fLastStrikeAgeMs - lay::DISC_STRIKE_HOLD_MS)*2);
+                lv_obj_set_style_bg_opa(strikeLastMark, opa, 0);
+                lv_obj_set_style_border_opa(strikeLastMark, opa, 0);
+                lv_obj_set_style_shadow_opa(strikeLastMark, opa/2, 0);
+                if(opa==0){ fLastStrikeAgeMs=-1; }
+            }
+        }
         gScopeMax=std::max(std::max(totalE,gScopeMax*0.995f),0.03f);
         fLevelEnv+=(totalE-fLevelEnv)*(totalE>fLevelEnv?0.55f:0.12f);
         float lvl=std::clamp(fLevelEnv/gScopeMax,0.f,1.f);
@@ -1199,7 +1512,6 @@ private:
             lv_obj_set_style_border_opa(strikeDisc,(lv_opa_t)(70+185.f*lvl),0);
         if(lfoDot)
             lv_obj_set_style_bg_opa(lfoDot,(lv_opa_t)(40+215.f*lvl),0);
-        // output level meter: absolute DSP level, fast attack / slow release,
         // ~500 ms peak hold then decay (15 frames @ 30 fps)
         if(fLevelBar){
             float v=std::clamp(fGotLiveViz?fVizLevel:0.f,0.f,1.f);
@@ -1224,15 +1536,21 @@ private:
     }
     DGL_NAMESPACE::LVGLTopLevelWidget* fLVGL=nullptr;
     UIStyles styles;
+    bool fUIBuilt=false;   // tracks whether buildUI() has populated the tree
     lv_obj_t* widgets[PluginMultiScaleBody::kParameterCount]={};
     float paramCache[PluginMultiScaleBody::kParameterCount]={};
-    bool fUIBuilt=false;
+
+    // master knob value label (re-uses the widget's own label, but the chip in
+    // the dial bank's Wet knob is the canonical one - master just inherits it)
     lv_timer_t* fSpectrumTimer=nullptr;
     lv_obj_t* fSpectrumChart=nullptr;
     lv_obj_t* strikeDisc=nullptr;
     lv_obj_t* strikeDot=nullptr;
     lv_obj_t* strikeCoordLabel=nullptr;
     lv_obj_t* presetDropdown=nullptr;
+    // piece-6: preset browser prev/next mini arrows flanking the dropdown
+    lv_obj_t* presetPrevBtn=nullptr;
+    lv_obj_t* presetNextBtn=nullptr;
     lv_obj_t* bodySubLabel=nullptr;
     lv_obj_t* bodyPreview=nullptr;
     lv_obj_t* lfoDot=nullptr;
@@ -1251,13 +1569,20 @@ private:
     float fLevelEnv=0.f;
     float fPrevEnergy=0.f;
     float gScopeMax=0.05f;
-    int fRippleCooldown=0;
+    // macro-LED row status dots (round-2: was macro-rack value chip labels in r1;
+    // r1 also had a 72px row of 8 mini arc-knobs that the critic flagged for
+    // competing with the dial groups. r2 collapses the strip to a 12px status
+    // row of dots, each lit when its kMacroParams[m] is non-default).
+    lv_obj_t* macroLedDots[8]={};
+
     float fMeterEnv=0.f;
     float fMeterPeak=0.f;
     int fStrikeNote=60;
     bool fStrikeHeld=false;
     bool fMarkerPlaced=false;
-    // spectrum band scrub state: which band's edit bracket is open + last
+    lv_obj_t* strikeLastMark=nullptr;        // round-2: small amber dot that persists ~0.5s post-hit
+    int fLastStrikeAgeMs=0;                 // ms since placeLastStrike; -1 = inactive
+    int fRippleCooldown=0;
     // written level, so PRESSING writes only on real change (no host spam)
     int fScrubBand=-1;
     float fScrubLevel=-1.f;
@@ -1285,4 +1610,14 @@ private:
     int fSpecHoldAge[16]={};
 };
 UI* createUI(){ return new MultiScaleBodyUI(); }
+const uint32_t MultiScaleBodyUI::kMacroParams[8]={
+    PluginMultiScaleBody::kParamPitch,
+    PluginMultiScaleBody::kParamDecay,
+    PluginMultiScaleBody::kParamBrightness,
+    PluginMultiScaleBody::kParamModeCount,
+    PluginMultiScaleBody::kParamWidth,
+    PluginMultiScaleBody::kParamRadiation,
+    PluginMultiScaleBody::kParamVelStrike,
+    PluginMultiScaleBody::kParamWet,
+};
 END_NAMESPACE_DISTRHO

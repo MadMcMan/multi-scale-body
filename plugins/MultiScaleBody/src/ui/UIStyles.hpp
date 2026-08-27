@@ -83,11 +83,17 @@ struct UIStyles {
         lv_style_set_shadow_opa(&arcIndicator, LV_OPA_10);
 
         // Knob Cap style: dark metallic, hairline rim, minimal shadow
+        // piece-2: knob cap carries a 1px darker hairline border (COL_BORDER at
+        // 40% alpha) - the "machined bezel" reads as an inset ring on the cap
+        // circumference. The amber arc indicator is the PRIMARY value cue; the
+        // bezel is decoration, so it stays low-OPA so the arc wins the eye.
         lv_style_init(&knobCap);
         lv_style_set_bg_color(&knobCap, COL_KNOB_CAP);
         lv_style_set_bg_opa(&knobCap, LV_OPA_COVER);
         lv_style_set_radius(&knobCap, LV_RADIUS_CIRCLE);
         lv_style_set_border_color(&knobCap, COL_BORDER);
+        lv_style_set_border_width(&knobCap, 1);
+        lv_style_set_border_opa(&knobCap, LV_OPA_40);
         lv_style_set_shadow_width(&knobCap, scaled(2));
         lv_style_set_shadow_color(&knobCap, COL_BLACK);
         lv_style_set_shadow_opa(&knobCap, LV_OPA_20);
@@ -124,13 +130,27 @@ struct UIStyles {
         lv_style_set_bg_opa(&knobNeedle, LV_OPA_COVER);
         lv_style_set_radius(&knobNeedle, 1);
         lv_style_set_border_width(&knobNeedle, 0);
-        lv_style_set_shadow_width(&knobNeedle, 0);
+        // piece-2: value tick at the indicator's tip. The arc's KNOB part is
+        // placed at the value angle; we style it as a 1px wide x 6px tall white
+        // tick (the size is derived from pad_left/right/top/bottom of the KNOB
+        // part, see lv_arc.c:812-816). Amber arc is still the primary value
+        // cue; this is the small "where am I right now" dot at the sweep tip.
+        lv_style_init(&arcKnob);
+        lv_style_set_bg_color(&arcKnob, COL_WHITE);
+        lv_style_set_bg_opa(&arcKnob, LV_OPA_COVER);
+        lv_style_set_radius(&arcKnob, 1);
+        lv_style_set_border_width(&arcKnob, 0);
+        // knob size = 1 wide (pad_left=0, pad_right=0) x 6 tall (pad_top=2, pad_bottom=2)
+        lv_style_set_pad_left(&arcKnob, 0);
+        lv_style_set_pad_right(&arcKnob, 0);
+        lv_style_set_pad_top(&arcKnob, 2);
+        lv_style_set_pad_bottom(&arcKnob, 2);
+        lv_style_set_shadow_width(&arcKnob, 0);
+        lv_style_set_shadow_color(&arcKnob, COL_WHITE);
+        lv_style_set_shadow_opa(&arcKnob, LV_OPA_30);
         lv_style_set_shadow_color(&knobNeedle, COL_WHITE);
         lv_style_set_shadow_opa(&knobNeedle, LV_OPA_0);
 
-        lv_style_init(&arcKnob);
-        lv_style_set_bg_opa(&arcKnob, LV_OPA_TRANSP);
-        lv_style_set_border_width(&arcKnob, 0);
 
 
 
@@ -196,9 +216,13 @@ struct UIStyles {
         lv_style_set_text_color(&knobTitleSmall, COL_KNOB_LABEL);
         lv_style_set_text_font(&knobTitleSmall, getScaledSmallFont());
 
-        // Shared compact value label style
+        // piece-5: value label text color -> PLATE_AMBER_DIM (desaturated amber).
+        // One-accent discipline: the only full-amber (COL_HIGHLIGHT / PLATE_AMBER)
+        // marks in the chrome are the indicator arc + the mallet. Value labels
+        // were previously full amber (competing with the arc); the dim variant
+        // keeps the read order: arc wins, label is supporting evidence.
         lv_style_init(&compactValueLabel);
-        lv_style_set_text_color(&compactValueLabel, COL_TEXT);
+        lv_style_set_text_color(&compactValueLabel, PLATE_AMBER_DIM);
         lv_style_set_text_font(&compactValueLabel, getScaledSmallFont());
         lv_style_set_text_align(&compactValueLabel, LV_TEXT_ALIGN_CENTER);
 
