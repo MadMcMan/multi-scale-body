@@ -25,6 +25,10 @@ VST3 · CLAP · LV2 · JACK standalone (DPF), with an LVGL-based UI.
 - **Space**: radiation mix, 16-band output EQ trims, wet/dry
 - **Live visuals**: 16-band spectrum, decay scope, mode spectrum chart, on-screen keyboard
 
+### Reverb as self-IR convolution
+
+The paper models the struck body directly and solves no emission/room problem. The plugin's reverb deliberately re-uses the synth's own shaped modal response as the body/space IR: the same per-mode damped sinusoids and strike-position gains that drive the reson bank are rendered into a short stereo IR and baked incrementally on parameter changes (≤16 modes per audio block, converging over ~8 blocks). Normalization is dual — scale by min(peak → 0.8, L1 → 0.85) — because peak-normalization alone bounds nothing: against correlated input (the engine's own ringing output), convolution gain approaches the IR's L1 norm (matched filter), whereas capping L1 bounds the wet path for any input via $|\mathrm{conv}| \le L_1 \cdot \max|x|$. The send mixes as dry·(1 − 0.7·wet) + conv·wet.
+
 ## Building
 
 Requires CMake + Ninja and DPF/LVGL under `deps/` (see `BUILD.md`):
