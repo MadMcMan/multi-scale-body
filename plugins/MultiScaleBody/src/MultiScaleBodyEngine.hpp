@@ -197,10 +197,15 @@ public:
     void processSampleStereo(float &l,float &r);
     // live analyser: Goertzel magnitudes at current mode freqs (16 bands)
     void analyseBands(float* out16);
+    // R3: percussive envelope (sum of active voice envelopes) for the UI
+    // decay scope. Cheap O(N) read, no allocation, safe to call from the
+    // UI timer (33 ms cadence) without locking.
+    float outputEnvelope() const {
+        float e=0.f; for (const auto& v : voices_) if (v.active) e += v.env; return e;
+    }
     int currentPreset() const { return presetIdx_; }
     int currentModeCount() const { return modeCount_; }
     float getPitchScale() const { return pitchScale_; }
-    double sampleRate() const { return sampleRate_; }
     const Voice& voice(int i) const { return voices_[i]; }
     // tests/diagnostics: currently baked reverb IR (populated after any wet render)
     const float* reverbIrL() const { return irL_; }

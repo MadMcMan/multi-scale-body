@@ -141,6 +141,11 @@ public:
         extraWidgets[extraWidgetCount++]={pi,arc};
     }
     void parameterChanged(uint32_t i,float v) override {
+        // R3: the idle scope preview depends on these params - recompute lazily
+        if(i==PluginMultiScaleBody::kParamPreset || i==PluginMultiScaleBody::kParamDecay
+           || i==PluginMultiScaleBody::kParamModeCount || i==PluginMultiScaleBody::kParamStrikeX
+           || i==PluginMultiScaleBody::kParamStrikeY)
+            fScopePreviewReady=false;
         // metering outputs arrive here every audio block - the bridge-safe DSP->UI link
         if(i>=PluginMultiScaleBody::kParamOutBand0 && i<PluginMultiScaleBody::kParameterCount){
             fVizBins[i-PluginMultiScaleBody::kParamOutBand0]=v;
@@ -1024,7 +1029,8 @@ private:
         // small 56px arc, the "MAIN" knob analogue on the right of the brand
         lv_obj_t* masterCol=makeCol(topbar,scaled(140),lv_pct(100),scaled(2));
         lv_obj_set_flex_align(masterCol,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);
-        addLabel(masterCol,"MASTER",getScaledMicroFont(),PLATE_LABEL_ACCENT,3);
+        // R2: relabel MASTER->OUTPUT with the small font so the header knob is labeled clearly
+        addLabel(masterCol,"OUTPUT",getScaledSmallFont(),PLATE_LABEL_ACCENT,3);
         {
             ArcVisualSpec mSpec=normalArcSpec();
             lv_obj_t* masterArc=UIWidgets::createArcKnob(masterCol,PluginMultiScaleBody::kParamWet,this,styles,mSpec);
@@ -1065,40 +1071,13 @@ private:
         lv_obj_set_style_bg_color(nav,PLATE_PANEL,0); lv_obj_set_style_bg_opa(nav,LV_OPA_COVER,0);
         lv_obj_set_style_border_color(nav,PLATE_LINE,0); lv_obj_set_style_border_width(nav,1,0);
         lv_obj_set_style_radius(nav,scaled(lay::RADIUS),0);
-        // navTop: chips + paper identity
-        lv_obj_t* navTop=makeRow(nav,lv_pct(100),scaled(lay::NAV_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
+        // navTop: paper identity, right-aligned (R4: the five section chips
+        // were dead decoration - every knob group is permanently visible in
+        // the dial bank, so switchable views had nothing real to switch to;
+        // they are removed per the user's make-real-or-delete sanction)
+        lv_obj_t* navTop=makeRow(nav,lv_pct(100),scaled(lay::NAV_H),0,LV_FLEX_ALIGN_END);
         lv_obj_set_style_pad_hor(navTop,scaled(8),0); lv_obj_set_style_pad_ver(navTop,scaled(3),0);
-        // left chip cluster
-        lv_obj_t* navChips=makeRow(navTop,0,scaled(lay::NAV_H-6),scaled(lay::NAV_CHIP_GAP),LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_flex_grow(navChips,1);
-        static const char* navLabels[5]={"BODY","RESONATE","EXCITER","SPACE","MOD"};
-        for(int n=0;n<5;++n){
-            const bool active=(n==0);   // piece-1: BODY is the visual lead
-            lv_obj_t* chip=makeBox(navChips,scaled(lay::NAV_CHIP_W),scaled(lay::NAV_H-6));
-            lv_obj_set_layout(chip,LV_LAYOUT_FLEX);
-            lv_obj_set_flex_flow(chip,LV_FLEX_FLOW_ROW);
-            lv_obj_set_flex_align(chip,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);
-            if(active){
-                // BODY chip: amber border + slight amber wash so it reads as
-                // the active section (mirrors the brighter BODY group label
-                // in the dial bank - one visual lead, two echo points)
-                lv_obj_set_style_bg_color(chip,COL_HIGHLIGHT,0);
-                lv_obj_set_style_bg_opa(chip,LV_OPA_20,0);
-                lv_obj_set_style_border_color(chip,COL_HIGHLIGHT,0);
-                lv_obj_set_style_border_opa(chip,LV_OPA_80,0);
-            } else {
-                lv_obj_set_style_bg_color(chip,PLATE_WELL,0);
-                lv_obj_set_style_bg_opa(chip,LV_OPA_60,0);
-                lv_obj_set_style_border_color(chip,PLATE_LINE,0);
-            }
-            lv_obj_set_style_border_width(chip,1,0);
-            lv_obj_set_style_radius(chip,scaled(lay::RADIUS_SM),0);
-            lv_obj_clear_flag(chip,LV_OBJ_FLAG_SCROLLABLE);
-            addLabel(chip,navLabels[n],getScaledMicroFont(),active?PLATE_AMBER:PLATE_TEXT_DIM,2);
-        }
-        // right paper identity - width-capped to guarantee no overflow at 1440
-        lv_obj_t* navRight=makeRow(navTop,scaled(180),scaled(lay::NAV_H-6),0,LV_FLEX_ALIGN_END);
-        addLabel(navRight,"DAFX-09  /  PAPER 47",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        addLabel(navTop,"DAFX-09  /  PAPER 47",getScaledMicroFont(),PLATE_TEXT_DIM,1);
         // navBottom: 8-slot LED macro strip - thin status row, each dot lit
         // when its kMacroParams[m] is non-default. Sync from parameterChanged
         // updates on every value change so the LEDs stay live.
@@ -1298,7 +1277,7 @@ private:
         // section header
         lv_obj_t* infoHead=makeRow(infoCol,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_START);
         addLabel(infoHead,"BODY",getScaledSmallFont(),PLATE_LABEL_ACCENT,2);
-        addLabel(infoHead,"   -   PRESET / MATERIAL / MODES",getScaledMicroFont(),PLATE_TEXT_DIM,0);
+        addLabel(infoHead,"PRESET / MATERIAL / MODES",getScaledMicroFont(),PLATE_TEXT_DIM,2);
         // coordinate readout (the live "X 0.50  Y 0.50" line - now prominent)
         lv_obj_t* coordWrap=makeRow(infoCol,lv_pct(100),scaled(lay::COORD_H),0);
         strikeCoordLabel=addLabel(coordWrap,"X 0.50  -  Y 0.50",getScaledSmallFont(),PLATE_AMBER,1);
@@ -1321,7 +1300,7 @@ private:
         lv_obj_set_style_text_color(bodySubLabel,PLATE_TEXT,0);
         lv_label_set_long_mode(bodySubLabel,LV_LABEL_LONG_WRAP);
         lv_obj_set_width(bodySubLabel,lv_pct(100));
-        addLabel(infoTextCol,"MATERIAL JEWEL   -   OCCUPANCY MAP",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        addLabel(infoTextCol,"MATERIAL PREVIEW",getScaledMicroFont(),PLATE_TEXT_DIM,1);
         // divider hairline
         addDivider(infoCol,scaled(1));
         // spec strip: BODY / MATERIAL / MODES / F0 in a 2x2 grid so it
@@ -1444,8 +1423,72 @@ private:
         // root converges the whole tree - THEN position anything that measured
         lv_obj_update_layout(root);
         layoutMeterMarks();
+        // prime both right-column charts with real data NOW: the 33ms spectrum
+        // timer is only serviced by lv_timer_handler() inside the DGL idle
+        // callback, which several hosts (and the capture harness) never run
+        // before their first present. One synchronous pass seeds the analyzer
+        // bars and the full idle decay trace, so the panels never present blank.
+        updateSpectrumDisplay();
     }
 
+    // R3: build the idle decay-envelope preview trace. Uses ONLY baked
+    // ModalData (per-mode decay rates + gains at the current strike point),
+    // so it works with no audio thread alive. Mirrors the engine exactly:
+    // shapeDecayRate() geometric pull toward the preset anchor, then the
+    // mirrored Decay-knob scale; envelope = exp(-t*rate). The full 128-point
+    // curve is seeded into the chart so the scope shows the complete
+    // strike-then-ring envelope immediately, not after 4 s of ticks.
+    void buildScopePreview(){
+        using namespace modal;
+        fScopePreviewReady=false;
+        int mx = kNumPresets - 1;
+        int preset = (int)std::round(paramCache[PluginMultiScaleBody::kParamPreset]*(float)mx);
+        preset = std::clamp(preset,0,mx);
+        const auto& pr = kPresets[preset];
+        int n = std::clamp((int)(8 + paramCache[PluginMultiScaleBody::kParamModeCount]*120.f), 8, pr.n);
+        // strike point -> bilinear mode gains (same math as the spectrum preview)
+        float sx = paramCache[PluginMultiScaleBody::kParamStrikeX];
+        float sy = paramCache[PluginMultiScaleBody::kParamStrikeY];
+        float fx=sx*15.f, fy=sy*15.f; int x0=(int)fx, y0=(int)fy;
+        x0=std::clamp(x0,0,14); y0=std::clamp(y0,0,14);
+        int x1=x0+1, y1=y0+1; float dx=fx-x0, dy=fy-y0;
+        float w00=(1-dx)*(1-dy), w10=dx*(1-dy), w01=(1-dx)*dy, w11=dx*dy;
+        // engine decay semantics: pull each rate toward the preset anchor
+        // (shapeDecayRate, beta=0.45, anchor=dmin/6), then the mirrored
+        // Decay-knob scale; tau = 1/rate
+        float dmn=pr.decay[0];
+        for(int i=1;i<pr.n;++i) if(pr.decay[i]<dmn) dmn=pr.decay[i];
+        const float ref=dmn/6.f;
+        float dk = paramCache[PluginMultiScaleBody::kParamDecay];
+        float dScale = 0.1f*std::pow(100.f,1.f-dk);
+        // 4.3 s window across 128 points; 3 ms attack ramp first
+        const float dt = 4.3f/128.f;
+        float peak=1e-12f;
+        for(int i=0;i<128;++i){
+            float t = i*dt;
+            float attack = std::min(t/0.003f, 1.f);
+            float e=0.f;
+            for(int m=0;m<n;++m){
+                float g = pr.gain[m][y0][x0]*w00 + pr.gain[m][y0][x1]*w10
+                        + pr.gain[m][y1][x0]*w01 + pr.gain[m][y1][x1]*w11;
+                float rate = std::pow(pr.decay[m],0.55f)*std::pow(ref,0.45f)*dScale;
+                if(rate<0.2f) rate=0.2f; if(rate>8000.f) rate=8000.f;
+                e += std::abs(g)*std::exp(-t*rate);
+            }
+            e *= attack;
+            fScopePreview[i]=e;
+            peak=std::max(peak,e);
+        }
+        for(int i=0;i<128;++i) fScopePreview[i]/=peak;
+        fScopePreviewIdx=0;
+        fScopePreviewReady=true;
+        // seed the whole trace now so a single tick shows the full curve
+        if(fScopeChart && fScopeSeries){
+            for(int i=0;i<128;++i)
+                lv_chart_set_next_value(fScopeChart,(lv_chart_series_t*)fScopeSeries,(int32_t)(fScopePreview[i]*980.f));
+            lv_chart_refresh(fScopeChart);
+        }
+    }
     void updateSpectrumDisplay(){
         if(!fSpectrumChart) return;
         // place the strike marker once the disc has real geometry
@@ -1507,10 +1550,23 @@ private:
                 if(opa==0){ fLastStrikeAgeMs=-1; }
             }
         }
+        // R3: decay-scope idle preview — when there's no audio clock yet, the
+        // scope draws the preset's real per-mode decay envelope (attack ramp
+        // + exponential tail computed from ModalData). This is the "scope
+        // does something" fix: the right column stops reading as dead.
+        if(fScopeChart && fScopeSeries && !fGotLiveViz){
+            if(!fScopePreviewReady) buildScopePreview();
+            if(fScopePreviewReady){
+                int idx=fScopePreviewIdx;
+                int32_t v=(int32_t)(fScopePreview[idx]*980.f);
+                lv_chart_set_next_value(fScopeChart,(lv_chart_series_t*)fScopeSeries,v);
+                fScopePreviewIdx=(fScopePreviewIdx+1)&127;
+            }
+        }
         gScopeMax=std::max(std::max(totalE,gScopeMax*0.995f),0.03f);
         fLevelEnv+=(totalE-fLevelEnv)*(totalE>fLevelEnv?0.55f:0.12f);
         float lvl=std::clamp(fLevelEnv/gScopeMax,0.f,1.f);
-        if(fScopeChart && fScopeSeries)
+        if(fGotLiveViz && fScopeChart && fScopeSeries)
             lv_chart_set_next_value(fScopeChart,(lv_chart_series_t*)fScopeSeries,(int32_t)(lvl*980.f));
         if(strikeDisc)
             lv_obj_set_style_border_opa(strikeDisc,(lv_opa_t)(70+185.f*lvl),0);
@@ -1594,7 +1650,13 @@ private:
     float fVizLevel=0.f;
     float fVizBins[16]={};
     bool fGotLiveViz=false;
-    // arpeggiator toggle (mirrors plugin state "arpon")
+    // R3: idle decay-envelope preview — the scope chart draws the preset's
+    // real per-mode decay curve (from ModalData, no audio needed) so the
+    // right column never reads as dead hardware. When live viz arrives,
+    // the trace switches to the audio-rate envelope.
+    float fScopePreview[128]={};
+    bool fScopePreviewReady=false;
+    int fScopePreviewIdx=0;
     lv_obj_t* arpBtn=nullptr;
     bool arpOnLocal=false;
     // keyboard

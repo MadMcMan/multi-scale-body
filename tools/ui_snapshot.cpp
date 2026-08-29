@@ -341,6 +341,39 @@ int main(int argc,char** argv)
      presentKick(hwnd,exp);
 
     struct Sz{ int w,h; const char* bmp; const char* tag; };
+    // R3 scope-preview probe: dump the second chart's (decay scope) series
+    // values after the idle frames so we can see whether the seeded preview
+    // trace lives in the chart data or never got written.
+    {
+        lv_obj_t* c1 = findByClass(lv_screen_active(),"lv_chart");
+        lv_obj_t* scope = nullptr;
+        if(c1){
+            // walk siblings/children for the second chart
+            // simple approach: iterate the whole tree, collect lv_chart objects
+            lv_obj_t* stack[512]; int sp=0; stack[sp++]=lv_screen_active();
+            lv_obj_t* charts[8]; int nc=0;
+            while(sp>0 && nc<8){
+                lv_obj_t* o=stack[--sp];
+                if(o->class_p && 0==std::strcmp(o->class_p->name,"lv_chart")) charts[nc++]=o;
+                const uint32_t k=lv_obj_get_child_count(o);
+                for(uint32_t i=0;i<k;++i) stack[sp++]=lv_obj_get_child(o,i);
+            }
+            LOGF("[scope-probe] charts found=%d\n",nc);
+            if(nc>=2){
+                scope=charts[1];   // scope is built after spectrum -> 2nd in DFS?
+                for(int ci=0;ci<nc;++ci){
+                    lv_obj_t* ch=charts[ci];
+                    lv_chart_series_t* ser=lv_chart_get_series_next(ch,nullptr);
+                    if(!ser) continue;
+                    const int pcnt=(int)lv_chart_get_point_count(ch); // complete type not needed here
+                    int32_t* ys=lv_chart_get_series_y_array(ch,ser);
+                    int nz=0,hi=0; long sum=0;
+                    for(int i=0;i<pcnt;++i){ int v=ys[i]; if(v!=0){++nz; if(v>hi)hi=v; sum+=v;} }
+                    LOGF("[scope-probe] chart#%d point_cnt=%d nonzero=%d hi=%d mean=%ld\n",ci,pcnt,nz,hi,sum/(pcnt?pcnt:1));
+                }
+            }
+        }
+    }
     const Sz sizes[]={{1440,860,"ui_zoom_1440.bmp","default"},
                       {1100,700,"ui_zoom_1100.bmp","small"},
                       {2028,1104,"ui_zoom_2048.bmp","large"}}; // screen 2048x1152: largest client that fits incl. frame
