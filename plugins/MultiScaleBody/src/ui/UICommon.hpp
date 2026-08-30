@@ -170,6 +170,18 @@ namespace lay {
     constexpr int DISC_RING_HARD = 84;           // outer-zone ring radius
     constexpr int DISC_STRIKE_MARKER = 6;        // last-strike marker dot diameter
     constexpr int DISC_STRIKE_HOLD_MS = 500;     // last-strike marker lifetime
+    // === ROUND-5 (issue #1): mode-activity panel (fills the dead band below
+    // the disc without re-inflating the disc itself) =====================
+    // Column budget @s=1 (discCol, 568 tall, 6px flex gap): 22 head + 6 + 280
+    // disc + 6 + 22 head + 6 + 226 card = 568 EXACT -> the ~260px dead band
+    // the r4 capture measured below the disc is fully consumed.
+    // Card inner (226 = 2*12 pad + 190 chart + 8 + 12 peak row): 16 bars,
+    // 13px wide + 2px gaps -> 208+30 = 238... bars row uses pct(100) flex so
+    // the 208 fits inside 280-24=256 inner width with slack for the walls.
+    constexpr int ACTIVITY_H = 226;           // full-height card (budget above)
+    constexpr int ACTIVITY_BARS_H = 190;      // bar strip height (bars bottom-aligned)
+    constexpr int ACTIVITY_BAR_W = 13;        // per-band bar width
+    constexpr int ACTIVITY_PEAK_H = 12;       // PEAK/B# readout row under the bars
     // top-bar identity cluster: brand mark | preset dropdown | master knob | zoom
     constexpr int NAV_CHIP_W = 86, NAV_CHIP_GAP = 6;
 }

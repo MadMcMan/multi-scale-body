@@ -80,3 +80,48 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         "${DEPS_DIR}/dpf-widgets/generic/LVGL.cpp"
         PROPERTIES COMPILE_OPTIONS "-Wno-error")
 endif()
+
+# --- UI-only visual verification harness (Windows) ---------------------------
+# Rebuilds tools/ui_snapshot.cpp against the REAL PluginUI sources. This is
+# the capture/ground-truth tool used by the gauntlet rounds; having it as a
+# CMake target replaces the lost ad-hoc g++ command line.
+if(WIN32)
+    find_package(OpenGL REQUIRED)
+    add_executable(ui_snapshot EXCLUDE_FROM_ALL
+        tools/ui_snapshot.cpp
+        plugins/MultiScaleBody/src/PluginUI.cpp
+        "${DEPS_DIR}/dpf-widgets/generic/LVGL.cpp"
+        "${DEPS_DIR}/DPF/distrho/src/DistrhoUI.cpp"
+    )
+    target_include_directories(ui_snapshot PRIVATE
+        plugins/MultiScaleBody/src
+        "${DEPS_DIR}/dpf-widgets/generic"
+        "${DEPS_DIR}/DPF/distrho"
+        "${DEPS_DIR}/DPF/distrho/src"
+    )
+    target_compile_definitions(ui_snapshot PRIVATE
+        SNAPSHOT_BUILD
+        SNAP_HAVE_LV_GLOBAL_PROVIDER
+        NOMINMAX
+        WIN32_LEAN_AND_MEAN
+    )
+    # lvgl::lvgl carries the public include dirs (lv_conf.h via the
+    # LV_CONF_PATH cache var set at the top of this file);
+    # dgl-opengl-definitions carries DGL_OPENGL/HAVE_OPENGL/HAVE_DGL as
+    # INTERFACE definitions - without them dpf-widgets' LVGL.hpp errors out.
+    target_link_libraries(ui_snapshot PRIVATE
+        dgl-opengl
+        dgl-opengl-definitions
+        lvgl::lvgl
+        ${OPENGL_gl_LIBRARY}
+        winmm
+        gdi32
+        user32
+    )
+    # single-translation-unit-friendly warnings on dep code
+    set_source_files_properties(
+        "${DEPS_DIR}/dpf-widgets/generic/LVGL.cpp"
+        PROPERTIES COMPILE_OPTIONS "-Wno-error")
+    set_target_properties(ui_snapshot PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+endif()
