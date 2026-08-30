@@ -34,6 +34,7 @@ void MultiScaleBodyEngine::reset() {
     lpL_.reset(); lpR_.reset();
     nextAge_=0; lfoPhase_=0; lfoUpdateCounter_=0; irBakeGate_=0; sustainPedal_=false; exFollow_=0.f;
     strikeSeq_=0; transPeak_=0.f; // fresh deterministic transient sequence + telemetry per reset
+    for (int c=1;c<16;++c) mpeZ_[c]=-1.f; // MPE: fresh latch set per reset (matches allSoundOff)
     limReset();
     widthCur_=width_; wetCur_=reverbWet_; exMixCur_=exciteMix_;
 }
@@ -283,6 +284,11 @@ void MultiScaleBodyEngine::setPitchBend(int channel,float semis){
     bendSemitones_[channel]=semis;
     for(auto& v:voices_) if(v.active && v.midiChannel==channel) recomputeVoiceCoeffs(v);
 }
+void MultiScaleBodyEngine::setMpePressure(int channel, float z01) {
+    if(channel<0||channel>15) return;
+    z01 = std::clamp(z01,0.f,1.f);
+    mpeZ_[channel]=z01;
+}
 void MultiScaleBodyEngine::setExciteMix(float v){ exciteMix_=std::clamp(v,0.f,1.f); }
 void MultiScaleBodyEngine::setVelStrike(float v){ velStrike_=std::clamp(v,0.f,1.f); }
 void MultiScaleBodyEngine::rebuildDetuneTable() {
@@ -493,7 +499,14 @@ void MultiScaleBodyEngine::updateEnvelope(Voice& v){
 void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
     vel01 = std::clamp(vel01,0.f,1.f);
     if (vel01 < 0.01f) vel01 = 0.01f;
-    if(channel<0||channel>15) channel=0;
+    // MPE per-note pressure: member channels latch the latest Channel
+    // Pressure (0xD0) and consume it ONCE at strike time — struck-object
+    // semantics; the strike is an event. Continuous mid-ring morphing is
+    // deliberately out of scope (sustained expressiveness = audio exciter).
+    // Unlatched / channel 0: drive == vel01, so the classic path's float ops
+    // are untouched and golden renders stay bit-identical.
+    float drive = vel01;
+    if (channel >= 1) { float z = mpeZ_[channel]; if (z >= 0.f) drive = 0.5f*(vel01+z); }
 
     if(monoMode_ && monoTopVoice_>=0 && voices_[monoTopVoice_].active){
         Voice& v=voices_[monoTopVoice_];
@@ -502,9 +515,9 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
         float noteShift=std::pow(2.f,(midiNote-60)/12.f);
         // velocity morph strike position
         float vx=strikeX_+(0.5f-strikeX_)*0.f; // base
-        float edgeX=vel01>0.5f?1.f:0.f;
-        vx=strikeX_+(edgeX-strikeX_)*(vel01-0.5f)*2.f*velStrike_;
-        float vy=strikeY_+(0.9f-strikeY_)*velStrike_*vel01;
+        float edgeX=drive>0.5f?1.f:0.f;
+        vx=strikeX_+(edgeX-strikeX_)*(drive-0.5f)*2.f*velStrike_;
+        float vy=strikeY_+(0.9f-strikeY_)*velStrike_*drive;
         float tmp[kMaxModes];
         interpolateGainsFor(tmp,vx,vy);
         for(int i=0;i<v.n;++i){
@@ -515,7 +528,7 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
                 float frac=(float)(1000.0/glideMs_/sampleRate_); // per-sample approach fraction approximated per noteOn
                 v.freq[i]=cur+(targetF-cur)*std::clamp(frac*64.f,0.02f,1.f); // chunked glide on retrig
             } else v.freq[i]=targetF;
-            v.gain[i]=tmp[i]*vel01;
+            v.gain[i]=tmp[i]*drive;
         }
         recomputeVoiceCoeffs(v);
         startStrikeBurst(v,vx,vy); // re-strike the contact pulse on mono retrigger
@@ -545,8 +558,8 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
     const auto& p = kPresets[presetIdx_];
     if (v.n > p.n) v.n = p.n;
     // velocity → strike position morph: soft=center/dark, hard=edge/bright
-    float vx = strikeX_ + (vel01-0.5f)*velStrike_*0.6f;      // X spreads with velocity
-    float vy = strikeY_ + (vel01-0.5f)*velStrike_*0.5f;      // Y drifts up (brighter rim)
+    float vx = strikeX_ + (drive-0.5f)*velStrike_*0.6f;      // X spreads with velocity
+    float vy = strikeY_ + (drive-0.5f)*velStrike_*0.5f;      // Y drifts up (brighter rim)
     vx=std::clamp(vx,0.f,1.f); vy=std::clamp(vy,0.f,1.f);
     float gains[kMaxModes];
     interpolateGainsFor(gains,vx,vy);
@@ -554,7 +567,7 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
     for (int i=0;i<v.n;++i) {
         v.freq[i] = p.freq[i]*noteShift;
         v.decay[i] = shapeDecayRate(p.decay[i]); // uniform-damping ring pull
-        v.gain[i] = gains[i] * vel01;
+        v.gain[i] = gains[i] * drive;
         v.s1[i]=v.s2[i]=0.f;
     }
     for (int i=v.n;i<kMaxModes;++i) { v.gain[i]=0.f; v.s1[i]=v.s2[i]=0.f; }
@@ -573,6 +586,11 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
 void MultiScaleBodyEngine::noteOff(int midiNote, int channel) {
     for(auto& v:voices_){
         if(!v.active) continue;
+        // MPE: the per-note pressure latch ends with the note. Clear on
+        // voice-match (not only when a Release actually armed — a stray
+        // 0x80 must not leave a stale Z poisoning the next note on this
+        // member channel).
+        if (channel>=1 && channel<=15 && v.midiChannel==channel) mpeZ_[channel]=-1.f;
         bool match = (channel<0)? (v.midiNote==midiNote) : (v.midiNote==midiNote && v.midiChannel==channel);
         if(match && v.envState!=Voice::Idle && v.envState!=Voice::Release){
             if(sustainPedal_) v.sustainHold=true; else v.envState=Voice::Release;
@@ -596,6 +614,7 @@ void MultiScaleBodyEngine::allSoundOff() {
         v.burstLen=0; v.burstLeft=0; v.transLen=0; v.transLeft=0; v.transLP=0.f;
         for(int i=0;i<kMaxModes;++i){ v.s1[i]=0.f; v.s2[i]=0.f; }
     }
+    for (int c=1;c<16;++c) mpeZ_[c]=-1.f; // MPE panic: drop every latched pressure
     monoTopVoice_=-1;
 }
 

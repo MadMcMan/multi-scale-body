@@ -186,6 +186,11 @@ public:
     float getReverbWet() const { return reverbWet_; }
     // pitch bend per MIDI channel (MPE)
     void setPitchBend(int channel, float semitones); // -12..+12
+    // MPE per-note pressure: member channels (1..15) latch the latest
+    // Channel Pressure (0xD0) and consume it once at strike time. Z is
+    // latched at noteOn — struck-object semantics: the strike is an event,
+    // and continuous mid-ring morphing is deliberately out of scope.
+    void setMpePressure(int channel, float z01);
     // exciter: call per sample with input audio before processing
     void setExciterSample(float in) { exciterIn_ = in; }
     void noteOn(int midiNote,float vel01,int channel=0);
@@ -247,6 +252,11 @@ public:
     float glideNorm_=0.f; float glideMs_=0.f;
     bool monoMode_=false;
     float bendSemitones_[16]={}; // per MIDI channel
+    // MPE pressure latch per channel: -1 = no pressure latched (never
+    // zero-fill — a 0 entry would read as "latched at Z=0" and corrupt the
+    // classic path's drive; every entry is initialized to -1.f explicitly).
+    float mpeZ_[16]={-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,
+                     -1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f};
     float exciterIn_=0.f;
     // mono stack
     int monoTopVoice_=-1;

@@ -157,9 +157,16 @@ void PluginMultiScaleBody::run(const float** inputs,float** outputs,uint32_t fra
     // 16th notes
     arpSamplesPerStep_ = (60.0/bpm/4.0)*sr;
     auto handleMidi=[this](const MidiEvent& ev){
-        if(ev.size<3) return; // guard: data[2] only valid for 3-byte messages
-        uint8_t st=ev.data[0]&0xF0, d1=ev.data[1], d2=ev.data[2];
+        if(ev.size<2) return; // guard: need status + data1 minimum
+        uint8_t st=ev.data[0]&0xF0, d1=ev.data[1];
         int ch=ev.data[0]&0x0F;
+        if(st==0xD0){ // channel pressure (2-byte message)
+            if(ch>=1) engine_.setMpePressure(ch, std::clamp(d1/127.f,0.f,1.f)); // MPE member: latch per-note Z
+            else engine_.setBrightness(std::clamp(0.5f+0.5f*d1/127.f,0.f,1.f)); // legacy ch0 brightness
+            return;
+        }
+        if(ev.size<3) return; // guard: data[2] only valid for 3-byte messages
+        uint8_t d2=ev.data[2];
         if(st==0x90 && d2>0) engine_.noteOn(d1,d2/127.f,ch);
         else if(st==0x80 || (st==0x90 && d2==0)) engine_.noteOff(d1,ch);
         else if(st==0xE0){ // pitch bend (MPE-aware per channel)
@@ -173,7 +180,6 @@ void PluginMultiScaleBody::run(const float** inputs,float** outputs,uint32_t fra
             else if(d1==120){ engine_.allSoundOff(); }   // panic: immediate silence
             else if(d1==123){ engine_.allNotesOff(); }   // host panic / all-notes-off
         }
-        else if(st==0xD0){ engine_.setBrightness(std::clamp(0.5f+0.5f*d1/127.f,0.f,1.f)); }
         else if(st==0xA0){ engine_.setBrightness(std::clamp(0.5f+0.5f*d2/127.f,0.f,1.f)); } // poly AT value = data2
     };
     modal::ScopedDenormals denormGuard; // FTZ/DAZ for the RT stretch below, restored on scope exit

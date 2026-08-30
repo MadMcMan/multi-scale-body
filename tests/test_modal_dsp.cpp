@@ -748,6 +748,95 @@ int main(){
             "Tune v=0.2256 (-13.17 ST) must land note 60 within 50 cents of scored C4");
         printf("tune span / scored C4 PASS\n");
     }
+    // --- issue #6: MPE per-note Channel Pressure latch (member ch 1-15) -----
+    // All comparisons are bit-identity (never RMS) and every pair of engines
+    // gets MATCHED strike history: strikeSeq_ seeds the per-voice transient
+    // RNG monotonically per engine (hpp), so a reused engine's 2nd strike is
+    // seeded differently than a fresh engine's 1st — reused-vs-fresh shapes
+    // would fail spuriously. Each test renders one note per engine.
+    {
+        // (1) init-trap: fresh engine, noteOn on ch1..15 with NO 0xD0 ever
+        // sent must render exactly what the same note on ch0 renders —
+        // catches any zero-fill regression of mpeZ_ (0 reads as "latched Z=0"
+        // and would halve the drive).
+        const auto renderCh=[&](int ch){
+            MultiScaleBodyEngine e; e.prepare(44100); e.reset();
+            e.noteOn(60,0.5f,ch);
+            std::vector<float> x; x.reserve(8192);
+            for(int i=0;i<8192;++i) x.push_back(e.processSampleMono());
+            return x;
+        };
+        for(int ch=1;ch<=15;++ch){
+            const std::vector<float> a=renderCh(ch), b=renderCh(0);
+            require(a.size()==b.size(),"mpe init-trap render size");
+            bool same=a==b;
+            require(same,"mpe init-trap: unlatched member channel must be bit-identical to ch0");
+        }
+        printf("mpe init-trap PASS (ch1..15 == ch0, no 0xD0 sent)\n");
+    }
+    {
+        // (2) blend math: latched Z on ch5 must equal the direct drive.
+        // drive = 0.5*(vel+Z) = 0.5*(0.5+1.0) = 0.75 (exactly representable),
+        // so engine A (ch5, vel 0.5, Z=1) must equal engine B (ch0, vel 0.75).
+        const auto renderNV=[&](int ch,float vel){
+            MultiScaleBodyEngine e; e.prepare(44100); e.reset();
+            if(ch>=1) e.setMpePressure(ch,1.0f);
+            e.noteOn(60,vel,ch);
+            std::vector<float> x; x.reserve(8192);
+            for(int i=0;i<8192;++i) x.push_back(e.processSampleMono());
+            return x;
+        };
+        const std::vector<float> a=renderNV(5,0.5f), b=renderNV(0,0.75f);
+        require(a.size()==b.size(),"mpe blend render size");
+        require(a==b,"mpe blend: latch Z=1 on ch5 must render identically to ch0 vel 0.75");
+        printf("mpe blend math PASS (0.5*(0.5+1.0)==0.75 drive)\n");
+    }
+    {
+        // (3) noteOff clears the latch. Engine A: latch Z=1 on ch5, strike
+        // (vel .5 -> drive .75), noteOff clears Z. Reference: identical
+        // history but never latched (strike 1 = direct vel .75 on ch5).
+        // The 2nd ch5 strike must be bit-identical: if the clear is broken
+        // it would render with drive .75 instead of .5.
+        const auto renderNoteOff=[&](bool latch){
+            MultiScaleBodyEngine e; e.prepare(44100); e.reset();
+            if(latch){ e.setMpePressure(5,1.0f); e.noteOn(60,0.5f,5); }
+            else     { e.noteOn(60,0.75f,5); }   // same drive, no latch
+            for(int i=0;i<64;++i) e.processSampleMono();
+            e.noteOff(60,5);                     // matched release (+ latch clear in A)
+            e.noteOn(62,0.5f,5);                 // assertion target: must be unlatched
+            std::vector<float> x; x.reserve(8192);
+            for(int i=0;i<8192;++i) x.push_back(e.processSampleMono());
+            return x;
+        };
+        const std::vector<float> a=renderNoteOff(true), b=renderNoteOff(false);
+        require(a.size()==b.size(),"mpe noteOff render size");
+        require(a==b,"mpe noteOff: cleared latch must leave 2nd ch5 strike == never-latched reference");
+        printf("mpe noteOff clear PASS\n");
+    }
+    {
+        // (4) allSoundOff (panic) clears every member latch. Same matched-
+        // history shape as (3): latched strike + panic must leave the post-
+        // panic ch5 strike identical to a never-latched reference.
+        const auto renderPanic=[&](bool latch){
+            MultiScaleBodyEngine e; e.prepare(44100); e.reset();
+            if(latch){ e.setMpePressure(5,1.0f); e.noteOn(60,0.5f,5); }
+            else     { e.noteOn(60,0.75f,5); }   // same drive, no latch
+            for(int i=0;i<64;++i) e.processSampleMono();
+            e.allSoundOff();                     // panic: kill voices + clear latches
+            e.noteOn(62,0.5f,5);                 // assertion target: must be unlatched
+            std::vector<float> x; x.reserve(8192);
+            for(int i=0;i<8192;++i) x.push_back(e.processSampleMono());
+            return x;
+        };
+        const std::vector<float> a=renderPanic(true), b=renderPanic(false);
+        require(a.size()==b.size(),"mpe panic render size");
+        require(a==b,"mpe panic: allSoundOff must clear latches so post-panic ch5 strike == never-latched");
+        printf("mpe panic clear PASS\n");
+    }
+
+
+
+
     printf("=== ALL TESTS PASSED ===\n");
     return 0;
 }
