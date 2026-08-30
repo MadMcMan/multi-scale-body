@@ -34,7 +34,21 @@ static void stubSetParam(void*, uint32_t i, float){
 }
 static void stubSetState(void*, const char*, const char*) {}
 static void stubSendNote(void*, uint8_t, uint8_t, uint8_t v){ if(v) ++gNoteOns; else ++gNoteOffs; }
-static void stubSetSize(void*, uint, uint) {}
+// Host-emulating setSize: a real host honors the plugin's d_uiResize request
+// by resizing the window; the old no-op stub silently swallowed the zoom
+// stepper's setSize(1800,1075) and pinned the display at the old size (the
+// zoom-step harness regression since R4). Defer the SetWindowPos until the
+// exporter's window exists, then apply client-size exactly.
+static DISTRHO::UIExporter* gExp=nullptr;
+static void stubSetSize(void*, uint w, uint h)
+{
+    if(!gExp) return;
+    HWND hwnd=(HWND)gExp->getNativeWindowHandle();
+    if(!hwnd) return;
+    RECT r{0,0,(LONG)w,(LONG)h};
+    AdjustWindowRect(&r,(DWORD)GetWindowLongPtr(hwnd,GWL_STYLE),FALSE);
+    SetWindowPos(hwnd,NULL,0,0,r.right-r.left,r.bottom-r.top,SWP_NOMOVE|SWP_NOZORDER);
+}
 static bool stubFileRequest(void*, const char*) { return false; }
 
 // Capture the window rect. Two paths:
@@ -252,12 +266,27 @@ static lv_obj_t* findByClass(lv_obj_t* root,const char* cls)
     return nullptr;
 }
 
-static lv_obj_t* findButtonByUserData(lv_obj_t* root,intptr_t ud)
+// Zoom stepper buttons are found by their label text, NOT user_data: the
+// preset prev/next arrows also carry user_data +/-1 (addPresetArrowBtn) and
+// are created earlier in the tree, so a user_data scan resolves the PRESET
+// arrow instead (the R4 zoom-test regression: the "zoom click" changed the
+// preset and the display stayed 1440x860).
+static lv_obj_t* findZoomButton(lv_obj_t* root,intptr_t ud)
 {
-    if(root->class_p && 0==std::strcmp(root->class_p->name,"lv_button")
-       && (intptr_t)lv_obj_get_user_data(root)==ud) return root;
+    if(root->class_p && 0==std::strcmp(root->class_p->name,"lv_button")){
+        const uint32_t n=lv_obj_get_child_count(root);
+        for(uint32_t i=0;i<n;++i){
+            lv_obj_t* c=lv_obj_get_child(root,i);
+            if(c->class_p && 0==std::strcmp(c->class_p->name,"lv_label")){
+                const char* t=lv_label_get_text(c);
+                const char* want=(ud>0)?"+":"-";
+                if(t&&t[0]==want[0]&&t[1]=='\0') return root;
+            }
+        }
+        return nullptr;                    // +/- userdata alone is not enough
+    }
     const uint32_t n=lv_obj_get_child_count(root);
-    for(uint32_t i=0;i<n;++i){ lv_obj_t* r=findButtonByUserData(lv_obj_get_child(root,i),ud); if(r) return r; }
+    for(uint32_t i=0;i<n;++i){ lv_obj_t* r=findZoomButton(lv_obj_get_child(root,i),ud); if(r) return r; }
     return nullptr;
 }
 
@@ -275,7 +304,6 @@ static bool resizeWindow(HWND hwnd,DISTRHO::UIExporter* exp,int w,int h,bool& fi
 }
 
 
-static DISTRHO::UIExporter* gExp=nullptr;
 
 // topmost DIRECT clickable child covering a point - mirrors what
 // lv_indev_search_obj picks among the disc's own children
@@ -391,8 +419,8 @@ int main(int argc,char** argv)
     LOGF("=== zoom-step test ===\n");
     first=false;
     EXPECT(resizeWindow(hwnd,exp,1440,860,first),"back-to-base-1440x860");
-    lv_obj_t* zPlus=findButtonByUserData(lv_screen_active(),1);
-    lv_obj_t* zMinus=findButtonByUserData(lv_screen_active(),-1);
+    lv_obj_t* zPlus=findZoomButton(lv_screen_active(),1);
+    lv_obj_t* zMinus=findZoomButton(lv_screen_active(),-1);
     EXPECT(zPlus!=nullptr,"zoom-plus-found"); EXPECT(zMinus!=nullptr,"zoom-minus-found");
     if(zPlus){
         lv_obj_send_event(zPlus,LV_EVENT_CLICKED,nullptr);   // 100% -> 125%
@@ -405,7 +433,7 @@ int main(int argc,char** argv)
         checkLayout("zoom125");
         presentKick(hwnd,exp); idleFrames(exp,90); writeBMP(hwnd,"ui_zoom_step_125.bmp");
         // drift/stability: + then - twice must return to the EXACT base size
-        lv_obj_t* zm=findButtonByUserData(lv_screen_active(),-1);
+        lv_obj_t* zm=findZoomButton(lv_screen_active(),-1);
         if(zm){ lv_obj_send_event(zm,LV_EVENT_CLICKED,nullptr); }              // -> 100%
         idleFrames(exp,120); pumpMsgs(); presentKick(hwnd,exp); idleFrames(exp,90);
         d=lv_display_get_default();

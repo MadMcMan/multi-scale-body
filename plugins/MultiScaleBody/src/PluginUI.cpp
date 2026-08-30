@@ -1025,19 +1025,35 @@ private:
         // wire the prev/next arrows: click cycles the preset by 1
         if(presetPrevBtn) lv_obj_add_event_cb(presetPrevBtn,presetArrowCb,LV_EVENT_CLICKED,this);
         if(presetNextBtn) lv_obj_add_event_cb(presetNextBtn,presetArrowCb,LV_EVENT_CLICKED,this);
-        // master knob - synthesized for piece-1 (paper's modal energy level),
-        // small 56px arc, the "MAIN" knob analogue on the right of the brand
-        lv_obj_t* masterCol=makeCol(topbar,scaled(140),lv_pct(100),scaled(2));
+        // master knob - synthesized for piece-1 (paper's modal energy level).
+        // Topbar inner height is only 50px (72 - 2*11 pad), so the full
+        // dial-bank createArcKnob (116px container) does NOT fit: its flex
+        // centering spilled 41px past both edges (title at y=-14, value chip
+        // bleeding into the nav strip - the d3 BOUNDS-FAIL in the harness).
+        // Compact layout: captioned row (OUTPUT label + arc + value chip)
+        // with the arc at 44px so the whole cluster centers in 50px.
+        lv_obj_t* masterCol=makeCol(topbar,scaled(150),lv_pct(100),scaled(2),LV_FLEX_ALIGN_CENTER);
         lv_obj_set_flex_align(masterCol,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);
-        // R2: relabel MASTER->OUTPUT with the small font so the header knob is labeled clearly
-        addLabel(masterCol,"OUTPUT",getScaledSmallFont(),PLATE_LABEL_ACCENT,3);
+        addLabel(masterCol,"OUTPUT",getScaledMicroFont(),PLATE_LABEL_ACCENT,2);
+        lv_obj_t* masterRow=makeRow(masterCol,lv_pct(100),scaled(30),0,LV_FLEX_ALIGN_CENTER);
         {
             ArcVisualSpec mSpec=normalArcSpec();
-            lv_obj_t* masterArc=UIWidgets::createArcKnob(masterCol,PluginMultiScaleBody::kParamWet,this,styles,mSpec);
+            mSpec.containerW=scaled(44); mSpec.containerH=scaled(30);
+            mSpec.arcSize=scaled(28);
+            mSpec.capInset=5; mSpec.needleTopOffset=1; mSpec.needleBottomInset=2;
+            mSpec.labelMarginBottom=0; mSpec.valueMarginTop=0;
+            lv_obj_t* masterArc=UIWidgets::createArcKnob(masterRow,PluginMultiScaleBody::kParamWet,this,styles,mSpec);
             regExtraWidget(PluginMultiScaleBody::kParamWet, masterArc);
             lv_obj_add_event_cb(masterArc,valueFormatCb,LV_EVENT_ALL,this);
             {
+                // hide the widget's own title ("Wet") - the OUTPUT caption
+                // above the row already names the cluster
                 lv_obj_t* cont=lv_obj_get_parent(masterArc);
+                if(cont&&lv_obj_get_child_count(cont)>0){
+                    lv_obj_t* t0=lv_obj_get_child(cont,0);
+                    if(t0&&lv_obj_check_type(t0,&lv_label_class)) lv_obj_add_flag(t0,LV_OBJ_FLAG_HIDDEN);
+                }
+                // reformat the trailing value chip from %.2f to the param format
                 lv_obj_t* lbl=cont?lv_obj_get_child(cont,lv_obj_get_child_count(cont)-1):nullptr;
                 if(lbl&&lv_obj_check_type(lbl,&lv_label_class)){
                     char b[24];
