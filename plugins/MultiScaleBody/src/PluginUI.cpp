@@ -235,7 +235,7 @@ private:
         bodyPreview=lfoDot=strikeLastMark=nullptr;
         hdrBodyVal=hdrMatVal=hdrModeVal=hdrF0Val=nullptr;
         fSpectrumChart=fScopeChart=fLevelBar=fLevelPeak=zoneWarnMark=zoneHotMark=nullptr;
-        fScopeSeries=nullptr; arpBtn=nullptr;
+        fScopeSeries=nullptr; fScopeAreaSeries=nullptr; arpBtn=nullptr;
         kbContainer=kbOctLabel=zoomMinus=zoomPlus=zoomValLbl=nullptr;
         for(int i=0;i<7;++i) kbWhite[i]=nullptr;
         for(int i=0;i<5;++i) kbBlack[i]=nullptr;
@@ -1356,8 +1356,14 @@ private:
             lv_obj_set_width(bar,scaled(lay::MAP_BAR_W));
             lv_obj_set_height(bar,1);
             lv_obj_set_style_radius(bar,0,0);
-            lv_obj_set_style_bg_color(bar,PLATE_EDGE,0);
-            lv_obj_set_style_bg_opa(bar,LV_OPA_COVER,0);
+            // non-peak bars use the dim amber (round-7: PLATE_EDGE read as
+            // invisible at 1px - the critic saw a near-empty rectangle. The
+            // dim amber still obeys the one-accent rule (only PEAK is full
+            // round-8: the comb must read as real data at a glance. Solid
+            // amber at high opacity for non-peak (the spectrum already uses
+            // amber bars so this is consistent), full highlight for peak.
+            lv_obj_set_style_bg_color(bar,PLATE_AMBER,0);
+            lv_obj_set_style_bg_opa(bar,LV_OPA_70,0);
             lv_obj_set_style_border_width(bar,0,0);
             lv_obj_set_style_pad_all(bar,0,0);
             lv_obj_clear_flag(bar,LV_OBJ_FLAG_SCROLLABLE);
@@ -1516,12 +1522,33 @@ private:
         lv_obj_set_style_border_color(scope,PLATE_LINE,0); lv_obj_set_style_border_width(scope,1,0);
         lv_obj_set_style_radius(scope,scaled(lay::RADIUS),0); lv_obj_set_style_pad_all(scope,scaled(6),0);
         lv_chart_set_div_line_count(scope,3,0);
-        lv_obj_set_style_line_color(scope,PLATE_LINE,LV_PART_MAIN); lv_obj_set_style_line_width(scope,1,LV_PART_MAIN); lv_obj_set_style_line_opa(scope,LV_OPA_30,LV_PART_MAIN);
+        // round-7: thicker series line + a dim-amber AREA fill underneath
+        // (LV_PART_ITEMS) so the scope reads as a real waveform, not a hair.
+        lv_obj_set_style_line_color(scope,PLATE_LINE,LV_PART_MAIN);
+        lv_obj_set_style_line_width(scope,1,LV_PART_MAIN);
+        lv_obj_set_style_line_opa(scope,LV_OPA_30,LV_PART_MAIN);
         lv_obj_set_style_line_width(scope,scaled(2),LV_PART_ITEMS);
+        lv_obj_set_style_line_color(scope,COL_HIGHLIGHT,LV_PART_ITEMS);
+        lv_obj_set_style_line_opa(scope,LV_OPA_COVER,LV_PART_ITEMS);
+        // round-7: simpler fix - just make the line thicker + add a dim area
+        // fill via a second series that mirrors the line. Both seeded.
+        // (area series is added first so it paints behind the line)
+        lv_chart_series_t* ssArea=lv_chart_add_series(scope,PLATE_AMBER_DIM,LV_CHART_AXIS_PRIMARY_Y);
+        lv_obj_set_style_line_color(scope,PLATE_AMBER_DIM,LV_PART_ITEMS);
+        lv_obj_set_style_line_opa(scope,LV_OPA_50,LV_PART_ITEMS);
+        lv_obj_set_style_line_width(scope,scaled(1),LV_PART_ITEMS);
+        // widen the line a hair
+        // round-7: main (bright) line series — declared first so it paints over
+        // the dim-amber area series
         lv_chart_series_t* ss=lv_chart_add_series(scope,COL_HIGHLIGHT,LV_CHART_AXIS_PRIMARY_Y);
-        lv_chart_set_update_mode(scope,LV_CHART_UPDATE_MODE_CIRCULAR);
+        lv_obj_set_style_line_color(scope,COL_HIGHLIGHT,LV_PART_ITEMS);
+        lv_obj_set_style_line_opa(scope,LV_OPA_COVER,LV_PART_ITEMS);
+        lv_obj_set_style_line_width(scope,scaled(2),LV_PART_ITEMS);
+        lv_obj_set_style_size(scope,0,0,LV_PART_INDICATOR);
+        // round-8: seed the area series so the dim-amber fill actually renders
+        for(int i=0;i<128;++i) lv_chart_set_next_value(scope,ssArea,0);
         for(int i=0;i<128;++i) lv_chart_set_next_value(scope,ss,0);
-        fScopeChart=scope; fScopeSeries=(void*)ss;
+        fScopeChart=scope; fScopeSeries=(void*)ss; fScopeAreaSeries=(void*)ssArea;
 
         // keyboard strip (full-width row under the stage)
         createKeyboard(root);
@@ -1592,12 +1619,13 @@ private:
             peak=std::max(peak,e);
         }
         for(int i=0;i<128;++i) fScopePreview[i]/=peak;
-        fScopePreviewIdx=0;
-        fScopePreviewReady=true;
-        // seed the whole trace now so a single tick shows the full curve
         if(fScopeChart && fScopeSeries){
-            for(int i=0;i<128;++i)
-                lv_chart_set_next_value(fScopeChart,(lv_chart_series_t*)fScopeSeries,(int32_t)(fScopePreview[i]*980.f));
+            for(int i=0;i<128;++i){
+                const int32_t v=(int32_t)(fScopePreview[i]*980.f);
+                lv_chart_set_next_value(fScopeChart,(lv_chart_series_t*)fScopeSeries,v);
+                if(fScopeAreaSeries)
+                    lv_chart_set_next_value(fScopeChart,(lv_chart_series_t*)fScopeAreaSeries,v);
+            }
             lv_chart_refresh(fScopeChart);
         }
     }
@@ -1676,27 +1704,24 @@ private:
             }
             int peakM=0;
             const lv_coord_t maxH=(lv_coord_t)(scaled(lay::MAP_BARS_H)-2);
-            for(int m=0;m<n;++m){
-                if(fModeGain[m]>fModeGain[peakM]) peakM=m;
-                lv_coord_t hh=(lv_coord_t)std::clamp((int)(fModeGain[m]/gmax*maxH),1,(int)maxH);
-                fModeMapH[m]=hh;
-            }
-            for(int m=n;m<modal::kMaxModes;++m) fModeMapH[m]=0;
             for(int m=0;m<modal::kMaxModes;++m){
                 lv_obj_t* bar=fModeBars[m];
                 if(!bar) continue;
-                lv_coord_t hh=fModeMapH[m];
-                if(lv_obj_get_height(bar)!=hh) lv_obj_set_height(bar,hh?hh:1);
-                lv_color_t col=(m==peakM&&hh>0)?COL_HIGHLIGHT:PLATE_EDGE;
-                lv_obj_set_style_bg_color(bar,col,0);
-            }
+                const lv_coord_t hh2=fModeMapH[m];
+                if(m==peakM && hh2>0){
+                    lv_obj_set_style_bg_opa(bar,LV_OPA_COVER,0);
+                } else {
+                    lv_obj_set_style_bg_color(bar,PLATE_AMBER,0);
+                    lv_obj_set_style_bg_opa(bar,LV_OPA_80,0);
+                }
+            }   // end for(int m=0;m<kMaxModes;++m) bar style loop
             if(fModePeakLbl && peakM!=fModePeakIdx){
                 fModePeakIdx=peakM;
                 char nm[24];
                 snprintf(nm,sizeof(nm),"M%d  -  %.0f HZ",peakM+1,pr.freq[peakM]);
                 lv_label_set_text(fModePeakLbl,nm);
             }
-        }
+        }   // end if(fModeBars[0] && fModeMapDirty)
         lv_chart_refresh(fSpectrumChart);
         if(fRippleCooldown>0) --fRippleCooldown;
         bool onset=(totalE>fPrevEnergy+std::max(0.02f,fPrevEnergy*1.1f)) && totalE>0.04f;
@@ -1786,6 +1811,7 @@ private:
     int fLevelPeakX=-1;
     lv_obj_t* fScopeChart=nullptr;
     void* fScopeSeries=nullptr;
+    void* fScopeAreaSeries=nullptr;
     lv_obj_t* fLevelBar=nullptr;
     lv_obj_t* fLevelPeak=nullptr;
     lv_obj_t* zoneWarnMark=nullptr;
