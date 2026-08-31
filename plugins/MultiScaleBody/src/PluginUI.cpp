@@ -146,6 +146,11 @@ public:
            || i==PluginMultiScaleBody::kParamModeCount || i==PluginMultiScaleBody::kParamStrikeX
            || i==PluginMultiScaleBody::kParamStrikeY)
             fScopePreviewReady=false;
+        // ROUND-6: the MODE MAP re-derives from these (plus band trims)
+        if(i==PluginMultiScaleBody::kParamPreset || i==PluginMultiScaleBody::kParamModeCount
+           || i==PluginMultiScaleBody::kParamStrikeX || i==PluginMultiScaleBody::kParamStrikeY
+           || (i>=PluginMultiScaleBody::kParamBand0 && i<=PluginMultiScaleBody::kParamBand15))
+            fModeMapDirty=true;
         // metering outputs arrive here every audio block - the bridge-safe DSP->UI link
         if(i>=PluginMultiScaleBody::kParamOutBand0 && i<PluginMultiScaleBody::kParameterCount){
             fVizBins[i-PluginMultiScaleBody::kParamOutBand0]=v;
@@ -206,7 +211,7 @@ public:
         if(!fUIBuilt) return;
         styles.reset(); styles.init();
         if(kbHeldNote>=0 && kbHeldNote<=127){ sendNote(0,(uint8_t)kbHeldNote,0); kbHeldNote=-1; }
-        for(int o=0;o<12;++o){ int n=kbBaseNote+o; if(n>=0&&n<=127) sendNote(0,(uint8_t)n,0); }
+        for(int o=0;o<lay::KEY_WHITE_N*2;++o){ int n=kbBaseNote+o; if(n>=0&&n<=127) sendNote(0,(uint8_t)n,0); }   // 3 octaves = 36 semitones
         lv_obj_t* root=lv_screen_active(); if(root) lv_obj_clean(root);
         fUIBuilt=false;
         clearWidgetRefs();
@@ -499,9 +504,11 @@ private:
         lv_obj_t* arc=(lv_obj_t*)lv_event_get_target(e);
         if(!ui||!arc) return;
         int pi=(int)(intptr_t)lv_obj_get_user_data(arc);
-        lv_obj_t* cont=lv_obj_get_parent(arc);
-        if(!cont) return;
-        lv_obj_t* lbl=lv_obj_get_child(cont,lv_obj_get_child_count(cont)-1);
+        // Round-6: resolve the chip via the UIWidgets binding map - the master
+        // knob's chip is reparented beside the arc (masterRow), so a
+        // "last child of cont" probe would miss it.
+        auto fIt=gArcVisualBindings.find(arc);
+        lv_obj_t* lbl=(fIt!=gArcVisualBindings.end())?fIt->second.valueLabel:nullptr;
         if(!lbl||!lv_obj_check_type(lbl,&lv_label_class)) return;
         char buf[24];
         ui->formatParamValue(pi,lv_arc_get_value(arc)/1000.f,buf,sizeof(buf));
@@ -644,27 +651,29 @@ private:
         static const int whiteOff[7]={0,2,4,5,7,9,11};
         static const int blackOff[5]={1,3,6,8,10};
         static const char* whiteName[7]={"C","D","E","F","G","A","B"};
-        for(int i=0;i<7;++i){
+        for(int i=0;i<lay::KEY_WHITE_N;++i){
             if(!kbWhite[i]) continue;
-            int note = kbBaseNote + whiteOff[i];
+            const int o=i/7, k=i%7;
+            int note = kbBaseNote + o*12 + whiteOff[k];
             note = std::clamp(note,0,127);
             lv_obj_set_user_data(kbWhite[i], (void*)(intptr_t)note);
             lv_obj_t* child = lv_obj_get_child(kbWhite[i],0);
             if(child && lv_obj_check_type(child,&lv_label_class)){
                 int oct = note/12 -1;
-                char buf[8]; snprintf(buf,sizeof(buf),"%s%d",whiteName[i],oct);
+                char buf[8]; snprintf(buf,sizeof(buf),"%s%d",whiteName[k],oct);
                 lv_label_set_text(child,buf);
             }
         }
-        for(int i=0;i<5;++i){
+        for(int i=0;i<lay::KEY_BLACK_N;++i){
             if(!kbBlack[i]) continue;
-            int note = kbBaseNote + blackOff[i];
+            const int o=i/5, k=i%5;
+            int note = kbBaseNote + o*12 + blackOff[k];
             note = std::clamp(note,0,127);
             lv_obj_set_user_data(kbBlack[i], (void*)(intptr_t)note);
         }
         if(kbOctLabel){
             int oct = kbBaseNote/12 -1;
-            char buf[16]; snprintf(buf,sizeof(buf),"C%d - B%d",oct,oct);
+            char buf[16]; snprintf(buf,sizeof(buf),"C%d - B%d",oct,oct+lay::KEY_OCTAVES-1);
             lv_label_set_text(kbOctLabel,buf);
         }
     }
@@ -692,7 +701,7 @@ private:
         lv_obj_t* btn=(lv_obj_t*)lv_event_get_target(e);
         if(!ui||!btn) return;
         int dir=(int)(intptr_t)lv_obj_get_user_data(btn);
-        int next=ui->kbBaseNote+dir; next=std::clamp(next,24,96); next=(next/12)*12;
+        int next=ui->kbBaseNote+dir; next=std::clamp(next,24,92); next=(next/12)*12;   // 92 -> floor C6: top key B6 = 119 <= 127
         if(next!=ui->kbBaseNote){ ui->kbBaseNote=next; ui->updateKeyboardNotes(); }
     }
     // arpeggiator master switch - persisted via shared "arpon" state
@@ -876,7 +885,7 @@ private:
         lv_obj_set_style_pad_all(kbContainer,scaled(8),0);
         // head row: caption left, ARP/octave cluster right (both explicit heights)
         lv_obj_t* kbHead=makeRow(kbContainer,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
-        lv_obj_t* kbTitle=addLabel(kbHead,"KEYBOARD  -  1 OCTAVE  -  CLICK TO AUDITION",getScaledMicroFont(),COL_HIGHLIGHT,2);
+        lv_obj_t* kbTitle=addLabel(kbHead,"KEYBOARD  -  3 OCTAVES  -  CLICK TO AUDITION",getScaledMicroFont(),COL_HIGHLIGHT,2);
         lv_obj_set_style_text_opa(kbTitle,LV_OPA_80,0);
         // cluster width: ARP 46 + 6 + oct 28 + 6 + label 70 + 6 + oct 28 = 190
         lv_obj_t* octRow=makeRow(kbHead,scaled(190),scaled(lay::BTN_H),scaled(6));
@@ -890,7 +899,7 @@ private:
         lv_obj_t* octDown=lv_btn_create(octRow); lv_obj_set_size(octDown,scaled(lay::BTN_W_OCT),scaled(lay::BTN_H)); lv_obj_add_style(octDown,&styles.btnMain,0); lv_obj_add_style(octDown,&styles.btnHovered,LV_STATE_HOVERED); lv_obj_add_style(octDown,&styles.btnPressed,LV_STATE_PRESSED); lv_obj_set_style_radius(octDown,scaled(lay::RADIUS_SM),0); lv_obj_set_style_pad_all(octDown,0,0);
         lv_obj_set_user_data(octDown,(void*)(intptr_t)-12); lv_obj_add_event_cb(octDown,octaveBtnCb,LV_EVENT_CLICKED,this);
         lv_obj_t* dl=lv_label_create(octDown); lv_label_set_text(dl,"<"); lv_obj_center(dl); lv_obj_set_style_text_color(dl,COL_TEXT,0);
-        kbOctLabel=lv_label_create(octRow); lv_label_set_text(kbOctLabel,"C4 - B4");
+        kbOctLabel=lv_label_create(octRow); lv_label_set_text(kbOctLabel,"C3 - B5");
         lv_obj_set_width(kbOctLabel,scaled(lay::OCTLBL_W));
         lv_obj_set_style_text_align(kbOctLabel,LV_TEXT_ALIGN_CENTER,0);
         lv_obj_set_style_text_color(kbOctLabel,COL_TEXT_DIM,0);
@@ -898,31 +907,39 @@ private:
         lv_obj_t* octUp=lv_btn_create(octRow); lv_obj_set_size(octUp,scaled(lay::BTN_W_OCT),scaled(lay::BTN_H)); lv_obj_add_style(octUp,&styles.btnMain,0); lv_obj_add_style(octUp,&styles.btnHovered,LV_STATE_HOVERED); lv_obj_add_style(octUp,&styles.btnPressed,LV_STATE_PRESSED); lv_obj_set_style_radius(octUp,scaled(lay::RADIUS_SM),0); lv_obj_set_style_pad_all(octUp,0,0);
         lv_obj_set_user_data(octUp,(void*)(intptr_t)12); lv_obj_add_event_cb(octUp,octaveBtnCb,LV_EVENT_CLICKED,this);
         lv_obj_t* ul=lv_label_create(octUp); lv_label_set_text(ul,">"); lv_obj_center(ul); lv_obj_set_style_text_color(ul,COL_TEXT,0);
-        // keys row centers the fixed 404-wide keybed in whatever width remains
+        // keys row: the keybed IS the footer width now - 3 octaves (C3-B5),
+        // 21 white keys derived from lay::KEY_WHITE_W so the comb fills the
+        // strip inner exactly (round-6: the old fixed 404px keybed sat
+        // centered with ~500px dead either side - the user read the footer
+        // as "keyboard doesn't extend over the full footer").
         lv_obj_t* kbRow=makeRow(kbContainer,lv_pct(100),scaled(lay::KEY_H),0,LV_FLEX_ALIGN_CENTER);
-        // keybed arithmetic: 7 white x 56 + 6 x 2 gap = 404 wide, 80 tall
-        const int whiteW=scaled(lay::KEY_W), whiteH=scaled(lay::KEY_H);
+        // keybed arithmetic @s=1: 21 white x 64 + 20 x 2 gap = 1384 wide
+        const int whiteW=scaled(lay::KEY_WHITE_W), whiteH=scaled(lay::KEY_H);
         const int blackW=scaled(lay::KEY_BLACK_W), blackH=scaled(lay::KEY_BLACK_H);
         const int gap=scaled(lay::KEY_GAP);
-        const int keysW=7*whiteW+6*gap;
+        const int keysW=lay::KEY_WHITE_N*whiteW+(lay::KEY_WHITE_N-1)*gap;
         lv_obj_t* keysBox=makeBox(kbRow,keysW,whiteH);
         lv_obj_set_layout(keysBox,LV_LAYOUT_NONE);
         static const char* whiteName[7]={"C","D","E","F","G","A","B"}; static const int whiteOff[7]={0,2,4,5,7,9,11}; static const int blackOff[5]={1,3,6,8,10};
-        int bX[5]; int stepW=whiteW+gap; bX[0]=stepW*1-blackW/2; bX[1]=stepW*2-blackW/2; bX[2]=stepW*4-blackW/2; bX[3]=stepW*5-blackW/2; bX[4]=stepW*6-blackW/2;
-        for(int i=0;i<7;++i){
+        const int stepW=whiteW+gap;
+        for(int i=0;i<lay::KEY_WHITE_N;++i){
             lv_obj_t* w=lv_btn_create(keysBox); lv_obj_set_size(w,whiteW,whiteH); lv_obj_set_pos(w,i*stepW,0);
             lv_obj_set_style_bg_color(w,COL_KNOB,0); lv_obj_set_style_bg_color(w,COL_KNOB_LIGHT,LV_STATE_HOVERED); lv_obj_set_style_bg_opa(w,LV_OPA_COVER,0); lv_obj_set_style_border_color(w,COL_HAIRLINE,0); lv_obj_set_style_border_width(w,1,0); lv_obj_set_style_radius(w,scaled(5),0); lv_obj_set_style_pad_all(w,0,0);
-            int note=kbBaseNote+whiteOff[i]; lv_obj_set_user_data(w,(void*)(intptr_t)note);
+            const int note=kbBaseNote+(i/7)*12+whiteOff[i%7]; lv_obj_set_user_data(w,(void*)(intptr_t)note);
             lv_obj_add_event_cb(w,keyEventCb,LV_EVENT_PRESSED,this); lv_obj_add_event_cb(w,keyEventCb,LV_EVENT_RELEASED,this); lv_obj_add_event_cb(w,keyEventCb,LV_EVENT_PRESS_LOST,this); lv_obj_add_event_cb(w,keyEventCb,LV_EVENT_LEAVE,this);
-            kbWhite[i]=w; lv_obj_t* lbl=lv_label_create(w); int oct=note/12-1; char buf[8]; snprintf(buf,sizeof(buf),"%s%d",whiteName[i],oct); lv_label_set_text(lbl,buf);
+            kbWhite[i]=w; lv_obj_t* lbl=lv_label_create(w); int oct=note/12-1; char buf[8]; snprintf(buf,sizeof(buf),"%s%d",whiteName[i%7],oct); lv_label_set_text(lbl,buf);
             lv_obj_add_style(lbl,&styles.labelSmall,0); lv_obj_set_style_text_color(lbl,COL_PANEL_DARK,0); lv_obj_set_style_text_font(lbl,getScaledMicroFont(),0); lv_obj_align(lbl,LV_ALIGN_BOTTOM_MID,0,-scaled(4)); lv_obj_clear_flag(lbl,LV_OBJ_FLAG_CLICKABLE);
         }
-        for(int i=0;i<5;++i){
-            lv_obj_t* b=lv_btn_create(keysBox); lv_obj_set_size(b,blackW,blackH); lv_obj_set_pos(b,bX[i],0);
+        for(int i=0;i<lay::KEY_BLACK_N;++i){
+            const int o=i/5, k=i%5;
+            // black key sits on the boundary after white {0,1,3,4,5} of its octave
+            static const int blackAfterWhite[5]={0,1,3,4,5};
+            const int bx=(o*7+blackAfterWhite[k]+1)*stepW-blackW/2;
+            lv_obj_t* b=lv_btn_create(keysBox); lv_obj_set_size(b,blackW,blackH); lv_obj_set_pos(b,bx,0);
             lv_obj_set_style_bg_color(b,KB_BLACK,0); lv_obj_set_style_bg_color(b,KB_BLACK_HI,LV_STATE_HOVERED); lv_obj_set_style_bg_grad_color(b,KB_BLACK_HI,0); lv_obj_set_style_bg_grad_dir(b,LV_GRAD_DIR_VER,0); lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);
             lv_obj_set_style_border_color(b,COL_HAIRLINE,0); lv_obj_set_style_border_width(b,1,0); lv_obj_set_style_radius(b,scaled(lay::RADIUS_SM),0); lv_obj_set_style_pad_all(b,0,0);
             lv_obj_set_style_shadow_width(b,scaled(4),0); lv_obj_set_style_shadow_color(b,COL_BLACK,0); lv_obj_set_style_shadow_opa(b,LV_OPA_30,0);
-            int note=kbBaseNote+blackOff[i]; lv_obj_set_user_data(b,(void*)(intptr_t)note);
+            const int note=kbBaseNote+o*12+blackOff[k]; lv_obj_set_user_data(b,(void*)(intptr_t)note);
             lv_obj_add_event_cb(b,keyEventCb,LV_EVENT_PRESSED,this); lv_obj_add_event_cb(b,keyEventCb,LV_EVENT_RELEASED,this); lv_obj_add_event_cb(b,keyEventCb,LV_EVENT_PRESS_LOST,this); lv_obj_add_event_cb(b,keyEventCb,LV_EVENT_LEAVE,this);
             kbBlack[i]=b;
         }
@@ -968,10 +985,33 @@ private:
         // Letter-space +2 (was 4) keeps the headline tight; the authors line
         // drops to 50% opacity + 1px smaller so it recedes and lets the title own the bar.
         // brand mark - bold, monospaced-feel, two-line: product | class
-        lv_obj_t* brandCol=makeCol(topbar,scaled(240),lv_pct(100),scaled(2));
-        lv_obj_t* titleLbl=addLabel(brandCol,"MULTI-SCALE BODY",gUIScale>=1.2f?getDisplayFont26():getDisplayFont(),PLATE_TITLE,2);
-        lv_obj_set_style_text_letter_space(titleLbl,4,0);
-        lv_obj_t* authorsLbl=addLabel(brandCol,"MODAL SYNTH   -   DAFX-09 / 47",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        lv_obj_t* brandCol=makeCol(topbar,scaled(lay::BRAND_W),lv_pct(100),scaled(2));
+        // Round-6: the title is MEASURED and steps down font buckets until it
+        // fits the column - "MULTI-SCALE BODY" at 26px + space 4 needed ~370px
+        // and clipped to "MULTI-SCALE B" in a 240px column (fitKnobText
+        // pattern from the gauntlet kit: never ship a truncated headline).
+        lv_obj_t* titleLbl=nullptr;
+        {
+            struct BrandFont{ const lv_font_t* f; int ls; };
+            const BrandFont cand[]={
+                {getDisplayFont26(),2},{getDisplayFont(),2},
+                {getScaledFont(),2},{getScaledSmallFont(),2}};
+            const char* txt="MULTI-SCALE BODY";
+            const lv_coord_t avail=scaled(lay::BRAND_W);
+            // measure by creating the label and forcing its layout: SIZE_CONTENT
+            // resolves to the real text width, so lv_obj_get_width is the truth
+            for(const BrandFont& c:cand){
+                lv_obj_t* l=addLabel(brandCol,txt,c.f,PLATE_TITLE,c.ls);
+                lv_obj_update_layout(l);
+                if(lv_obj_get_width(l)<=avail){ titleLbl=l; break; }
+                lv_obj_delete(l);
+            }
+            if(!titleLbl) titleLbl=addLabel(brandCol,txt,cand[3].f,PLATE_TITLE,cand[3].ls);
+        }
+        // Round-6: sub-line shortened to the synth class - the DAFX-09/PAPER 47
+        // identity already lives right-aligned in the nav strip below, and the
+        // duplicated suffix truncated at the old 240px column.
+        lv_obj_t* authorsLbl=addLabel(brandCol,"MODAL SYNTH",getScaledMicroFont(),PLATE_TEXT_DIM,1);
         lv_obj_set_style_text_opa(authorsLbl,LV_OPA_50,0);
         lv_obj_set_style_text_letter_space(authorsLbl,1,0);
         // preset browser - move from the center to the top bar so the hero gets air
@@ -1045,20 +1085,27 @@ private:
             lv_obj_t* masterArc=UIWidgets::createArcKnob(masterRow,PluginMultiScaleBody::kParamWet,this,styles,mSpec);
             regExtraWidget(PluginMultiScaleBody::kParamWet, masterArc);
             lv_obj_add_event_cb(masterArc,valueFormatCb,LV_EVENT_ALL,this);
-            {
+            // Round-6: the 44x30 container cannot stack arc (28) + value chip
+            // (~15) - the chip flex-spilled to the topbar's bottom edge (the
+            // user-visible "0.5 cut off"). Restructure, keeping UIWidgets'
+            // binding contract intact (sync/drag paths address the chip via
+            // gArcVisualBindings pointers, so reparenting is safe):
+            //   cont keeps ONLY the arc (the "Wet" title is deleted - HIDDEN
+            //   still occupies a flex slot and pushed the arc up);
+            //   the chip moves BESIDE the arc in masterRow (30px tall, all in
+            //   the header with real clearance).
+            lv_obj_t* cont=lv_obj_get_parent(masterArc);
+            if(cont && lv_obj_get_child_count(cont)>0){
                 // hide the widget's own title ("Wet") - the OUTPUT caption
                 // above the row already names the cluster
-                lv_obj_t* cont=lv_obj_get_parent(masterArc);
-                if(cont&&lv_obj_get_child_count(cont)>0){
-                    lv_obj_t* t0=lv_obj_get_child(cont,0);
-                    if(t0&&lv_obj_check_type(t0,&lv_label_class)) lv_obj_add_flag(t0,LV_OBJ_FLAG_HIDDEN);
-                }
+                lv_obj_t* t0=lv_obj_get_child(cont,0);
+                if(t0 && lv_obj_check_type(t0,&lv_label_class)) lv_obj_add_flag(t0,LV_OBJ_FLAG_HIDDEN);
                 // reformat the trailing value chip from %.2f to the param format
-                lv_obj_t* lbl=cont?lv_obj_get_child(cont,lv_obj_get_child_count(cont)-1):nullptr;
-                if(lbl&&lv_obj_check_type(lbl,&lv_label_class)){
+                auto bIt=gArcVisualBindings.find(masterArc);
+                if(bIt!=gArcVisualBindings.end() && bIt->second.valueLabel){
                     char b[24];
                     formatParamValue(PluginMultiScaleBody::kParamWet,paramCache[PluginMultiScaleBody::kParamWet],b,sizeof(b));
-                    lv_label_set_text(lbl,b);
+                    lv_label_set_text(bIt->second.valueLabel,b);
                 }
             }
         }
@@ -1287,43 +1334,40 @@ private:
         lv_obj_set_style_shadow_opa(strikeDot,LV_OPA_60,0);
         lv_obj_set_pos(strikeDot,(int)(paramCache[PluginMultiScaleBody::kParamStrikeX]*(D-scaled(12))),
                                 (int)((1.f-paramCache[PluginMultiScaleBody::kParamStrikeY])*(D-scaled(12))));
-        // === ROUND-5 (issue #1): MODE ACTIVITY panel =====================
-        // The capture judgement measured ~260px of dead charcoal below the
-        // disc (discCol held only head 22 + gap + disc 280 of its 568px
-        // height). Instead of stretching the disc (which would re-create the
-        // "dark empty area" the round-2 critic flagged at 406px), the dead
-        // band becomes a live readout: one thin bar per mode band, fed by the
-        // SAME spectrum data the analyzer tower uses (fVizBins live path /
-        // sound-map preview path), plus a shared PEAK cell. The hero column
-        // then shows what the body is DOING, not just where to hit it.
-        // Budget @s=1 (discCol = 568, 6px flex gaps): 22 head + 6 + 280 disc
-        //   + 6 + 22 head + 6 + 226 card = 568 EXACT - zero dead band. The
-        //   disc keeps its hero size (280; r2 critic flagged 406 as an empty
-        //   dark area, so re-inflating it is not an option), and the column
-        //   now carries a second data surface instead of charcoal.
+        // === ROUND-6: MODE MAP (per-mode strike-gain comb) ================
+        // Round-5's MODE ACTIVITY panel re-plotted the SAME 16 env[] bands as
+        // the MODE SPECTRUM - the user read it as a duplicated spectrum. It
+        // is now a 128-slot per-MODE comb instead: bar height = that mode's
+        // strike-position gain (bilinear sound-map, the same ModalData math
+        // the idle spectrum preview uses), mode order = ascending baked
+        // frequency. A different QUESTION than the live spectrum ("what does
+        // this body do under the mallet" vs "what is it sounding now"), and
+        // it visibly morphs as the strike disc / preset / Modes knob move.
+        // Budget @s=1 (discCol = 566, 6px flex gaps): 22 head + 6 + 280 disc
+        //   + 6 + 22 head + 6 + 224 card = 566 EXACT - zero dead band.
         lv_obj_t* actHead=makeRow(discCol,scaled(lay::DISC_D),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
-        addLabel(actHead,"MODE ACTIVITY",getScaledSmallFont(),PLATE_TEXT,2);
-        addLabel(actHead,"LIVE",getScaledMicroFont(),PLATE_TEXT_DIM,1);
-        lv_obj_t* actCard=makeCard(discCol,scaled(lay::DISC_D),scaled(lay::ACTIVITY_H),scaled(4));
-        lv_obj_t* actRow=makeRow(actCard,lv_pct(100),scaled(lay::ACTIVITY_BARS_H),scaled(2),LV_FLEX_ALIGN_START);
+        addLabel(actHead,"MODE MAP",getScaledSmallFont(),PLATE_TEXT,2);
+        addLabel(actHead,"STRIKE GAINS",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        lv_obj_t* actCard=makeCard(discCol,scaled(lay::DISC_D),scaled(lay::MAP_CARD_H),scaled(4));
+        lv_obj_t* actRow=makeRow(actCard,lv_pct(100),scaled(lay::MAP_BARS_H),1,LV_FLEX_ALIGN_START);
         lv_obj_set_flex_align(actRow,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_END,LV_FLEX_ALIGN_CENTER);
-        for(int b=0;b<16;++b){
+        for(int m=0;m<modal::kMaxModes;++m){
             lv_obj_t* bar=lv_obj_create(actRow);
-            lv_obj_set_width(bar,scaled(lay::ACTIVITY_BAR_W));
-            lv_obj_set_height(bar,scaled(lay::ACTIVITY_BARS_H));
-            lv_obj_set_style_radius(bar,scaled(1),0);
-            lv_obj_set_style_bg_color(bar,PLATE_WELL,0);
+            lv_obj_set_width(bar,scaled(lay::MAP_BAR_W));
+            lv_obj_set_height(bar,1);
+            lv_obj_set_style_radius(bar,0,0);
+            lv_obj_set_style_bg_color(bar,PLATE_EDGE,0);
             lv_obj_set_style_bg_opa(bar,LV_OPA_COVER,0);
             lv_obj_set_style_border_width(bar,0,0);
             lv_obj_set_style_pad_all(bar,0,0);
             lv_obj_clear_flag(bar,LV_OBJ_FLAG_SCROLLABLE);
             lv_obj_clear_flag(bar,LV_OBJ_FLAG_CLICKABLE);
-            fActivityBars[b]=bar;
+            fModeBars[m]=bar;
         }
-        // shared peak cell (right-anchored readout, one per panel not per bar)
-        lv_obj_t* actPeakCell=makeRow(actCard,lv_pct(100),scaled(lay::ACTIVITY_PEAK_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
+        // shared peak cell: PEAK + "M<n> . <freq> HZ" readout
+        lv_obj_t* actPeakCell=makeRow(actCard,lv_pct(100),scaled(lay::MAP_PEAK_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         addLabel(actPeakCell,"PEAK",getScaledMicroFont(),PLATE_TEXT_DIM,1);
-        fActivityPeakLbl=addLabel(actPeakCell,"B1",getScaledMicroFont(),PLATE_AMBER,1);
+        fModePeakLbl=addLabel(actPeakCell,"M1",getScaledMicroFont(),PLATE_AMBER,1);
 
         // === INFO COL (right of the disc) ================================
         // The body-info cluster spread to the right of the disc instead of
@@ -1601,24 +1645,56 @@ private:
             if(env[b]>fSpecPeaks[b]){ fSpecPeaks[b]=env[b]; fSpecHoldAge[b]=0; }
             else if(++fSpecHoldAge[b]>21) fSpecPeaks[b]=std::max(0.f,std::max(env[b],fSpecPeaks[b]-0.006f));
         }
-        // ROUND-5: mode-activity bars (hero column). Same env[] the analyzer
-        // chart consumes - bottom-aligned height, amber only for the peak
-        // band (one-accent discipline), dim plate for the rest.
-        if(fActivityBars[0]){
-            int peakB=0;
-            for(int b=1;b<16;++b) if(env[b]>env[peakB]) peakB=b;
-            for(int b=0;b<16;++b){
-                lv_obj_t* bar=fActivityBars[b];
+        // ROUND-6: MODE MAP bars (hero column). Per-mode strike gains from the
+        // bilinear sound-map (baked ModalData + current preset / strike X/Y /
+        // Modes / band trims from paramCache). Recomputed only when one of
+        // those params changes (fModeMapDirty, set in parameterChanged);
+        // heights are cached so idle ticks do no LVGL work. Amber only for
+        // the peak-gain mode (one-accent discipline), PLATE_EDGE for the rest.
+        if(fModeBars[0] && fModeMapDirty){
+            fModeMapDirty=false;
+            using namespace modal;
+            int mxp=kNumPresets-1;
+            int preset=(int)std::round(paramCache[PluginMultiScaleBody::kParamPreset]*(float)mxp);
+            const auto& pr=kPresets[std::clamp(preset,0,mxp)];
+            int n=std::clamp((int)(8+paramCache[PluginMultiScaleBody::kParamModeCount]*120.f),8,pr.n);
+            float sx=paramCache[PluginMultiScaleBody::kParamStrikeX];
+            float sy=paramCache[PluginMultiScaleBody::kParamStrikeY];
+            float fx=sx*15.f, fy=sy*15.f;
+            int x0=std::clamp((int)fx,0,14), y0=std::clamp((int)fy,0,14);
+            int x1=x0+1, y1=y0+1; float dx=fx-x0, dy=fy-y0;
+            float w00=(1-dx)*(1-dy), w10=dx*(1-dy), w01=(1-dx)*dy, w11=dx*dy;
+            float gmax=1e-9f;
+            for(int m=0;m<n;++m){
+                float g=pr.gain[m][y0][x0]*w00+pr.gain[m][y0][x1]*w10
+                       +pr.gain[m][y1][x0]*w01+pr.gain[m][y1][x1]*w11;
+                g=std::fabs(g);
+                int band=(m*16)/n;
+                float trim=paramCache[PluginMultiScaleBody::kParamBand0+std::clamp(band,0,15)]*2.f;
+                fModeGain[m]=g*trim;
+                gmax=std::max(gmax,fModeGain[m]);
+            }
+            int peakM=0;
+            const lv_coord_t maxH=(lv_coord_t)(scaled(lay::MAP_BARS_H)-2);
+            for(int m=0;m<n;++m){
+                if(fModeGain[m]>fModeGain[peakM]) peakM=m;
+                lv_coord_t hh=(lv_coord_t)std::clamp((int)(fModeGain[m]/gmax*maxH),1,(int)maxH);
+                fModeMapH[m]=hh;
+            }
+            for(int m=n;m<modal::kMaxModes;++m) fModeMapH[m]=0;
+            for(int m=0;m<modal::kMaxModes;++m){
+                lv_obj_t* bar=fModeBars[m];
                 if(!bar) continue;
-                lv_coord_t hh=std::clamp((lv_coord_t)(env[b]*(float)(scaled(lay::ACTIVITY_BARS_H)-2)),(lv_coord_t)1,scaled(lay::ACTIVITY_BARS_H));
-                if(lv_obj_get_height(bar)!=hh) lv_obj_set_height(bar,hh);
-                lv_color_t col=(b==peakB)?COL_HIGHLIGHT:PLATE_LINE;
+                lv_coord_t hh=fModeMapH[m];
+                if(lv_obj_get_height(bar)!=hh) lv_obj_set_height(bar,hh?hh:1);
+                lv_color_t col=(m==peakM&&hh>0)?COL_HIGHLIGHT:PLATE_EDGE;
                 lv_obj_set_style_bg_color(bar,col,0);
             }
-            if(fActivityPeakLbl && peakB!=fActivityPeakBand){
-                fActivityPeakBand=peakB;
-                char nm[8]; snprintf(nm,sizeof(nm),"B%d",peakB+1);
-                lv_label_set_text(fActivityPeakLbl,nm);
+            if(fModePeakLbl && peakM!=fModePeakIdx){
+                fModePeakIdx=peakM;
+                char nm[24];
+                snprintf(nm,sizeof(nm),"M%d  -  %.0f HZ",peakM+1,pr.freq[peakM]);
+                lv_label_set_text(fModePeakLbl,nm);
             }
         }
         lv_chart_refresh(fSpectrumChart);
@@ -1747,12 +1823,12 @@ private:
     int fScopePreviewIdx=0;
     lv_obj_t* arpBtn=nullptr;
     bool arpOnLocal=false;
-    // keyboard
+    // keyboard - round-6: 3 octaves (C3-B5) spanning the full footer strip
     lv_obj_t* kbContainer=nullptr;
-    lv_obj_t* kbWhite[7];
-    lv_obj_t* kbBlack[5];
+    lv_obj_t* kbWhite[lay::KEY_WHITE_N];
+    lv_obj_t* kbBlack[lay::KEY_BLACK_N];
     lv_obj_t* kbOctLabel=nullptr;
-    int kbBaseNote=60;
+    int kbBaseNote=48;
     int kbHeldNote=-1;
     // header zoom stepper
     lv_obj_t* zoomMinus=nullptr;
@@ -1762,12 +1838,16 @@ private:
     // spectrum peak-hold caps (falling-hold markers above the bars)
     float fSpecPeaks[16]={};
     int fSpecHoldAge[16]={};
-    // ROUND-5: mode-activity panel (disc column dead-band fix, issue #1) -
-    // bars share the analyzer's per-band data path, peak label tracks the
-    // strongest band so the readout stays live even when bars are near-zero
-    lv_obj_t* fActivityBars[16]={};
-    lv_obj_t* fActivityPeakLbl=nullptr;
-    int fActivityPeakBand=0;
+    // ROUND-6: MODE MAP (per-mode strike-gain comb, disc column). Gains come
+    // from the baked ModalData sound-map at the current strike position;
+    // recomputation is gated by fModeMapDirty (preset/strike/modes/band
+    // changes) and cached into fModeMapH so idle ticks do no LVGL work.
+    lv_obj_t* fModeBars[modal::kMaxModes]={};
+    float fModeGain[modal::kMaxModes]={};
+    lv_coord_t fModeMapH[modal::kMaxModes]={};
+    lv_obj_t* fModePeakLbl=nullptr;
+    int fModePeakIdx=-1;
+    bool fModeMapDirty=true;
 };
 UI* createUI(){ return new MultiScaleBodyUI(); }
 const uint32_t MultiScaleBodyUI::kMacroParams[8]={

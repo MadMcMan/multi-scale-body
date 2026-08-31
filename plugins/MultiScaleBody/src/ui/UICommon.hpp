@@ -86,22 +86,36 @@ public:
 // the nav strip (12px instead of 72px). 60px of vertical room flows into the stage.
 //
 // Vertical budget, base scale:
-//   2*PAD + HEADER_H + NAV_H(28) + MACRO_LED_H(12) + 4*ROW_GAP + STAGE_H + KB_STRIP_H
-//   = 16 + 72 + 28 + 12 + 24 + 568 + 128 + 16 = 864  (base_h 860 -> 4px slack)
+//   2*PAD + HEADER_H + NAV_H(24) + MACRO_LED_H(18) + 4*ROW_GAP + STAGE_H + KB_STRIP_H
+//   = 16 + 72 + 24 + 18 + 24 + 566 + 128 + 16 = 864  (base_h 860 -> 4px slack)
+// Round-6: LED row 12 -> 18 - the M1-M8 micro labels have a ~13px line height
+// and were clipped mid-glyph by the nav panel's bottom edge at 12px.
 // Horizontal budget (stage inner = 1440-2*16 = 1408):
 //   LEFT_W + CENTER_W + RIGHT(grow) + 2*GUTTER = 392 + 480 + 516 + 20 = 1408  (exact)
 namespace lay {
     constexpr int BASE_W = 1440, BASE_H = 860;
     constexpr int PAD = 16;                      // chassis inset on all sides
     constexpr int ROW_GAP = 6;                   // vertical gap between regions
-    constexpr int HEADER_H = 72;                 // identity bar: brand | preset | master | menu | zoom
-    // NAV (h = 28): section chips + paper identity; the macro-LED row lives in
-    // the same nav-strip flex column underneath (12px) so it reads as a status
+    constexpr int HEADER_H = 72;                 // identity bar: brand | preset | master | zoom
+    // NAV (h = 24): paper identity row; the macro-LED row lives in the same
+    // nav-strip flex column underneath (18px) so it reads as a status
     // annotation, not a control region competing for primary attention.
-    constexpr int NAV_H = 28;
-    constexpr int MACRO_LED_H = 12;              // 8 thin status dots: lit when param != default
+    constexpr int NAV_H = 24;
+    constexpr int MACRO_LED_H = 18;              // 8 status cells: dot + M<n> name (13px label line height)
     constexpr int KB_STRIP_H = 128;              // 8 pad + 22 head + 6 gap + 80 keys + 8 pad (+4 slack)
-    constexpr int STAGE_H = BASE_H - 2 * PAD - HEADER_H - NAV_H - MACRO_LED_H - KB_STRIP_H - 4 * ROW_GAP;  // = 568
+    constexpr int STAGE_H = BASE_H - 2 * PAD - HEADER_H - NAV_H - MACRO_LED_H - KB_STRIP_H - 4 * ROW_GAP;  // = 566
+    // Round-6: brand column widened 240 -> 300 so the fitted title never
+    // truncates ("MULTI-SCALE B" clip at 240). Preset browser donates the 60.
+    constexpr int KEY_GAP = 2;                   // keybed pitch gap (white keys)
+    constexpr int BRAND_W = 300;
+    // Round-6: keyboard spans the full footer - 3 octaves (C3-B5), white-key
+    // width derived from the strip inner width so the keybed IS the footer.
+    constexpr int KEY_OCTAVES = 3;
+    constexpr int KEY_WHITE_N = 7 * KEY_OCTAVES;                     // 21
+    constexpr int KEY_BLACK_N = 5 * KEY_OCTAVES;                     // 15
+    constexpr int KB_INNER_W = BASE_W - 2 * PAD - 16;                // strip pad_all 8 x2
+    constexpr int KEY_WHITE_W = (KB_INNER_W - (KEY_WHITE_N - 1) * KEY_GAP) / KEY_WHITE_N;  // 64 @s=1
+    constexpr int KEY_BLACK_W = KEY_WHITE_W / 2;                     // 32
     constexpr int GUTTER = 10;                   // horizontal gap between stage columns
 
     constexpr int LEFT_W = 392;                  // dial bank: 4 knobs x 92 + 3 x 8 gutters
@@ -129,15 +143,15 @@ namespace lay {
     constexpr int PREVIEW_BOX = 52, PREVIEW_PAD = 4, PREVIEW_GAP = 2;
     constexpr int PRESET_ROW_H = 52;             // preview box + dropdown/info column
 
-    // analysis tower (right column, fills STAGE_H exactly).
-    // 568 - 8 (top inter-card) = 560; spectrum 360 + scope 196 (widened ~30px so
-    // the chart reads as an analyzer, not a bar chart)
+    // analysis tower (right column, fills STAGE_H exactly @566):
+    // spectrum 360 + gap 6 + scope 200 = 566. Scope grew +4 with the round-6
+    // LED-row fix (stage 568 -> 566 would otherwise leave a 4px charcoal seam).
     constexpr int SPECTRUM_CARD_H = 360;         // 2*10 + 22 head + 8 + 280 chart + 8 + 12 band ticks
     constexpr int CHART_H = 280;
     constexpr int TICKS_H = 12;                  // B1..B16 micro-label strip under the spectrum
-    constexpr int SCOPE_CARD_H = 196;            // 2*10 + 22 head + 8 + 14 meter + 8 + 134 scope
+    constexpr int SCOPE_CARD_H = 200;            // 2*10 + 22 head + 8 + 14 meter + 8 + 138 scope
     constexpr int METER_H = 12;
-    constexpr int SCOPE_H = 134;
+    constexpr int SCOPE_H = 138;
 
     // shared control chrome
     constexpr int RADIUS = 6, RADIUS_SM = 4;
@@ -150,13 +164,12 @@ namespace lay {
     // window keeps the base aspect EXACTLY at every step (w,h scale together)
     inline constexpr int ZOOM_STEPS[] = {50, 75, 100, 125, 150, 200};
     inline constexpr int ZOOM_STEP_COUNT = (int)(sizeof(ZOOM_STEPS) / sizeof(ZOOM_STEPS[0]));
-    // preset dropdown list: capped to ~8 visible rows -> scrolling engages
+    constexpr int KEY_H = 80, KEY_BLACK_H = 48;  // keybed heights (widths derived above)
     constexpr int DROPDOWN_ROW_H = 15, DROPDOWN_MAX_ROWS = 8;
     // unified drop-shadow direction (one global light, top-left => shadow falls down)
     constexpr int CARD_SHADOW = 10, SHADOW_OFF_Y = 3;
     // spectrum peak-hold caps drawn over the bars (piece-3: thinner/taller tick)
     constexpr int PEAK_CAP_W = 1, PEAK_CAP_H = 6;
-    constexpr int KEY_W = 56, KEY_H = 80, KEY_BLACK_W = 28, KEY_BLACK_H = 48, KEY_GAP = 2;
     // === ROUND-2: macro strip demoted to LED row ===========================
     // 8 small status dots in a single thin row; each lights amber when its
     // kMacroParams[m] is non-default. inner = 1408 - 7*8 = 1352; cell = 169.
@@ -170,18 +183,19 @@ namespace lay {
     constexpr int DISC_RING_HARD = 84;           // outer-zone ring radius
     constexpr int DISC_STRIKE_MARKER = 6;        // last-strike marker dot diameter
     constexpr int DISC_STRIKE_HOLD_MS = 500;     // last-strike marker lifetime
-    // === ROUND-5 (issue #1): mode-activity panel (fills the dead band below
-    // the disc without re-inflating the disc itself) =====================
-    // Column budget @s=1 (discCol, 568 tall, 6px flex gap): 22 head + 6 + 280
-    // disc + 6 + 22 head + 6 + 226 card = 568 EXACT -> the ~260px dead band
-    // the r4 capture measured below the disc is fully consumed.
-    // Card inner (226 = 2*12 pad + 190 chart + 8 + 12 peak row): 16 bars,
-    // 13px wide + 2px gaps -> 208+30 = 238... bars row uses pct(100) flex so
-    // the 208 fits inside 280-24=256 inner width with slack for the walls.
-    constexpr int ACTIVITY_H = 226;           // full-height card (budget above)
-    constexpr int ACTIVITY_BARS_H = 190;      // bar strip height (bars bottom-aligned)
-    constexpr int ACTIVITY_BAR_W = 13;        // per-band bar width
-    constexpr int ACTIVITY_PEAK_H = 12;       // PEAK/B# readout row under the bars
+    // === ROUND-6: MODE MAP (per-mode strike-gain map, replaces the round-5
+    // 16-bar MODE ACTIVITY panel that duplicated the MODE SPECTRUM) =======
+    // One thin bar per MODE (up to 128, mode order = ascending baked
+    // frequency); height = strike-position gain from the SAME bilinear
+    // sound-map the idle spectrum preview uses - engine-truthful modal data,
+    // a different question than the live 16-band spectrum above it.
+    // Column budget @s=1 (discCol, 566 tall, 6px flex gap): 22 head + 6 +
+    // 280 disc + 6 + 22 head + 6 + 224 card = 566 EXACT.
+    // Bars: 128 x 1px with 1px gaps = 256 = card inner (280 - 2*12 pad).
+    constexpr int MAP_CARD_H = 224;           // full-height card (budget above)
+    constexpr int MAP_BARS_H = 186;           // bar strip height (bars bottom-aligned)
+    constexpr int MAP_BAR_W = 1;              // per-mode bar width (128-slot comb)
+    constexpr int MAP_PEAK_H = 12;            // PEAK/M<n> readout row under the bars
     // top-bar identity cluster: brand mark | preset dropdown | master knob | zoom
     constexpr int NAV_CHIP_W = 86, NAV_CHIP_GAP = 6;
 }
