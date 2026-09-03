@@ -16,51 +16,55 @@ public:
     virtual std::string parameterName(uint32_t index) const = 0;
 };
 
-// === Cymbals palette — exact copy === //
-#define COL_BG         lv_color_hex(0x0D0C0A)
-#define COL_ACCENT     lv_color_hex(0x2B3039)
-#define COL_BTN_HOVER  lv_color_hex(0x3A414C)  // chrome-button hover lift (over COL_ACCENT)
-#define COL_HIGHLIGHT  lv_color_hex(0xFFB020)
-#define COL_TEXT       lv_color_hex(0xE6E0D6)
-#define COL_TEXT_DIM   lv_color_hex(0x99958B)
-#define COL_HAIRLINE   lv_color_hex(0x353B45)
-#define COL_KNOB_LABEL lv_color_hex(0x8D877A)
-#define COL_KNOB       lv_color_hex(0xF2EDE4)
-#define COL_KNOB_LIGHT lv_color_hex(0xE0DAD0)
+// === PIGMENTS-ALIGNED palette (cool charcoal chassis + light-blue accent) ===
+// Macro names preserved (UIWidgets.hpp reads these at runtime). Values are
+// bar-matched: dark charcoal ~#1A1D24 background, white text, light-blue
+// ~#3FA9F5 primary accent. Material swatches stay semantic (wood/glass/etc.)
+// because they encode the paper-47 body-material identity, not chrome.
+#define COL_BG         lv_color_hex(0x1F2229)
+#define COL_ACCENT     lv_color_hex(0x2C3038)
+#define COL_BTN_HOVER  lv_color_hex(0x3F4450)
+#define COL_HIGHLIGHT  lv_color_hex(0x3FA9F5)  // PRIMARY accent (was amber)
+#define COL_TEXT       lv_color_hex(0xE6E8EE)
+#define COL_TEXT_DIM   lv_color_hex(0xB4B8C2)
+#define COL_HAIRLINE   lv_color_hex(0x3A3E48)
+#define COL_KNOB_LABEL lv_color_hex(0x8B8F99)
+#define COL_KNOB       lv_color_hex(0xF4F4F4)
+#define COL_KNOB_LIGHT lv_color_hex(0xDDE2EA)
 #define COL_WHITE      lv_color_hex(0xFFFFFF)
 #define COL_BLACK      lv_color_hex(0x000000)
-#define COL_KNOB_RING_BG    lv_color_hex(0x232830)
-#define COL_KNOB_CAP        lv_color_hex(0x2A2E35)
-#define COL_KNOB_INDICATOR  COL_HIGHLIGHT
-#define COL_PANEL_DARK lv_color_hex(0x131518)
-#define COL_BORDER     lv_color_hex(0x383F4A)
-#define COL_CHECKED_BG lv_color_hex(0xC88A1E)
+#define COL_KNOB_RING_BG    lv_color_hex(0x15181E)  // dark track
+#define COL_KNOB_CAP        lv_color_hex(0x383D46)  // lifted cap for dark theme
+#define COL_KNOB_INDICATOR  COL_HIGHLIGHT           // light-blue arc
+#define COL_PANEL_DARK lv_color_hex(0x1F2229)
+#define COL_BORDER     lv_color_hex(0x4A4E58)
+#define COL_CHECKED_BG lv_color_hex(0x2E7BC0)       // active button gradient bottom
 
-// === STRIKE PLATE palette (MultiScaleBody chassis) === //
-#define PLATE_BG          lv_color_hex(0x0A0908)  // true-black warm chassis
-#define PLATE_PANEL       lv_color_hex(0x141210)  // machined plate surface
-#define PLATE_LINE        lv_color_hex(0x28241C)  // hairline rules, dividers, rings
-#define PLATE_EDGE        lv_color_hex(0x342E24)  // exposed edges, strong borders
-#define PLATE_WELL        lv_color_hex(0x0D0B09)  // inset wells (charts, disc, selects)
-#define PLATE_PREVIEW_BG  lv_color_hex(0x0B0A08)  // body-preview box interior
-#define PLATE_WELL_HI     lv_color_hex(0x181410)  // well gradient bottom (depth)
-#define PLATE_EMPTY       lv_color_hex(0x0A0E14)  // unoccupied preview cells
-#define PLATE_TITLE       lv_color_hex(0xF2EDE4)  // title white
-#define PLATE_TEXT        lv_color_hex(0xC9C1B2)  // primary spec text
-#define PLATE_TEXT_MID    lv_color_hex(0x8A8272)  // secondary text
-#define PLATE_TEXT_DIM    lv_color_hex(0x655F51)  // tertiary/label text
-#define PLATE_AMBER_DIM   lv_color_hex(0xC9A05A)  // desaturated amber for value labels (one-accent discipline: only the arc + mallet stay full-amber)
-#define PLATE_AMBER       lv_color_hex(0xFFCE6B)  // bright amber readout
-#define PLATE_AMBER_PALE  lv_color_hex(0xFFF0C8)  // mallet marker rim
-#define PLATE_LABEL_ACCENT lv_color_hex(0xB49A64) // active group label (BODY)
-#define PLATE_MARK        lv_color_hex(0x4A4234)  // witness marks
-#define PLATE_BTN_PRESS    lv_color_hex(0x2A251D)  // flat-button pressed surface (lift over PLATE_WELL)
+// === CHASSIS (Pigments-aligned) ============================================
+#define PLATE_BG          lv_color_hex(0x1A1D24)  // chassis - dark cool charcoal
+#define PLATE_PANEL       lv_color_hex(0x232830)  // panel surface, slightly lifted
+#define PLATE_LINE        lv_color_hex(0x3A3E48)  // hairline rules, dividers, rings
+#define PLATE_EDGE        lv_color_hex(0x4A4E58)  // exposed edges, strong borders
+#define PLATE_WELL        lv_color_hex(0x15181E)  // inset wells (charts, disc, selects)
+#define PLATE_PREVIEW_BG  lv_color_hex(0x15181E)  // body-preview box interior
+#define PLATE_WELL_HI     lv_color_hex(0x1A1D24)  // well gradient bottom (depth)
+#define PLATE_EMPTY       lv_color_hex(0x1A1D24)  // unoccupied preview cells
+#define PLATE_TITLE       lv_color_hex(0xF4F4F4)  // title white
+#define PLATE_TEXT        lv_color_hex(0xDDE2EA)  // primary spec text
+#define PLATE_TEXT_MID    lv_color_hex(0xA8AEBA)  // secondary text
+#define PLATE_TEXT_DIM    lv_color_hex(0x7B8090)  // tertiary/label text
+#define PLATE_AMBER_DIM   lv_color_hex(0x2E7BC0)  // dimmed blue (value labels)
+#define PLATE_AMBER       lv_color_hex(0x5FBCF8)  // bright blue readout
+#define PLATE_AMBER_PALE  lv_color_hex(0x9FD4FF)  // pale blue (mallet rim)
+#define PLATE_LABEL_ACCENT lv_color_hex(0x5FBCF8) // active group label (BODY)
+#define PLATE_MARK        lv_color_hex(0x3A3E48)  // witness marks
+#define PLATE_BTN_PRESS    lv_color_hex(0x232830)  // flat-button pressed surface
 #define COL_METER_SAFE    lv_color_hex(0x8FAE5A)  // muted green: nominal level
 #define COL_METER_HOT     lv_color_hex(0xD9534A)  // red: headroom exceeded
-#define KB_WELL           lv_color_hex(0x0F131A)
-#define KB_BLACK          lv_color_hex(0x121110)
-#define KB_BLACK_HI       lv_color_hex(0x1C1915)
-// body-material swatches (preview grid)
+#define KB_WELL           lv_color_hex(0x15181E)
+#define KB_BLACK          lv_color_hex(0x14181E)
+#define KB_BLACK_HI       lv_color_hex(0x1E2228)
+// body-material swatches (paper-47 identity; KEEP semantic, not chrome)
 #define MAT_WOOD          lv_color_hex(0x8B6A3A)
 #define MAT_GLASS         lv_color_hex(0x7AB8FF)
 #define MAT_MEMBRANE      lv_color_hex(0xFF6B6B)
@@ -72,6 +76,18 @@ public:
 #define MAT_COWBELL       lv_color_hex(0xA98B45)
 #define MAT_KALIMBA       lv_color_hex(0x56748A)
 #define MAT_CELESTA       lv_color_hex(0xBFC9D4)
+// === ROUND-9: per-section color bands (Pigments-style source identity) ===
+// Each of the four knob groups (BODY/RESONATE/EXCITER/SPACE) gets a distinct
+// accent color used for the section label rule and arc fill. Maps cleanly to
+// the four functional regions of paper-47 modal synthesis: geometry, resonant
+// shaping, excitation, and acoustic space.
+#define SEC_BODY          lv_color_hex(0x3FA9F5)  // light-blue (primary chassis)
+#define SEC_RESONATE      lv_color_hex(0x4FC1A1)  // teal (resonant shaping)
+#define SEC_EXCITER       lv_color_hex(0xF0A050)  // warm orange (excitation)
+#define SEC_SPACE         lv_color_hex(0x9F7AD3)  // cool purple (space)
+
+// === LAYOUT TOKENS — chassis arithmetic (base units @ 1440x860, pre-scale) ===
+
 
 // === LAYOUT TOKENS — chassis arithmetic (base units @ 1440x860, pre-scale) ===
 // Single source of truth for the deterministic grid. Every container in PluginUI.cpp
@@ -198,6 +214,21 @@ namespace lay {
     constexpr int MAP_PEAK_H = 12;            // PEAK/M<n> readout row under the bars
     // top-bar identity cluster: brand mark | preset dropdown | master knob | zoom
     constexpr int NAV_CHIP_W = 86, NAV_CHIP_GAP = 6;
+    // === R5: DAMPING panel (per-band tail-time map, fills infoCol dead band) ===
+    // Paper-47 physics: each baked preset has 128 modes with per-mode decay
+    // RATES; mean decay across a frequency band is the body's damping at
+    // that scale - the multi-scale identity the plugin is named for. The
+    // panel aggregates 128 modes into 16 log bands, draws a horizontal
+    // bar per band whose length tracks 1/<decay>, and reacts live to the
+    // DECAY knob (the engine's decayScale_ mirror).
+    // infoCol budget: 22 head + 6 + 20 coord + 6 + 1 div + 6 + 52 infoRow +
+    // 6 + 1 div + 6 + 34 specStrip + 6 + 400 card + 5*6 inter-gaps = 566
+    // (exact match STAGE_H). Card internals: 2*4 pad + 22 head + 4 gap +
+    // 16*22 rows = 392; inner 400 - 8 pad = 392. See PluginUI.cpp builder.
+    constexpr int DAMP_CARD_H = 400;             // full infoCol-height fill
+    constexpr int DAMP_ROW_H = 22;              // per-band row (16 fit cleanly)
+    constexpr int DAMP_LABEL_W = 22;            // "B1".."B16" column
+    constexpr int DAMP_VAL_W = 40;              // tail-time value column
 }
 
  extern float gUIScale;

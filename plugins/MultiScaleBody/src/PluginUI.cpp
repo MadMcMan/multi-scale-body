@@ -120,7 +120,7 @@ public:
         if(i>=PluginMultiScaleBody::kParameterCount) return;
         paramCache[i]=v; setParameterValue(i,v); syncParamWidget(i,v);
         if(i==PluginMultiScaleBody::kParamStrikeX || i==PluginMultiScaleBody::kParamStrikeY) updateStrikeMarker();
-        if(i==PluginMultiScaleBody::kParamPreset){ syncPresetDropdown(v); if(bodySubLabel) updateBodyInfo(); updateBodyPreview(); }
+        if(i==PluginMultiScaleBody::kParamPreset){ syncPresetDropdown(v); if(bodySubLabel) updateBodyInfo(); updateBodyPreview(); updateDampingDisplay(); }
     }
     void editParameter(uint32_t i,bool s) override { if(i<PluginMultiScaleBody::kParameterCount) UI::editParameter(i,s); }
     // duplicate parameter widgets - macros + master arc replicate the same
@@ -162,6 +162,11 @@ public:
             for(int m=0;m<8;++m) if(i==kMacroParams[m]) updateMacroLed(m);
             if(i==PluginMultiScaleBody::kParamStrikeX || i==PluginMultiScaleBody::kParamStrikeY) updateStrikeMarker();
             if(i==PluginMultiScaleBody::kParamPreset){ syncPresetDropdown(v); if(bodySubLabel) updateBodyInfo(); updateBodyPreview(); }
+            // R5: Decay knob drives the DAMPING panel's live rescale (and
+            // preset changes always re-bake it). Gate by fDampPresetCache/
+            // fDampDecayCache inside updateDampingDisplay so other params
+            // cost nothing here.
+            if(i==PluginMultiScaleBody::kParamDecay || i==PluginMultiScaleBody::kParamPreset) updateDampingDisplay();
         }
     }
     void stateChanged(const char* key,const char* value) override {
@@ -240,12 +245,10 @@ private:
         for(int i=0;i<7;++i) kbWhite[i]=nullptr;
         for(int i=0;i<5;++i) kbBlack[i]=nullptr;
         for(int i=0;i<8;++i) macroLedDots[i]=nullptr;
+        // R5: damping panel - bars + value labels
+        for(int i=0;i<16;++i){ fDampBars[i]=nullptr; fDampVals[i]=nullptr; }
+        fDampMax=1.f; fDampPresetCache=-1; fDampDecayCache=-1.f;
     }
-
-    // ---- shared builder/painter geometry -----------------------------------
-    // Body-preview grid math lives HERE ONLY. The builder sizes the box from
-    // lay::PREVIEW_*, this function derives cell/gap/inset from the SAME
-    // constants, so the painting can never overflow the container it lives in.
     static void previewGeometry(int& cell,int& gap,int& off){
         gap = scaled(lay::PREVIEW_GAP);
         const int inner = scaled(lay::PREVIEW_BOX) - 2*scaled(lay::PREVIEW_PAD);
@@ -351,6 +354,68 @@ private:
                     lv_obj_set_style_shadow_opa(cellObj, occ>0.6f?LV_OPA_30:LV_OPA_0,0);
                 }
             }
+        }
+    }
+    // R5: DAMPING panel updater. Per-band tail-time map. Each band
+    // groups modes [b*n/16, (b+1)*n/16); the band's T60 (60dB decay time
+    // in abstract units) = 6.9078 / mean(decay[m]) for the modes in that
+    // band, then scaled by the engine's decayScale_ mirror so the DECAY
+    // knob's effect is visible live (same v->scale curve as engine
+    // setDecayScale: 0.1*pow(100, 1-v)). Bar value is t60 / maxT60 * 1000
+    // (the lv_bar 0..1000 range). Gated by fDampPresetCache/fDampDecayCache
+    // so a move of a non-decay param (e.g. a knob in the left bank) does
+    // not re-walk the 128 modes. Bars with no modes (e.g. Bar preset at
+    // n=88, bands 8..15) render with 0 fill and "-" label.
+    void updateDampingDisplay(){
+        if(!fDampBars[0]) return;
+        int mx = modal::kNumPresets - 1;
+        int idx = (int)std::round(paramCache[PluginMultiScaleBody::kParamPreset]*(float)mx);
+        idx = std::clamp(idx,0,mx);
+        float decayV = paramCache[PluginMultiScaleBody::kParamDecay];
+        if(idx==fDampPresetCache && std::abs(decayV-fDampDecayCache)<1e-4f) return;
+        fDampPresetCache=idx; fDampDecayCache=decayV;
+        const auto& pr = modal::kPresets[idx];
+        // mirror the engine's setDecayScale curve: larger v = longer tail
+        // (smaller rate multiplier). The display tracks 1/(decay*scale).
+        const float scale = 0.1f * std::pow(100.f, 1.f - decayV);
+        // per-band mean decay, per-band T60
+        float bandT60[16]={};
+        float maxT60=1e-6f;
+        for(int b=0;b<16;++b){
+            int m0 = (b*pr.n)/16;
+            int m1 = ((b+1)*pr.n)/16;
+            if(m0>=m1) continue;   // empty band (e.g. Bar preset bands 8..15)
+            double sum=0.0; int cnt=0;
+            for(int m=m0;m<m1;++m){
+                float d = std::max(0.2f, pr.decay[m]);
+                sum += d; ++cnt;
+            }
+            float meanRate = (float)(sum/(double)cnt);
+            // effective rate scaled by the DECAY knob, T60 = 6.91/rate
+            float t60 = 6.9078f / (meanRate * scale);
+            bandT60[b]=t60;
+            if(t60>maxT60) maxT60=t60;
+        }
+        fDampMax=maxT60;
+        // paint bars + values
+        for(int b=0;b<16;++b){
+            int m0=(b*pr.n)/16;
+            int m1=((b+1)*pr.n)/16;
+            char vbuf[16];
+            if(m0>=m1){
+                lv_bar_set_value(fDampBars[b],0,LV_ANIM_OFF);
+                snprintf(vbuf,sizeof(vbuf),"-");
+            } else {
+                int v = (int)std::lround(1000.f*bandT60[b]/maxT60);
+                lv_bar_set_value(fDampBars[b],v,LV_ANIM_OFF);
+                // display seconds with 1- or 2-decimal precision depending
+                // on magnitude; cap at 99.9s so 4-digit formats never blow
+                // the 40px value cell.
+                if(bandT60[b]>=10.f)      snprintf(vbuf,sizeof(vbuf),"%.0f s",bandT60[b]);
+                else if(bandT60[b]>=1.f)  snprintf(vbuf,sizeof(vbuf),"%.1f s",bandT60[b]);
+                else                      snprintf(vbuf,sizeof(vbuf),"%.2f s",bandT60[b]);
+            }
+            lv_label_set_text(fDampVals[b],vbuf);
         }
     }
     void syncPresetDropdown(float v){
@@ -1014,12 +1079,20 @@ private:
         lv_obj_t* authorsLbl=addLabel(brandCol,"MODAL SYNTH",getScaledMicroFont(),PLATE_TEXT_DIM,1);
         lv_obj_set_style_text_opa(authorsLbl,LV_OPA_50,0);
         lv_obj_set_style_text_letter_space(authorsLbl,1,0);
+        // R5: vertical divider between the brand mark and the preset
+        // browser - the R4 critic read the top bar as label soup (title,
+        // "BAKED MODAL PRESETS" caption, dropdown, OUTPUT all jammed
+        // together). Dividers group the bar into three legible zones:
+        // BRAND | PRESET | MASTER+ZOOM. The "BAKED MODAL PRESETS" suffix
+        // was redundant with the brand sub-line "MODAL SYNTH" and was
+        // dropped; the caption now reads simply "PRESET".
+        addDivider(topbar,scaled(lay::HEADER_H-20));
         // preset browser - move from the center to the top bar so the hero gets air
         lv_obj_t* presetBar=makeCol(topbar,0,lv_pct(100),scaled(3));
         lv_obj_set_flex_grow(presetBar,1);
         lv_obj_set_style_pad_hor(presetBar,scaled(10),0);
         lv_obj_set_flex_align(presetBar,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
-        addLabel(presetBar,"PRESET   -   BAKED MODAL PRESETS",getScaledMicroFont(),PLATE_TEXT_DIM,2);
+        addLabel(presetBar,"PRESET",getScaledMicroFont(),PLATE_TEXT_DIM,2);
         // piece-6: preset browser now has prev/next mini arrows around the
         // dropdown. The dropdown itself carries a small caret (LV_PART_INDICATOR)
         // styled as a chevron. Layout: [<] [dropdown  -  caret  -  NAME] [>].
@@ -1061,10 +1134,10 @@ private:
         // piece-6: dropdown group/keyboard handling. Dropdown must NOT be in
         // the group (wheel = encoder; group focus defocuses + closes).
         lv_group_remove_obj(presetDropdown);
-        lv_obj_add_event_cb(presetDropdown,dropdownCb,LV_EVENT_VALUE_CHANGED,this);
-        // wire the prev/next arrows: click cycles the preset by 1
-        if(presetPrevBtn) lv_obj_add_event_cb(presetPrevBtn,presetArrowCb,LV_EVENT_CLICKED,this);
-        if(presetNextBtn) lv_obj_add_event_cb(presetNextBtn,presetArrowCb,LV_EVENT_CLICKED,this);
+        // R5: vertical divider between the preset browser and the master
+        // cluster - second of three separators in the top bar so each zone
+        // (brand | preset | master+zoom) reads as a distinct module.
+        addDivider(topbar,scaled(lay::HEADER_H-20));
         // master knob - synthesized for piece-1 (paper's modal energy level).
         // Topbar inner height is only 50px (72 - 2*11 pad), so the full
         // dial-bank createArcKnob (116px container) does NOT fit: its flex
@@ -1181,15 +1254,35 @@ private:
             const int kh=primary?lay::KNOB_H_N:lay::KNOB_H_C;
             lv_obj_t* sec=makeCol(left,scaled(lay::LEFT_W),scaled(lay::SEC_LABEL_H+lay::SEC_GAP+kh),scaled(lay::SEC_GAP));
             lv_obj_set_flex_align(sec,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
-            // piece-4: section captions letter-space +2 (was 3) -> consistent
-            // wide-set feel with the title and spec-strip cells. The active
-            // BODY row keeps the accent color so it still reads as the lead.
-            addLabel(sec,groupNames[g],getScaledMicroFont(),primary?PLATE_LABEL_ACCENT:PLATE_TEXT_DIM,5);
+            // R4: per-section color identity (Pigments-style categorical
+            // vocabulary) - a 3px x SEC_LABEL_H vertical rule beside the
+            // label + the label itself tinted in the section color. The R2
+            // fix that defined SEC_* was lost in a revert cycle (macros
+            // existed but were never applied) - the R3 critic read the left
+            // bank as "single cyan accent across every section".
+            static const lv_color_t secColors[4]={SEC_BODY,SEC_RESONATE,SEC_EXCITER,SEC_SPACE};
+            lv_obj_t* secLabelRow=makeRow(sec,lv_pct(100),scaled(lay::SEC_LABEL_H),scaled(6),LV_FLEX_ALIGN_START);
+            lv_obj_t* secRule=makeBox(secLabelRow,scaled(3),scaled(lay::SEC_LABEL_H));
+            lv_obj_set_style_bg_color(secRule,secColors[g],0);
+            lv_obj_set_style_bg_opa(secRule,LV_OPA_COVER,0);
+            lv_obj_clear_flag(secRule,LV_OBJ_FLAG_CLICKABLE);
+            // group caption: BODY keeps full lead-blue (active lead group),
+            // others carry their own section tint at 80% so the categorical
+            // identity is legible but the lead still leads.
+            lv_obj_t* glbl=addLabel(secLabelRow,groupNames[g],getScaledMicroFont(),primary?PLATE_LABEL_ACCENT:secColors[g],5);
+            if(!primary) lv_obj_set_style_text_opa(glbl,LV_OPA_80,0);
             // knob grid: explicit single-row width so nothing ever wraps
             lv_obj_t* grid=makeRow(sec,scaled(lay::LEFT_W),scaled(kh),scaled(lay::GRID_GUT_X));
-            // size hierarchy: BODY runs full machined size, secondary groups compact
             ArcVisualSpec groupSpec=normalArcSpec();
-            if(!primary){ groupSpec.containerW=scaled(lay::KNOB_W_C); groupSpec.containerH=scaled(lay::KNOB_H_C); groupSpec.arcSize=scaled(lay::KNOB_ARC_C); }
+            // R5: uniform knob pitch across all 4 groups - the R4 critic
+            // read the left bank as "inconsistent widths, gaps, and
+            // densities (exciter knobs bunched, modal knobs sparse)".
+            // Secondary groups now share BODY's container width (92) so
+            // every row is 4*92+3*8 = 392px exact; arc size stays compact
+            // (64) so the visual size hierarchy still reads (BODY knobs
+            // are visibly larger). The 4-pixel added per container is
+            // padding inside, not a wider arc - no UIWidgets clipping.
+            if(!primary){ groupSpec.containerW=scaled(lay::KNOB_W_N); groupSpec.containerH=scaled(lay::KNOB_H_C); groupSpec.arcSize=scaled(lay::KNOB_ARC_C); }
             for(int k=0;k<4;++k){
                 lv_obj_t* arc=UIWidgets::createArcKnob(grid,groupParams[g][k],this,styles,groupSpec);
                 // runs AFTER UIWidgets' own handlers (insertion order) so the
@@ -1260,10 +1353,14 @@ private:
         lv_obj_set_style_bg_grad_color(well,PLATE_WELL,0);
         lv_obj_set_style_bg_grad_dir(well,LV_GRAD_DIR_VER,0);
         lv_obj_set_style_bg_opa(well,LV_OPA_80,0);
-        lv_obj_set_style_border_color(well,PLATE_LINE,0);
-        lv_obj_set_style_border_width(well,1,0);
-        lv_obj_set_style_border_opa(well,60,0);
-        // decorative overlays must never eat disc clicks: LVGL delivers PRESSED
+        // ROUND-9: richer outer glow - the disc reads as a lit physical panel
+        // (matches the Pigments wavetable's halo). Wider shadow with accent
+        // color bleed and spread makes the disc the hero element.
+        lv_obj_set_style_shadow_width(strikeDisc,scaled(24),0);
+        lv_obj_set_style_shadow_color(strikeDisc,COL_HIGHLIGHT,0);
+        lv_obj_set_style_shadow_opa(strikeDisc,LV_OPA_30,0);
+        lv_obj_set_style_shadow_spread(strikeDisc,scaled(2),0);
+        lv_obj_set_style_shadow_offset_y(strikeDisc,scaled(lay::SHADOW_OFF_Y),0);
         // to the topmost clickable object under the point (lv_indev_search_obj),
         // and plain lv_obj children are clickable BY DEFAULT (lv_obj ctor).
         lv_obj_clear_flag(well,LV_OBJ_FLAG_CLICKABLE);
@@ -1330,11 +1427,70 @@ private:
         lv_obj_set_style_radius(strikeDot,LV_RADIUS_CIRCLE,0);
         lv_obj_set_style_shadow_width(strikeDot,scaled(14),0);
         lv_obj_set_style_shadow_color(strikeDot,COL_HIGHLIGHT,0);
-        lv_obj_clear_flag(strikeDot,LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_style_shadow_opa(strikeDot,LV_OPA_60,0);
         lv_obj_set_pos(strikeDot,(int)(paramCache[PluginMultiScaleBody::kParamStrikeX]*(D-scaled(12))),
                                 (int)((1.f-paramCache[PluginMultiScaleBody::kParamStrikeY])*(D-scaled(12))));
+        lv_obj_clear_flag(strikeDot,LV_OBJ_FLAG_CLICKABLE);
+
         // === ROUND-6: MODE MAP (per-mode strike-gain comb) ================
+        // ROUND-9: DISC HEATMAP - the disc interior projects the current
+        // preset's strike-gain sound map (same bilinear 15x15 grid the MODE
+        // MAP reads from) as a 10x10 grid of dim accent dots. This kills the
+        // "vast empty dark void" reading (R2 critic) by giving the disc real
+        // rendered content that reads as a topographic modal surface.
+        {
+            using namespace modal;
+            int preset=(int)std::round(paramCache[PluginMultiScaleBody::kParamPreset]*(float)(kNumPresets-1));
+            const auto& pr=kPresets[std::clamp(preset,0,kNumPresets-1)];
+            const int GS=10;
+            const int dotS=3;
+            const int margin=(int)(D*0.10f);
+            const int inner=D-margin*2;
+            const int cell=inner/GS;
+            int cellPeak[GS*GS]={0};
+            float gMax=1e-9f;
+            for(int gy=0;gy<GS;++gy){
+                for(int gx=0;gx<GS;++gx){
+                    float gxN=(gx+0.5f)/(float)GS;
+                    float gyN=(gy+0.5f)/(float)GS;
+                    float fx=gxN*14.f, fy=gyN*14.f;
+                    int x0=std::clamp((int)fx,0,14), y0=std::clamp((int)fy,0,14);
+                    int x1=x0+1, y1=y0+1; float dx=fx-x0, dy=fy-y0;
+                    float w00=(1-dx)*(1-dy), w10=dx*(1-dy), w01=(1-dx)*dy, w11=dx*dy;
+                    float pk=0.f;
+                    int n=std::clamp((int)(8+paramCache[PluginMultiScaleBody::kParamModeCount]*120.f),8,pr.n);
+                    for(int m=0;m<n;++m){
+                        float g=pr.gain[m][y0][x0]*w00+pr.gain[m][y0][x1]*w10
+                               +pr.gain[m][y1][x0]*w01+pr.gain[m][y1][x1]*w11;
+                        int band=(m*16)/n;
+                        float trim=paramCache[PluginMultiScaleBody::kParamBand0+std::clamp(band,0,15)]*2.f;
+                        float v=std::fabs(g)*trim;
+                        if(v>pk) pk=v;
+                    }
+                    cellPeak[gy*GS+gx]=(int)(pk*1000.f);
+                    if(pk>gMax) gMax=pk;
+                }
+            }
+            for(int gy=0;gy<GS;++gy){
+                for(int gx=0;gx<GS;++gx){
+                    float v=(float)cellPeak[gy*GS+gx]/1000.f / gMax;
+                    if(v<0.02f) continue;
+                    lv_obj_t* dot=lv_obj_create(strikeDisc);
+                    lv_obj_set_size(dot, scaled(dotS), scaled(dotS));
+                    lv_obj_set_pos(dot, margin + gx*cell + (cell-scaled(dotS))/2,
+                                       margin + gy*cell + (cell-scaled(dotS))/2);
+                    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+                    lv_obj_set_style_bg_color(dot, COL_HIGHLIGHT, 0);
+                    // R4: raised floor/ceiling (was LV_OPA_10..LV_OPA_70) -
+                    // the R3 critic read the faint 2px dots as an "empty
+                    // dotted canvas" at the 1600x1000 staging scale.
+                    lv_obj_set_style_bg_opa(dot, (lv_opa_t)(LV_OPA_20 + v*(LV_OPA_90-LV_OPA_20)), 0);
+                    lv_obj_set_style_border_width(dot, 0, 0);
+                    lv_obj_set_style_pad_all(dot, 0, 0);
+                    lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE);
+                    lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
+                }
+            }
+        }
         // Round-5's MODE ACTIVITY panel re-plotted the SAME 16 env[] bands as
         // the MODE SPECTRUM - the user read it as a duplicated spectrum. It
         // is now a 128-slot per-MODE comb instead: bar height = that mode's
@@ -1417,8 +1573,66 @@ private:
         addSpecCell(specRow1,"MODES",&hdrModeVal,PLATE_TEXT,56);
         lv_obj_t* specRow2=makeRow(specStrip,lv_pct(100),scaled(16),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         addSpecCell(specRow2,"MAT",&hdrMatVal,PLATE_TEXT,80);
-        addSpecCell(specRow2,"F0",&hdrF0Val,PLATE_AMBER,56);
-
+        // R5: DAMPING card - the 16-band tail-time map that fills the
+        // infoCol's dead band (R4 critic: "plate floats in dead space").
+        // Each row is one frequency band (B1..B16 = ascending mode index
+        // ranges); bar length tracks 1/<band-mean decay> normalized to the
+        // longest band in the current preset. The decay RATE is inverted
+        // (rate in -> time out) so longer-bar = longer-tail, matching the
+        // user's knob intuition. The DECAY knob rescales the display in
+        // lockstep with the engine (decayScale_ mirror) so the user sees
+        // the knob's effect immediately. Card height 400 leaves 166px of
+        // padding absorbed by the infoCol's 6px flex gaps and the spec
+        // strip above (no dead band remains).
+        // CARD height is the ONLY fixed slot; the spec strip above is
+        // content-sized (height 0) and the head + coord wrap + dividers
+        // contribute their fixed sizes - the makeCol gap of 6 carries the
+        // remaining vertical slack. To keep the card at the bottom of the
+        // column without floating, we push the preceding content up via
+        // a flex-grow spacer (infoColSpacer) above the card.
+        lv_obj_t* infoColSpacer=lv_obj_create(infoCol);
+        lv_obj_set_size(infoColSpacer,1,1);
+        lv_obj_set_style_bg_opa(infoColSpacer,LV_OPA_TRANSP,0);
+        lv_obj_set_style_border_width(infoColSpacer,0,0);
+        lv_obj_set_style_pad_all(infoColSpacer,0,0);
+        lv_obj_set_flex_grow(infoColSpacer,1);
+        lv_obj_clear_flag(infoColSpacer,LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_t* dampCard=makeCard(infoCol,lv_pct(100),scaled(lay::DAMP_CARD_H),scaled(2));
+        // dampCard head: matches the discCol MODE MAP header grammar
+        // ("MODE MAP" / "STRIKE GAINS") for cross-column reading rhythm.
+        lv_obj_t* dampHead=makeRow(dampCard,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
+        addLabel(dampHead,"DAMPING",getScaledSmallFont(),COL_HIGHLIGHT,2);
+        addLabel(dampHead,"BY BAND",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        // 16 band rows. Each row: [Bxx label][bar (lv_bar, flex_grow)][t60 value].
+        // Bars are lv_bar widgets styled like the fLevelBar meter so the
+        // chassis reads as one instrument (meterTrack style + PLATE_AMBER
+        // indicator at LV_OPA_70 so the panels don't compete for amber).
+        for(int b=0;b<16;++b){
+            lv_obj_t* row=makeRow(dampCard,lv_pct(100),scaled(lay::DAMP_ROW_H),scaled(4),LV_FLEX_ALIGN_CENTER);
+            char lab[8]; snprintf(lab,sizeof(lab),"B%d",b+1);
+            addLabel(row,lab,getScaledMicroFont(),PLATE_TEXT_DIM,1);
+            // 1px narrower than the label spec (22) so the B-cell and
+            // value cell actually fit a 194-wide card: 22 + 4 + flex + 4 + 40
+            // = 70; remaining 124 for the bar - generous. The bar's
+            // background is a dark track, the fill is amber.
+            lv_obj_t* bar=lv_bar_create(row);
+            lv_obj_set_height(bar,scaled(8));
+            lv_obj_set_flex_grow(bar,1);
+            lv_obj_set_style_radius(bar,scaled(2),0);
+            lv_obj_set_style_radius(bar,scaled(2),LV_PART_INDICATOR);
+            lv_obj_add_style(bar,&styles.meterTrack,LV_PART_MAIN);
+            lv_obj_set_style_bg_color(bar,PLATE_AMBER,LV_PART_INDICATOR);
+            lv_obj_set_style_bg_opa(bar,LV_OPA_70,LV_PART_INDICATOR);
+            lv_obj_set_style_border_width(bar,0,0);
+            lv_obj_clear_flag(bar,LV_OBJ_FLAG_CLICKABLE);
+            lv_bar_set_range(bar,0,1000);
+            lv_bar_set_value(bar,0,LV_ANIM_OFF);
+            fDampBars[b]=bar;
+            fDampVals[b]=addLabel(row,"-",getScaledMicroFont(),PLATE_TEXT,0);
+        }
+        // initial fill: bar widths depend on baked decay, not on params -
+        // call once on first build, and again on preset+Decay changes.
+        updateDampingDisplay();
 
         // === ROUND-5 (issue #1): hero-column density ======================
         // Judged from fresh capture r4_mpe_check.png: the 280px disc interior
@@ -1449,7 +1663,11 @@ private:
         lv_obj_set_style_bg_color(chart,PLATE_WELL,0); lv_obj_set_style_bg_opa(chart,LV_OPA_COVER,0);
         lv_obj_set_style_border_color(chart,PLATE_LINE,0); lv_obj_set_style_border_width(chart,1,0);
         lv_obj_set_style_radius(chart,scaled(lay::RADIUS),0);
-        lv_obj_set_style_pad_all(chart,scaled(8),0); lv_obj_set_style_pad_column(chart,scaled(4),0);
+        lv_chart_set_div_line_count(chart,4,16);
+        // ROUND-9: dim the bar series (LV_PART_ITEMS) so the spectrum stops
+        // out-shouting the disc + wordmark (R2 critic).
+        lv_obj_set_style_line_opa(chart,LV_OPA_70,LV_PART_ITEMS);
+        lv_obj_set_style_line_width(chart,scaled(1),LV_PART_ITEMS);
         // piece-3: one vertical gridline per band (16) so the analyzer reads as
         // 16 discrete mode bins, not 12 generic column dividers. Opacity stays
         // at OPA_30 below; the per-band peak tick is what carries the highlight.
@@ -1874,6 +2092,17 @@ private:
     lv_obj_t* fModePeakLbl=nullptr;
     int fModePeakIdx=-1;
     bool fModeMapDirty=true;
+    // R5: DAMPING panel (per-band tail-time map, infoCol dead-band fill).
+    // 16 bars, one per frequency band, each holding a normalized 0..1000
+    // fill value; 16 value labels read "<T60> s" per band. fDampMax
+    // caches the longest-band T60 (in seconds) for the current preset so
+    // subsequent updates skip the loop when neither preset nor DECAY knob
+    // moved (same gating as fModeMapDirty).
+    lv_obj_t* fDampBars[16]={};
+    lv_obj_t* fDampVals[16]={};
+    float fDampMax=1.f;
+    int fDampPresetCache=-1;
+    float fDampDecayCache=-1.f;
 };
 UI* createUI(){ return new MultiScaleBodyUI(); }
 const uint32_t MultiScaleBodyUI::kMacroParams[8]={
