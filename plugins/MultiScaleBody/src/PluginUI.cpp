@@ -1212,12 +1212,13 @@ private:
         zoomMinus=addButton(zoomRow,lay::ZOOM_BTN,lay::ZOOM_LBL_H,"-",PLATE_TEXT_MID);
         lv_obj_set_user_data(zoomMinus,(void*)(intptr_t)-1);
         lv_obj_add_event_cb(zoomMinus,zoomBtnCb,LV_EVENT_CLICKED,this);
-        zoomValLbl=addLabel(zoomRow,"100%",getScaledSmallFont(),PLATE_AMBER,1);
+        { char zb[16]; snprintf(zb,sizeof(zb),"%d%%",lay::ZOOM_STEPS[std::clamp(fZoomIdx,0,lay::ZOOM_STEP_COUNT-1)]); zoomValLbl=addLabel(zoomRow,zb,getScaledSmallFont(),PLATE_AMBER,1); }
         lv_obj_set_width(zoomValLbl,scaled(lay::ZOOM_LBL_W));
         lv_obj_set_style_text_align(zoomValLbl,LV_TEXT_ALIGN_CENTER,0);
         zoomPlus=addButton(zoomRow,lay::ZOOM_BTN,lay::ZOOM_LBL_H,"+",PLATE_TEXT_MID);
         lv_obj_set_user_data(zoomPlus,(void*)(intptr_t)1);
         lv_obj_add_event_cb(zoomPlus,zoomBtnCb,LV_EVENT_CLICKED,this);
+        refreshZoomWidgets();   // rebuild wipes the label/disabled states - re-assert from fZoomIdx
         // --- STAGE ROW (h = 610): dial bank | hero plate | analysis tower -----
         lv_obj_t* stage=makeRow(root,lv_pct(100),scaled(lay::STAGE_H),scaled(lay::GUTTER));
         // LEFT - FORGE: four labeled knob clusters, spread over the full column
@@ -1907,22 +1908,39 @@ private:
                 gmax=std::max(gmax,fModeGain[m]);
             }
             int peakM=0;
+            float peakG=-1.f;
             const lv_coord_t maxH=(lv_coord_t)(scaled(lay::MAP_BARS_H)-2);
+            for(int m=0;m<modal::kMaxModes;++m){
+                // FIX: heights were never written - bars kept their 1px
+                // construction height (the flat dotted line). Active modes
+                // scale with gain/gmax over a 4% ambient floor; idle slots
+                // stay 1px ticks. Peak is tracked here, styled next pass.
+                lv_coord_t hh2=1;
+                if(m<n && gmax>1e-9f){
+                    float f=0.04f+0.96f*(fModeGain[m]/gmax);
+                    hh2=(lv_coord_t)std::max(1,(int)std::lround(f*maxH));
+                    if(fModeGain[m]>peakG){ peakG=fModeGain[m]; peakM=m; }
+                }
+                fModeMapH[m]=hh2;
+                lv_obj_t* bar=fModeBars[m];
+                if(bar) lv_obj_set_size(bar,scaled(lay::MAP_BAR_W),hh2);
+            }
             for(int m=0;m<modal::kMaxModes;++m){
                 lv_obj_t* bar=fModeBars[m];
                 if(!bar) continue;
-                const lv_coord_t hh2=fModeMapH[m];
-                if(m==peakM && hh2>0){
+                if(m==peakM && fModeMapH[m]>1){
+                    lv_obj_set_style_bg_color(bar,COL_HIGHLIGHT,0);
                     lv_obj_set_style_bg_opa(bar,LV_OPA_COVER,0);
                 } else {
                     lv_obj_set_style_bg_color(bar,PLATE_AMBER,0);
                     lv_obj_set_style_bg_opa(bar,LV_OPA_80,0);
                 }
-            }   // end for(int m=0;m<kMaxModes;++m) bar style loop
+            }   // end style pass (peak known)
             if(fModePeakLbl && peakM!=fModePeakIdx){
                 fModePeakIdx=peakM;
                 char nm[24];
-                snprintf(nm,sizeof(nm),"M%d  -  %.0f HZ",peakM+1,pr.freq[peakM]);
+                // freq[] is angular (rad/s) - report true Hz like the F0 cell
+                snprintf(nm,sizeof(nm),"M%d  -  %.0f HZ",peakM+1,pr.freq[peakM]/(2.f*3.14159f));
                 lv_label_set_text(fModePeakLbl,nm);
             }
         }   // end if(fModeBars[0] && fModeMapDirty)
