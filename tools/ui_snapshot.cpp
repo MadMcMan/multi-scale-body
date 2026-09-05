@@ -17,6 +17,7 @@
 #include "PluginMultiScaleBody.hpp"
 #include "ui/UICommon.hpp"
 #include <windows.h>
+#include <functional>
 
 static FILE* gLog=nullptr;
 #define LOGF(...) do{ if(gLog){ fprintf(gLog,__VA_ARGS__); fflush(gLog);} printf(__VA_ARGS__); }while(0)
@@ -443,6 +444,41 @@ int main(int argc,char** argv)
         EXPECT(DISTRHO::gUIScale>0.995f&&DISTRHO::gUIScale<1.005f,"scale-no-drift");
         checkLayout("zoom-back");
     }
+
+    // ---- T1c: free-form window resize (non-zoom-step dimensions) ----------
+    // The zoom stepper only covers 6 base-aspect sizes. A user dragging the
+    // host's window corner to any other size must still produce a live,
+    // non-blank UI - the plugin handles it via uiReshape -> rebuildForScale.
+    LOGF("=== free-form resize test ===\n");
+    EXPECT(resizeWindow(hwnd,exp,1200,900,first),"1200x900-resized");
+    {
+        int w=0,h=0; std::vector<unsigned char> px;
+        lv_obj_update_layout(lv_screen_active());
+        if(!grabScreen(hwnd,w,h,px)){ LOGF("freeresize grab failed\n"); }
+        else{
+            const double br=blackRatio(px);
+            LOGF("[freeresize-1200x900] display=%dx%d black=%.2f\n",w,h,br);
+            writeBMP(hwnd,"ui_freeresize_1200.bmp");
+            // a live UI has panels/knobs/bars/dots - well under 50% pure black
+            EXPECT(br<0.5,"freeresize-not-blank");
+            // the disc must still be findable and at the new scale
+            lv_obj_t* d=findDisc(lv_screen_active());
+            EXPECT(d!=nullptr,"disc-survives-resize");
+            // the knob bank must still be present (left column has 4 groups,
+            // each with 4 lv_arc widgets, plus 1 master in the header = 17)
+            int arcs=0;
+            std::function<void(lv_obj_t*)> count=[&](lv_obj_t* p){
+                if(!p) return;
+                if(p->class_p && std::strcmp(p->class_p->name,"lv_arc")==0) ++arcs;
+                for(uint32_t i=0;i<lv_obj_get_child_count(p);++i) count(lv_obj_get_child(p,i));
+            };
+            count(lv_screen_active());
+            LOGF("[freeresize-1200x900] arcs-found=%d\n",arcs);
+            EXPECT(arcs>=16,"arcs-survive-resize");   // 4*4 dial bank + 1 master
+        }
+    }
+    // back to base for the remaining tests
+    EXPECT(resizeWindow(hwnd,exp,1440,860,first),"back-to-base-2");
 
     // ---- T2: dropdown open + mouse-wheel scrolling of the list --------------
     LOGF("=== dropdown-wheel test ===\n");

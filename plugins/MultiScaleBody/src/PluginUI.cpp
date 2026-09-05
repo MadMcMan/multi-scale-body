@@ -197,18 +197,12 @@ public:
         }
     }
     void uiIdle() override {
-        if(!fUIBuilt){
-            buildUI();
-            if(fUIBuilt && !fSpectrumTimer){
-                fSpectrumTimer = lv_timer_create([](lv_timer_t* t){
-                    auto ui=(MultiScaleBodyUI*)lv_timer_get_user_data(t); if(ui) ui->updateSpectrumDisplay();
-                },33,this);
-            }
-        }
-        // hosts may open the window at a non-default size without ever sending
-        // uiReshape - keep the scale in sync from the real LVGL surface
+        // First build (and every resize) is owned by rebuildForScale() now,
+        // including the timer lifecycle. Keep the call path tiny: one
+        // surface-scale probe per idle, exactly one rebuild when it differs.
         const float ns=currentSurfaceScale();
         if(std::abs(ns-::DISTRHO::gUIScale)>=0.01f) rebuildForScale(ns);
+        else if(!fUIBuilt) rebuildForScale(ns);   // first build at base scale
         UI::uiIdle();
     }
     void uiReshape(uint w,uint h) override {
@@ -233,23 +227,87 @@ public:
     }
     void rebuildForScale(float ns){
         if(std::abs(ns-::DISTRHO::gUIScale)<0.01f) return;
+        // Re-entry guard: a rapid resize (e.g. dragging a DAW window corner)
+        // fires uiReshape several times before the first rebuild finishes.
+        // Without this, the second pass can lv_obj_clean mid-construction
+        // and leave the screen blank - the "vanishes on resize" symptom.
+        if(fRebuildInFlight) return;
+        fRebuildInFlight=true;
         ::DISTRHO::gUIScale=ns;
-        if(!fUIBuilt) return;
-        styles.reset(); styles.init();
-        if(kbHeldNote>=0 && kbHeldNote<=127){ sendNote(0,(uint8_t)kbHeldNote,0); kbHeldNote=-1; }
-        if(fStrikeHeld){ sendNote((uint8_t)fStrikeChannel,(uint8_t)fStrikeNote,0); fStrikeHeld=false; }
-        for(int o=0;o<lay::KEY_WHITE_N*2;++o){ int n=kbBaseNote+o; if(n>=0&&n<=127) sendNote(0,(uint8_t)n,0); }   // 3 octaves = 36 semitones
-        lv_obj_t* root=lv_screen_active(); if(root) lv_obj_clean(root);
-        fUIBuilt=false;
-        clearWidgetRefs();
-        fPrevEnergy=0.f; fLevelEnv=0.f; fMeterEnv=0.f; fMeterPeak=0.f; fPeakAge=0; gScopeMax=0.05f; fRippleCooldown=0; fStrikeHeld=false;
-        fMarkerPlaced=false;
-        buildUI();
+        if(!fUIBuilt){
+            // first build (constructor / first uiIdle): no existing tree
+            styles.reset(); styles.init();
+            buildUI(nullptr);
+        } else {
+            // resize rebuild: release held notes BEFORE touching the screen
+            if(kbHeldNote>=0 && kbHeldNote<=127){ sendNote(0,(uint8_t)kbHeldNote,0); kbHeldNote=-1; }
+            if(fStrikeHeld){ sendNote((uint8_t)fStrikeChannel,(uint8_t)fStrikeNote,0); fStrikeHeld=false; }
+            for(int o=0;o<lay::KEY_WHITE_N*2;++o){ int n=kbBaseNote+o; if(n>=0&&n<=127) sendNote(0,(uint8_t)n,0); }
+            // Delete the old timer FIRST so the rebuild can't be tickled
+            // mid-construction (the tick dereferences fSpectrumChart etc.,
+            // which are about to be nulled). Also stops the per-rebuild
+            // timer leak (each rebuild used to add another without
+            // deleting the last).
+            if(fSpectrumTimer){ lv_timer_del(fSpectrumTimer); fSpectrumTimer=nullptr; }
+            // Build the new tree into a hidden overlay parent so the
+            // existing tree stays visible during construction. Without
+            // this, lv_obj_clean blanks the screen for the entire buildUI()
+            // duration - the visible flash and vanish on every resize.
+            lv_obj_t* screen=lv_screen_active();
+            lv_obj_t* stash=screen ? lv_obj_create(screen) : nullptr;
+            if(stash){
+                lv_obj_set_size(stash,lv_pct(100),lv_pct(100));
+                lv_obj_add_flag(stash,LV_OBJ_FLAG_HIDDEN);
+                lv_obj_clear_flag(stash,(lv_obj_flag_t)(LV_OBJ_FLAG_CLICKABLE|LV_OBJ_FLAG_SCROLLABLE));
+                lv_obj_set_style_bg_opa(stash,LV_OPA_TRANSP,0);
+                lv_obj_set_style_border_width(stash,0,0);
+                lv_obj_set_style_pad_all(stash,0,0);
+            }
+            // Capture the OLD screen children (old tree + the stash) BEFORE
+            // buildUI: new dropdowns created inside the stash parent their
+            // list to the REAL screen (LVGL lv_dropdown_constructor), so
+            // after the build the screen's child list is old-tree + stash +
+            // NEW lists. Snapshotting first keeps the new lists out of the
+            // delete set.
+            lv_obj_t* old[24]; uint32_t oldN=0;
+            if(screen){
+                const uint32_t sn=lv_obj_get_child_count(screen);
+                for(uint32_t i=0;i<sn && oldN<24;++i){
+                    lv_obj_t* c=lv_obj_get_child(screen,i);
+                    if(c!=stash) old[oldN++]=c;
+                }
+            }
+            fUIBuilt=false;
+            clearWidgetRefs();
+            fPrevEnergy=0.f; fLevelEnv=0.f; fMeterEnv=0.f; fMeterPeak=0.f; fPeakAge=0; gScopeMax=0.05f; fRippleCooldown=0; fStrikeHeld=false;
+            fMarkerPlaced=false;
+            styles.reset(); styles.init();
+            buildUI(stash);
+            // The NEW tree is fully built (hidden in stash); old tree still
+            // on screen. Delete the old tree now - each captured pointer
+            // with a liveness check (deleting the old topbar cascades to its
+            // dropdown's destructor, which deletes that dropdown's own list,
+            // also a screen child that may be in this array).
+            for(uint32_t i=0;i<oldN;++i)
+                if(lv_obj_is_valid(old[i])) lv_obj_del(old[i]);
+            // Atomic swap: move every new child from the hidden stash onto
+            // the real screen, then delete the stash. No blank frame
+            // between old tree and new tree.
+            if(stash){
+                const uint32_t n=lv_obj_get_child_count(stash);
+                for(int32_t i=(int32_t)n-1;i>=0;--i){
+                    lv_obj_t* c=lv_obj_get_child(stash,(uint32_t)i);
+                    lv_obj_set_parent(c,screen);
+                }
+                lv_obj_del(stash);
+            }
+        }
         if(fUIBuilt && !fSpectrumTimer){
             fSpectrumTimer = lv_timer_create([](lv_timer_t* t){
                 auto ui=(MultiScaleBodyUI*)lv_timer_get_user_data(t); if(ui) ui->updateSpectrumDisplay();
             },33,this);
         }
+        fRebuildInFlight=false;
     }
 private:
     // single owner of every lv_obj_t* member default; ctor and rebuildForScale share it
@@ -269,7 +327,7 @@ private:
         // R5: damping panel - bars + value labels
         for(int i=0;i<16;++i){ fDampBars[i]=nullptr; fDampVals[i]=nullptr; }
         fDampMax=1.f; fDampPresetCache=-1; fDampDecayCache=-1.f;
-        fMasterValLbl=nullptr; fStrikeChannel=0; fNextStrikeChannel=1; fLiveAge=1000;
+        fMasterValLbl=nullptr; fStrikeChannel=0; fNextStrikeChannel=1; fLiveAge=1000; fRebuildInFlight=false;
     }
     static void previewGeometry(int& cell,int& gap,int& off){
         gap = scaled(lay::PREVIEW_GAP);
@@ -1041,21 +1099,25 @@ private:
     //   |   +-- RIGHT  (spectrum card + scope card)
     //   +-- KEYBOARD  (octave + keys + ARP)
     // vertical budget @s=1: 32 + 72 + 610 + 128 + 3*6 gaps = 860 (exact).
-    void buildUI(){
-        lv_obj_t* root=lv_screen_active();
+    void buildUI(lv_obj_t* parent=nullptr){
+        lv_obj_t* root=parent ? parent : lv_screen_active();
         if(!root){ lv_display_t* d=lv_display_get_default(); if(d) root=lv_display_get_screen_active(d); }
         if(!root) return;
         fUIBuilt=true; fMarkerPlaced=false;
 
-        // --- ROOT COLUMN -----------------------------------------------------
-        // SPACE_BETWEEN absorbs sub-threshold resize drift into the row gaps
-        // instead of clipping the keyboard bottom before the rescale rebuild fires.
-        lv_obj_set_style_bg_color(root,PLATE_BG,0); lv_obj_set_style_bg_opa(root,LV_OPA_COVER,0);
-        lv_obj_set_layout(root,LV_LAYOUT_FLEX); lv_obj_set_flex_flow(root,LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(root,LV_FLEX_ALIGN_SPACE_BETWEEN,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_all(root,scaled(lay::PAD),0);
-        lv_obj_set_scrollbar_mode(root,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(root,LV_OBJ_FLAG_SCROLLABLE);
-
+        // --- ROOT COLUMN (screen styling only on first build) ----------------
+        // The screen's bg/layout/padding is permanent; only the first build
+        // sets it. On rebuild, buildUI(parent=stash) re-runs the widget
+        // construction against a hidden overlay (see rebuildForScale), so
+        // re-applying screen-level styles to a non-screen parent would crash
+        // or visually reset the surface.
+        if(!parent){
+            lv_obj_set_style_bg_color(root,PLATE_BG,0); lv_obj_set_style_bg_opa(root,LV_OPA_COVER,0);
+            lv_obj_set_layout(root,LV_LAYOUT_FLEX); lv_obj_set_flex_flow(root,LV_FLEX_FLOW_COLUMN);
+            lv_obj_set_flex_align(root,LV_FLEX_ALIGN_SPACE_BETWEEN,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);
+            lv_obj_set_style_pad_all(root,scaled(lay::PAD),0);
+            lv_obj_set_scrollbar_mode(root,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(root,LV_OBJ_FLAG_SCROLLABLE);
+        }
         // --- TOP-BAR (h = 72): brand | preset browser | master | zoom --------
         // Same role Serum 2 fills with SERUM 2 / preset / MASTER / MENU.
         // Horizontal split:  brand(220) | preset(0,grow) | master(140) | zoom(116).
@@ -2008,6 +2070,11 @@ private:
     DGL_NAMESPACE::LVGLTopLevelWidget* fLVGL=nullptr;
     UIStyles styles;
     bool fUIBuilt=false;   // tracks whether buildUI() has populated the tree
+    // fRebuildInFlight: true while rebuildForScale() is mid-rebuild. uiReshape
+    // and uiIdle both call rebuildForScale; if a resize re-enters while the
+    // first rebuild is still constructing the new tree, the second pass can
+    // lv_obj_clean mid-construction and leave the screen blank. Guard it.
+    bool fRebuildInFlight=false;
     lv_obj_t* widgets[PluginMultiScaleBody::kParameterCount]={};
     float paramCache[PluginMultiScaleBody::kParameterCount]={};
 
