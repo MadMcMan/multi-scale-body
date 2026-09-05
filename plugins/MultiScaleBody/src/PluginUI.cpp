@@ -65,9 +65,6 @@ static void pulseGlowCb(void* var,int32_t v){ lv_obj_t* r=(lv_obj_t*)var; if(r) 
 // ============================================================================
 class MultiScaleBodyUI : public UI, public AbstractMultiScaleBodyUI {
 public:
-    // auditioning a body - the BODY group's four + four secondaries that change
-    // the perceived voice most. Shared between buildUI() and parameterChanged().
-    static const uint32_t kMacroParams[8];
     MultiScaleBodyUI(): UI(DISTRHO_UI_DEFAULT_WIDTH, DISTRHO_UI_DEFAULT_HEIGHT),
         fLVGL(nullptr){
         // widget maps + param cache MUST be initialized before buildUI():
@@ -122,8 +119,7 @@ public:
         // FIX: UI-originated gestures must invalidate the same derived
         // views the host-echo path does - previously only preset sync ran
         // here, so Decay/strike/Modes/band drags never moved DAMPING,
-        // MODE MAP, scope preview, or the macro LEDs until a host echo.
-        for(int m=0;m<8;++m) if(i==kMacroParams[m]) updateMacroLed(m);
+        // MODE MAP, or the scope preview until a host echo.
         if(i==PluginMultiScaleBody::kParamPreset || i==PluginMultiScaleBody::kParamDecay
            || i==PluginMultiScaleBody::kParamModeCount || i==PluginMultiScaleBody::kParamStrikeX
            || i==PluginMultiScaleBody::kParamStrikeY)
@@ -181,8 +177,6 @@ public:
             return;
         }
         if(i<PluginMultiScaleBody::kParameterCount){ paramCache[i]=v; syncParamWidget(i,v);
-            // round-2: LED row mirrors the dial-bank knob for the same param
-            for(int m=0;m<8;++m) if(i==kMacroParams[m]) updateMacroLed(m);
             if(i==PluginMultiScaleBody::kParamStrikeX || i==PluginMultiScaleBody::kParamStrikeY) updateStrikeMarker();
             if(i==PluginMultiScaleBody::kParamPreset){ syncPresetDropdown(v); if(bodySubLabel) updateBodyInfo(); updateBodyPreview(); }
             // R5: Decay knob drives the DAMPING panel's live rescale (and
@@ -272,7 +266,6 @@ private:
         kbContainer=kbOctLabel=zoomMinus=zoomPlus=zoomValLbl=nullptr;
         for(int i=0;i<7;++i) kbWhite[i]=nullptr;
         for(int i=0;i<5;++i) kbBlack[i]=nullptr;
-        for(int i=0;i<8;++i) macroLedDots[i]=nullptr;
         // R5: damping panel - bars + value labels
         for(int i=0;i<16;++i){ fDampBars[i]=nullptr; fDampVals[i]=nullptr; }
         fDampMax=1.f; fDampPresetCache=-1; fDampDecayCache=-1.f;
@@ -452,34 +445,6 @@ private:
         int mx = modal::kNumPresets - 1;
         int idx = (int)std::round(v*(float)mx); idx=std::clamp(idx,0,mx);
         lv_dropdown_set_selected(presetDropdown, idx);
-    }
-    // ---- round-2 helpers (LED row + disc info) ----------------------------
-    // An LED is "lit" when its macro param is non-default (anything but 0.5
-    // for normalized; except Wet=0 / Mono=0 which are themselves the default).
-    // We compare against a small epsilon to absorb host round-trip quantization.
-    void updateMacroLed(int m){
-        if(m<0||m>=8||!macroLedDots[m]) return;
-        const float v=paramCache[kMacroParams[m]];
-        // 0.0 is the true default for: Wet (0%), Mono (off).
-        // For everything else 0.5 is the true default (per PluginUI ctor).
-        const float defv=(kMacroParams[m]==PluginMultiScaleBody::kParamWet
-                       ||kMacroParams[m]==PluginMultiScaleBody::kParamMono) ? 0.f : 0.5f;
-        const bool lit=std::fabs(v-defv)>0.01f;
-        lv_obj_set_style_bg_color(macroLedDots[m], lit?COL_HIGHLIGHT:PLATE_MARK, 0);
-    }
-    // Macro cells are clickable: clicking M<n> resets that macro's param
-    // to its default (the LED shows non-default). Gives the status strip
-    // a real function instead of dead decoration.
-    static void macroCellCb(lv_event_t* e){
-        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
-        lv_obj_t* cell=(lv_obj_t*)lv_event_get_target(e);
-        if(!ui||!cell) return;
-        int m=(int)(intptr_t)lv_obj_get_user_data(cell);
-        if(m<0||m>=8) return;
-        uint32_t pi=kMacroParams[m];
-        const float defv=(pi==PluginMultiScaleBody::kParamWet
-                       ||pi==PluginMultiScaleBody::kParamMono) ? 0.f : 0.5f;
-        ui->editParameter(pi,true); ui->setParamValue(pi,defv); ui->editParameter(pi,false);
     }
     // last-strike marker: a small filled amber dot at the click position that
     // persists for ~0.5s after the hit and then fades. Visual feedback the
@@ -1070,14 +1035,12 @@ private:
     // Layout hierarchy (matches Serum 2 main-view grammar, paper-faithful):
     //   ROOT  (PLATE_BG)
     //   +-- TOP-BAR  (identity: brand mark | preset browser | master knob | zoom)
-    //   +-- NAV-STRIP  (section chips + paper identity, single horizontal rule)
-    //   +-- MACRO-RACK  (8 quick-access slots: the dial bank's most-touched params)
     //   +-- STAGE
     //   |   +-- LEFT  (4 dial groups: BODY/RESONATE/EXCITER/SPACE)
     //   |   +-- CENTER  (hero strike disc + preset row + spec strip)
     //   |   +-- RIGHT  (spectrum card + scope card)
     //   +-- KEYBOARD  (octave + keys + ARP)
-    // vertical budget @s=1: 16+72+6+28+6+72+6+504+6+128+16 = 860 (exact).
+    // vertical budget @s=1: 32 + 72 + 610 + 128 + 3*6 gaps = 860 (exact).
     void buildUI(){
         lv_obj_t* root=lv_screen_active();
         if(!root){ lv_display_t* d=lv_display_get_default(); if(d) root=lv_display_get_screen_active(d); }
@@ -1255,55 +1218,11 @@ private:
         zoomPlus=addButton(zoomRow,lay::ZOOM_BTN,lay::ZOOM_LBL_H,"+",PLATE_TEXT_MID);
         lv_obj_set_user_data(zoomPlus,(void*)(intptr_t)1);
         lv_obj_add_event_cb(zoomPlus,zoomBtnCb,LV_EVENT_CLICKED,this);
-        // --- NAV-STRIP (h = NAV_H + MACRO_LED_H = 40) -----------------------
-        // Round-2: the section chips + paper identity live in a top flex row,
-        // and an 8-slot LED status row hangs below (replaces the old 72px
-        // MACRO-RACK of duplicate knobs). Net -60px; flows into the stage so
-        // the disc can keep its 280px diameter with breathing room. Each LED
-        // lights AMBER when its kMacroParams[m] is non-default - the param
-        // value still lives in the dial bank and is editable there.
-        // outer = makeCol so chips on top, LEDs on bottom share one panel/border
-        lv_obj_t* nav=makeCol(root,lv_pct(100),scaled(lay::NAV_H+lay::MACRO_LED_H+6),0);
-        lv_obj_set_style_bg_color(nav,PLATE_PANEL,0); lv_obj_set_style_bg_opa(nav,LV_OPA_COVER,0);
-        lv_obj_set_style_border_color(nav,PLATE_LINE,0); lv_obj_set_style_border_width(nav,1,0);
-        lv_obj_set_style_radius(nav,scaled(lay::RADIUS),0);
-        // navTop: paper identity, right-aligned (R4: the five section chips
-        // were dead decoration - every knob group is permanently visible in
-        // the dial bank, so switchable views had nothing real to switch to;
-        // they are removed per the user's make-real-or-delete sanction)
-        lv_obj_t* navTop=makeRow(nav,lv_pct(100),scaled(lay::NAV_H),0,LV_FLEX_ALIGN_END);
-        lv_obj_set_style_pad_hor(navTop,scaled(8),0); lv_obj_set_style_pad_ver(navTop,scaled(3),0);
-        addLabel(navTop,"DAFX-09  /  PAPER 47",getScaledMicroFont(),PLATE_TEXT_DIM,1);
-        // navBottom: 8-slot LED macro strip - thin status row, each dot lit
-        // when its kMacroParams[m] is non-default. Sync from parameterChanged
-        // updates on every value change so the LEDs stay live.
-        lv_obj_t* navLedRow=makeRow(nav,lv_pct(100),scaled(lay::MACRO_LED_H),scaled(lay::MACRO_LED_GAP),LV_FLEX_ALIGN_SPACE_BETWEEN);
-        lv_obj_set_style_pad_hor(navLedRow,scaled(8),0); lv_obj_set_style_pad_ver(navLedRow,0,0);
-        for(int m=0;m<8;++m){
-            lv_obj_t* cell=makeRow(navLedRow,scaled(lay::MACRO_LED_CELL_W),scaled(lay::MACRO_LED_H),scaled(4),LV_FLEX_ALIGN_START);
-            // M<n> caption (TEXT: judged ghost-like at DIM and still dim at
-            // MID in the r5 capture - status text must read at spec-text
-            // contrast, matching the BODY value strip)
-            char num[8]; snprintf(num,sizeof(num),"M%d",m+1);
-            addLabel(cell,num,getScaledMicroFont(),PLATE_TEXT,0);
-            // the dot itself - dim when default, amber when non-default
-            lv_obj_t* dot=makeBox(cell,scaled(lay::MACRO_LED_DOT),scaled(lay::MACRO_LED_DOT));
-            lv_obj_set_style_radius(dot,LV_RADIUS_CIRCLE,0);
-            lv_obj_set_style_bg_opa(dot,LV_OPA_COVER,0);
-            macroLedDots[m]=dot;
-            updateMacroLed(m);   // initial state from current paramCache
-            // trailing label - the macro's param name in micro font so the LED
-            // row reads as "M1 TUNE    [.]" instead of an anonymous strip
-            addLabel(cell,parameterName(kMacroParams[m]).c_str(),getScaledMicroFont(),PLATE_TEXT,0);
-            // status + action: click resets this macro to default
-            lv_obj_set_user_data(cell,(void*)(intptr_t)m);
-            lv_obj_add_event_cb(cell,macroCellCb,LV_EVENT_CLICKED,this);
-        }   // end macros-as-LEDs
-        // --- STAGE ROW (h = 504): dial bank | hero plate | analysis tower -----
+        // --- STAGE ROW (h = 610): dial bank | hero plate | analysis tower -----
         lv_obj_t* stage=makeRow(root,lv_pct(100),scaled(lay::STAGE_H),scaled(lay::GUTTER));
         // LEFT - FORGE: four labeled knob clusters, spread over the full column
         // heights: BODY 16+6+116=138, others 16+6+98=120; SPACE_BETWEEN spreads
-        // the leftover 118 across three inter-cluster gaps (~39) - deliberate air
+        // the leftover 112 across three inter-cluster gaps (~37) - deliberate air
         lv_obj_t* left=makeCol(stage,scaled(lay::LEFT_W),scaled(lay::STAGE_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         const uint32_t groupParams[4][4]={
             {PluginMultiScaleBody::kParamPitch,PluginMultiScaleBody::kParamDecay,PluginMultiScaleBody::kParamBrightness,PluginMultiScaleBody::kParamModeCount},
@@ -1562,8 +1481,8 @@ private:
         // frequency. A different QUESTION than the live spectrum ("what does
         // this body do under the mallet" vs "what is it sounding now"), and
         // it visibly morphs as the strike disc / preset / Modes knob move.
-        // Budget @s=1 (discCol = 566, 6px flex gaps): 22 head + 6 + 280 disc
-        //   + 6 + 22 head + 6 + 224 card = 566 EXACT - zero dead band.
+        // Budget @s=1 (discCol = 610, 6px flex gaps): 22 head + 6 + 280 disc
+        //   + 6 + 22 head + 6 + 268 card = 610 EXACT - zero dead band.
         lv_obj_t* actHead=makeRow(discCol,scaled(lay::DISC_D),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         addLabel(actHead,"MODE MAP",getScaledSmallFont(),PLATE_TEXT,2);
         addLabel(actHead,"STRIKE GAINS",getScaledMicroFont(),PLATE_TEXT_DIM,1);
@@ -1709,7 +1628,7 @@ private:
         // existing content with larger gaps instead of clustering at 25%.
 
 
-        // RIGHT - ANALYSIS TOWER: spectrum card 370 + gutter 10 + scope card 236 = 616 exact
+        // RIGHT - ANALYSIS TOWER: spectrum card 360 + gutter 6 + scope card 244 = 610 exact
         lv_obj_t* right=makeCol(stage,0,scaled(lay::STAGE_H),scaled(lay::GUTTER)); // explicit-height parent: grow legal
         lv_obj_set_flex_grow(right,1);   // absorb remaining width (no horizontal overflow)
 
@@ -2108,12 +2027,6 @@ private:
     float fLevelEnv=0.f;
     float fPrevEnergy=0.f;
     float gScopeMax=0.05f;
-    // macro-LED row status dots (round-2: was macro-rack value chip labels in r1;
-    // r1 also had a 72px row of 8 mini arc-knobs that the critic flagged for
-    // competing with the dial groups. r2 collapses the strip to a 12px status
-    // row of dots, each lit when its kMacroParams[m] is non-default).
-    lv_obj_t* macroLedDots[8]={};
-
     float fMeterEnv=0.f;
     float fMeterPeak=0.f;
     int fStrikeNote=60;
@@ -2187,14 +2100,4 @@ private:
     float fDampDecayCache=-1.f;
 };
 UI* createUI(){ return new MultiScaleBodyUI(); }
-const uint32_t MultiScaleBodyUI::kMacroParams[8]={
-    PluginMultiScaleBody::kParamPitch,
-    PluginMultiScaleBody::kParamDecay,
-    PluginMultiScaleBody::kParamBrightness,
-    PluginMultiScaleBody::kParamModeCount,
-    PluginMultiScaleBody::kParamWidth,
-    PluginMultiScaleBody::kParamRadiation,
-    PluginMultiScaleBody::kParamVelStrike,
-    PluginMultiScaleBody::kParamWet,
-};
 END_NAMESPACE_DISTRHO
