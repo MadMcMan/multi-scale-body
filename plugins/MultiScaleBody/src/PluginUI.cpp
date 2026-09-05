@@ -119,8 +119,26 @@ public:
     void setParamValue(uint32_t i,float v) override {
         if(i>=PluginMultiScaleBody::kParameterCount) return;
         paramCache[i]=v; setParameterValue(i,v); syncParamWidget(i,v);
+        // FIX: UI-originated gestures must invalidate the same derived
+        // views the host-echo path does - previously only preset sync ran
+        // here, so Decay/strike/Modes/band drags never moved DAMPING,
+        // MODE MAP, scope preview, or the macro LEDs until a host echo.
+        for(int m=0;m<8;++m) if(i==kMacroParams[m]) updateMacroLed(m);
+        if(i==PluginMultiScaleBody::kParamPreset || i==PluginMultiScaleBody::kParamDecay
+           || i==PluginMultiScaleBody::kParamModeCount || i==PluginMultiScaleBody::kParamStrikeX
+           || i==PluginMultiScaleBody::kParamStrikeY)
+            fScopePreviewReady=false;
+        if(i==PluginMultiScaleBody::kParamPreset || i==PluginMultiScaleBody::kParamModeCount
+           || i==PluginMultiScaleBody::kParamStrikeX || i==PluginMultiScaleBody::kParamStrikeY
+           || (i>=PluginMultiScaleBody::kParamBand0 && i<=PluginMultiScaleBody::kParamBand15))
+            fModeMapDirty=true;
         if(i==PluginMultiScaleBody::kParamStrikeX || i==PluginMultiScaleBody::kParamStrikeY) updateStrikeMarker();
-        if(i==PluginMultiScaleBody::kParamPreset){ syncPresetDropdown(v); if(bodySubLabel) updateBodyInfo(); updateBodyPreview(); updateDampingDisplay(); }
+        if(i==PluginMultiScaleBody::kParamPreset){ syncPresetDropdown(v); if(bodySubLabel) updateBodyInfo(); updateBodyPreview(); }
+        if(i==PluginMultiScaleBody::kParamDecay || i==PluginMultiScaleBody::kParamPreset) updateDampingDisplay();
+        if(i==PluginMultiScaleBody::kParamWet && fMasterValLbl){
+            char b[24]; formatParamValue(PluginMultiScaleBody::kParamWet,v,b,sizeof(b));
+            lv_label_set_text(fMasterValLbl,b);
+        }
     }
     void editParameter(uint32_t i,bool s) override { if(i<PluginMultiScaleBody::kParameterCount) UI::editParameter(i,s); }
     // duplicate parameter widgets - macros + master arc replicate the same
@@ -152,9 +170,14 @@ public:
            || (i>=PluginMultiScaleBody::kParamBand0 && i<=PluginMultiScaleBody::kParamBand15))
             fModeMapDirty=true;
         // metering outputs arrive here every audio block - the bridge-safe DSP->UI link
+        // FIX: kParamOutLevel was falling through to the generic branch so
+        // fVizLevel stayed 0 forever (flat scope + dead meter once live).
+        // fLiveAge resets on every metering write so the idle preview
+        // resumes after ~1.5s of silence instead of flatlining.
+        if(i==PluginMultiScaleBody::kParamOutLevel){ fVizLevel=v; fGotLiveViz=true; fLiveAge=0; return; }
         if(i>=PluginMultiScaleBody::kParamOutBand0 && i<PluginMultiScaleBody::kParameterCount){
             fVizBins[i-PluginMultiScaleBody::kParamOutBand0]=v;
-            fGotLiveViz=true;
+            fGotLiveViz=true; fLiveAge=0;
             return;
         }
         if(i<PluginMultiScaleBody::kParameterCount){ paramCache[i]=v; syncParamWidget(i,v);
@@ -167,6 +190,10 @@ public:
             // fDampDecayCache inside updateDampingDisplay so other params
             // cost nothing here.
             if(i==PluginMultiScaleBody::kParamDecay || i==PluginMultiScaleBody::kParamPreset) updateDampingDisplay();
+            if(i==PluginMultiScaleBody::kParamWet && fMasterValLbl){
+                char b[24]; formatParamValue(PluginMultiScaleBody::kParamWet,v,b,sizeof(b));
+                lv_label_set_text(fMasterValLbl,b);
+            }
         }
     }
     void stateChanged(const char* key,const char* value) override {
@@ -216,6 +243,7 @@ public:
         if(!fUIBuilt) return;
         styles.reset(); styles.init();
         if(kbHeldNote>=0 && kbHeldNote<=127){ sendNote(0,(uint8_t)kbHeldNote,0); kbHeldNote=-1; }
+        if(fStrikeHeld){ sendNote((uint8_t)fStrikeChannel,(uint8_t)fStrikeNote,0); fStrikeHeld=false; }
         for(int o=0;o<lay::KEY_WHITE_N*2;++o){ int n=kbBaseNote+o; if(n>=0&&n<=127) sendNote(0,(uint8_t)n,0); }   // 3 octaves = 36 semitones
         lv_obj_t* root=lv_screen_active(); if(root) lv_obj_clean(root);
         fUIBuilt=false;
@@ -248,6 +276,7 @@ private:
         // R5: damping panel - bars + value labels
         for(int i=0;i<16;++i){ fDampBars[i]=nullptr; fDampVals[i]=nullptr; }
         fDampMax=1.f; fDampPresetCache=-1; fDampDecayCache=-1.f;
+        fMasterValLbl=nullptr; fStrikeChannel=0; fNextStrikeChannel=1; fLiveAge=1000;
     }
     static void previewGeometry(int& cell,int& gap,int& off){
         gap = scaled(lay::PREVIEW_GAP);
@@ -438,6 +467,20 @@ private:
         const bool lit=std::fabs(v-defv)>0.01f;
         lv_obj_set_style_bg_color(macroLedDots[m], lit?COL_HIGHLIGHT:PLATE_MARK, 0);
     }
+    // Macro cells are clickable: clicking M<n> resets that macro's param
+    // to its default (the LED shows non-default). Gives the status strip
+    // a real function instead of dead decoration.
+    static void macroCellCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* cell=(lv_obj_t*)lv_event_get_target(e);
+        if(!ui||!cell) return;
+        int m=(int)(intptr_t)lv_obj_get_user_data(cell);
+        if(m<0||m>=8) return;
+        uint32_t pi=kMacroParams[m];
+        const float defv=(pi==PluginMultiScaleBody::kParamWet
+                       ||pi==PluginMultiScaleBody::kParamMono) ? 0.f : 0.5f;
+        ui->editParameter(pi,true); ui->setParamValue(pi,defv); ui->editParameter(pi,false);
+    }
     // last-strike marker: a small filled amber dot at the click position that
     // persists for ~0.5s after the hit and then fades. Visual feedback the
     // disc actually registered the strike (the dynamic mallet marker
@@ -569,9 +612,14 @@ private:
         lv_obj_t* arc=(lv_obj_t*)lv_event_get_target(e);
         if(!ui||!arc) return;
         int pi=(int)(intptr_t)lv_obj_get_user_data(arc);
-        // Round-6: resolve the chip via the UIWidgets binding map - the master
-        // knob's chip is reparented beside the arc (masterRow), so a
-        // "last child of cont" probe would miss it.
+        // Master arc writes its owned beside-arc label (the widget's own
+        // chip is hidden - it overflowed the 30px row and clipped).
+        if(pi==PluginMultiScaleBody::kParamWet && ui->fMasterValLbl){
+            char buf[24];
+            ui->formatParamValue(pi,lv_arc_get_value(arc)/1000.f,buf,sizeof(buf));
+            lv_label_set_text(ui->fMasterValLbl,buf);
+            return;
+        }
         auto fIt=gArcVisualBindings.find(arc);
         lv_obj_t* lbl=(fIt!=gArcVisualBindings.end())?fIt->second.valueLabel:nullptr;
         if(!lbl||!lv_obj_check_type(lbl,&lv_label_class)) return;
@@ -666,14 +714,21 @@ private:
                 // round-2 audit trail: a small amber dot persists at the
                 // strike point for ~0.5s, fading out via the spectrum timer
                 ui->placeLastStrike(p.x - coords.x1, p.y - coords.y1);
-                // physical hit: strike position first, then trigger the body
-                ui->sendNote(0,(uint8_t)ui->fStrikeNote,100);
+                // physical hit: strike position first, then trigger the body.
+                // MPE: each strike takes the next member channel (1..15) so
+                // the hit is its own MPE note - per-note bend/pressure from
+                // the host applies per channel and voices key note+channel.
+                // DPF UI can only send notes (no pressure/bend send), so the
+                // strike velocity carries the gesture (edge = harder).
+                ui->fStrikeChannel=ui->fNextStrikeChannel;
+                ui->fNextStrikeChannel=(ui->fNextStrikeChannel%15)+1;
+                ui->sendNote((uint8_t)ui->fStrikeChannel,(uint8_t)ui->fStrikeNote,100);
                 ui->fStrikeHeld=true;
             }
             ui->setParamValue(PluginMultiScaleBody::kParamStrikeX, fx);
             ui->setParamValue(PluginMultiScaleBody::kParamStrikeY, fy);
         } else if(code==LV_EVENT_RELEASED || code==LV_EVENT_PRESS_LOST){
-            if(ui->fStrikeHeld){ ui->sendNote(0,(uint8_t)ui->fStrikeNote,0); ui->fStrikeHeld=false; }
+            if(ui->fStrikeHeld){ ui->sendNote((uint8_t)ui->fStrikeChannel,(uint8_t)ui->fStrikeNote,0); ui->fStrikeHeld=false; }
             ui->editParameter(PluginMultiScaleBody::kParamStrikeX,false);
             ui->editParameter(PluginMultiScaleBody::kParamStrikeY,false);
         }
@@ -1134,6 +1189,12 @@ private:
         // piece-6: dropdown group/keyboard handling. Dropdown must NOT be in
         // the group (wheel = encoder; group focus defocuses + closes).
         lv_group_remove_obj(presetDropdown);
+        // FIX: the VALUE_CHANGED + CLICKED handlers were defined
+        // (dropdownCb/presetArrowCb) but never registered, so the whole
+        // preset browser was dead. Wire them here.
+        lv_obj_add_event_cb(presetDropdown,dropdownCb,LV_EVENT_VALUE_CHANGED,this);
+        lv_obj_add_event_cb(presetPrevBtn,presetArrowCb,LV_EVENT_CLICKED,this);
+        lv_obj_add_event_cb(presetNextBtn,presetArrowCb,LV_EVENT_CLICKED,this);
         // R5: vertical divider between the preset browser and the master
         // cluster - second of three separators in the top bar so each zone
         // (brand | preset | master+zoom) reads as a distinct module.
@@ -1158,28 +1219,27 @@ private:
             lv_obj_t* masterArc=UIWidgets::createArcKnob(masterRow,PluginMultiScaleBody::kParamWet,this,styles,mSpec);
             regExtraWidget(PluginMultiScaleBody::kParamWet, masterArc);
             lv_obj_add_event_cb(masterArc,valueFormatCb,LV_EVENT_ALL,this);
-            // Round-6: the 44x30 container cannot stack arc (28) + value chip
-            // (~15) - the chip flex-spilled to the topbar's bottom edge (the
-            // user-visible "0.5 cut off"). Restructure, keeping UIWidgets'
-            // binding contract intact (sync/drag paths address the chip via
-            // gArcVisualBindings pointers, so reparenting is safe):
-            //   cont keeps ONLY the arc (the "Wet" title is deleted - HIDDEN
-            //   still occupies a flex slot and pushed the arc up);
-            //   the chip moves BESIDE the arc in masterRow (30px tall, all in
-            //   the header with real clearance).
+            // FIX: the widget stacks title + arc(28) + chip(~13) = ~41px in
+            // a 30px container, so the chip spilled out of the 30px row and
+            // clipped (the "cut off" text). Hide BOTH built-in labels - the
+            // OUTPUT caption above already names the cluster - and own a
+            // value label beside the arc. Also hide this instance's white
+            // PART_KNOB tip tick: at 28px it collides with the white needle
+            // into "2 white lines"; the blue indicator arc still shows value.
+            lv_obj_set_style_bg_opa(masterArc,LV_OPA_TRANSP,LV_PART_KNOB);
             lv_obj_t* cont=lv_obj_get_parent(masterArc);
             if(cont && lv_obj_get_child_count(cont)>0){
-                // hide the widget's own title ("Wet") - the OUTPUT caption
-                // above the row already names the cluster
-                lv_obj_t* t0=lv_obj_get_child(cont,0);
-                if(t0 && lv_obj_check_type(t0,&lv_label_class)) lv_obj_add_flag(t0,LV_OBJ_FLAG_HIDDEN);
-                // reformat the trailing value chip from %.2f to the param format
-                auto bIt=gArcVisualBindings.find(masterArc);
-                if(bIt!=gArcVisualBindings.end() && bIt->second.valueLabel){
-                    char b[24];
-                    formatParamValue(PluginMultiScaleBody::kParamWet,paramCache[PluginMultiScaleBody::kParamWet],b,sizeof(b));
-                    lv_label_set_text(bIt->second.valueLabel,b);
+                for(uint32_t ci=0;ci<(uint32_t)lv_obj_get_child_count(cont);++ci){
+                    lv_obj_t* ch=lv_obj_get_child(cont,(int32_t)ci);
+                    if(ch && ch!=masterArc && lv_obj_check_type(ch,&lv_label_class))
+                        lv_obj_add_flag(ch,LV_OBJ_FLAG_HIDDEN);
                 }
+            }
+            fMasterValLbl=addLabel(masterRow,"",getScaledSmallFont(),PLATE_TEXT,0);
+            {
+                char b[24];
+                formatParamValue(PluginMultiScaleBody::kParamWet,paramCache[PluginMultiScaleBody::kParamWet],b,sizeof(b));
+                lv_label_set_text(fMasterValLbl,b);
             }
         }
         // zoom stepper - the rightmost cluster, vertical divider before it
@@ -1235,6 +1295,9 @@ private:
             // trailing label - the macro's param name in micro font so the LED
             // row reads as "M1 TUNE    [.]" instead of an anonymous strip
             addLabel(cell,parameterName(kMacroParams[m]).c_str(),getScaledMicroFont(),PLATE_TEXT,0);
+            // status + action: click resets this macro to default
+            lv_obj_set_user_data(cell,(void*)(intptr_t)m);
+            lv_obj_add_event_cb(cell,macroCellCb,LV_EVENT_CLICKED,this);
         }   // end macros-as-LEDs
         // --- STAGE ROW (h = 504): dial bank | hero plate | analysis tower -----
         lv_obj_t* stage=makeRow(root,lv_pct(100),scaled(lay::STAGE_H),scaled(lay::GUTTER));
@@ -1854,7 +1917,11 @@ private:
         lv_chart_series_t* s=lv_chart_get_series_next(fSpectrumChart,nullptr); if(!s) return;
         float bins[16]={};
         float totalE=0.f;
-        if(fGotLiveViz){
+        // live iff metering arrived within the last ~1.5s (45 ticks);
+        // otherwise fall back to the baked preview so panels keep moving.
+        if(fLiveAge<1000) ++fLiveAge;
+        const bool live = fGotLiveViz && fLiveAge<45;
+        if(live){
             // live: per-band modal energies published by the DSP via output parameters
             for(int b=0;b<16;++b) bins[b]=fVizBins[b];
             totalE=fVizLevel;
@@ -1944,7 +2011,7 @@ private:
         if(fRippleCooldown>0) --fRippleCooldown;
         bool onset=(totalE>fPrevEnergy+std::max(0.02f,fPrevEnergy*1.1f)) && totalE>0.04f;
         fPrevEnergy=std::max(totalE,fPrevEnergy*0.90f);
-        if(onset && fRippleCooldown==0 && fGotLiveViz){ spawnRipple(); fRippleCooldown=9; }
+        if(onset && fRippleCooldown==0 && live){ spawnRipple(); fRippleCooldown=9; }
         // round-2: fade out the persistent last-strike marker after ~0.5s.
         // The timer fires every 33ms; 15 ticks ~= 500ms.
         if(strikeLastMark && fLastStrikeAgeMs>=0){
@@ -1961,7 +2028,7 @@ private:
         // scope draws the preset's real per-mode decay envelope (attack ramp
         // + exponential tail computed from ModalData). This is the "scope
         // does something" fix: the right column stops reading as dead.
-        if(fScopeChart && fScopeSeries && !fGotLiveViz){
+        if(fScopeChart && fScopeSeries && !live){
             if(!fScopePreviewReady) buildScopePreview();
             if(fScopePreviewReady){
                 int idx=fScopePreviewIdx;
@@ -1973,7 +2040,7 @@ private:
         gScopeMax=std::max(std::max(totalE,gScopeMax*0.995f),0.03f);
         fLevelEnv+=(totalE-fLevelEnv)*(totalE>fLevelEnv?0.55f:0.12f);
         float lvl=std::clamp(fLevelEnv/gScopeMax,0.f,1.f);
-        if(fGotLiveViz && fScopeChart && fScopeSeries)
+        if(live && fScopeChart && fScopeSeries)
             lv_chart_set_next_value(fScopeChart,(lv_chart_series_t*)fScopeSeries,(int32_t)(lvl*980.f));
         if(strikeDisc)
             lv_obj_set_style_border_opa(strikeDisc,(lv_opa_t)(70+185.f*lvl),0);
@@ -1981,7 +2048,7 @@ private:
             lv_obj_set_style_bg_opa(lfoDot,(lv_opa_t)(40+215.f*lvl),0);
         // ~500 ms peak hold then decay (15 frames @ 30 fps)
         if(fLevelBar){
-            float v=std::clamp(fGotLiveViz?fVizLevel:0.f,0.f,1.f);
+            float v=std::clamp(live?fVizLevel:0.f,0.f,1.f);
             fMeterEnv+=(v-fMeterEnv)*(v>fMeterEnv?0.55f:0.10f);
             if(fMeterEnv>fMeterPeak){ fMeterPeak=fMeterEnv; fPeakAge=0; }
             else if(++fPeakAge>=15) fMeterPeak=std::max(0.f,fMeterPeak-0.015f);
@@ -2009,6 +2076,10 @@ private:
 
     // master knob value label (re-uses the widget's own label, but the chip in
     // the dial bank's Wet knob is the canonical one - master just inherits it)
+    // FIX: the widget's own chip stays hidden (it overflows the 30px master
+    // row); fMasterValLbl is an owned label beside the arc, updated by
+    // valueFormatCb + explicit Wet sync paths.
+    lv_obj_t* fMasterValLbl=nullptr;
     lv_timer_t* fSpectrumTimer=nullptr;
     lv_obj_t* fSpectrumChart=nullptr;
     lv_obj_t* strikeDisc=nullptr;
@@ -2047,6 +2118,13 @@ private:
     float fMeterPeak=0.f;
     int fStrikeNote=60;
     bool fStrikeHeld=false;
+    // UI-strike MPE channel: disc hits rotate over member channels 1..15
+    // so each strike is its own MPE note (per-note bend/pressure from the
+    // host applies per channel; voices are keyed note+channel). The
+    // keyboard stays ch0 legacy piano. fNextStrikeChannel is the next
+    // member channel to allocate; fStrikeChannel is the live held one.
+    int fStrikeChannel=0;
+    int fNextStrikeChannel=1;
     bool fMarkerPlaced=false;
     lv_obj_t* strikeLastMark=nullptr;        // round-2: small amber dot that persists ~0.5s post-hit
     int fLastStrikeAgeMs=0;                 // ms since placeLastStrike; -1 = inactive
@@ -2054,10 +2132,14 @@ private:
     // written level, so PRESSING writes only on real change (no host spam)
     int fScrubBand=-1;
     float fScrubLevel=-1.f;
-    // live metering cache fed by output parameters (bridge-safe DSP->UI link)
     float fVizLevel=0.f;
     float fVizBins[16]={};
     bool fGotLiveViz=false;
+    // Live-data freshness: metering outputs reset fLiveAge to 0 on every
+    // audio block; updateSpectrumDisplay increments it each 33ms tick and
+    // treats age>=45 (~1.5s of silence) as idle so the decay preview
+    // resumes instead of flatlining forever after the first note.
+    int fLiveAge=1000;
     // R3: idle decay-envelope preview — the scope chart draws the preset's
     // real per-mode decay curve (from ModalData, no audio needed) so the
     // right column never reads as dead hardware. When live viz arrives,
