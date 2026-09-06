@@ -197,12 +197,13 @@ public:
         }
     }
     void uiIdle() override {
-        // First build (and every resize) is owned by rebuildForScale() now,
-        // including the timer lifecycle. Keep the call path tiny: one
-        // surface-scale probe per idle, exactly one rebuild when it differs.
+        // First build AND every rescale are owned by rebuildForScale(),
+        // including the timer lifecycle. One probe per idle: if no built tree
+        // exists yet, build it (rebuildForScale no longer early-returns for
+        // an unbuilt tree, even at identical scale); otherwise rebuild only
+        // when the surface scale actually moved.
         const float ns=currentSurfaceScale();
-        if(std::abs(ns-::DISTRHO::gUIScale)>=0.01f) rebuildForScale(ns);
-        else if(!fUIBuilt) rebuildForScale(ns);   // first build at base scale
+        if(!fUIBuilt || std::abs(ns-::DISTRHO::gUIScale)>=0.01f) rebuildForScale(ns);
         UI::uiIdle();
     }
     void uiReshape(uint w,uint h) override {
@@ -226,7 +227,12 @@ public:
         return false;
     }
     void rebuildForScale(float ns){
-        if(std::abs(ns-::DISTRHO::gUIScale)<0.01f) return;
+        // Early-return only if a built tree exists at this scale. A bare
+        // scale check let a standalone window opening at EXACTLY the base
+        // size (scale 1.0, no delta from the default) skip the first build
+        // entirely - blank exe screen. The harness never caught it (its
+        // surface is 1458x907, scale 1.0125, always differs).
+        if(fUIBuilt && std::abs(ns-::DISTRHO::gUIScale)<0.01f) return;
         // Re-entry guard: a rapid resize (e.g. dragging a DAW window corner)
         // fires uiReshape several times before the first rebuild finishes.
         // Without this, the second pass can lv_obj_clean mid-construction

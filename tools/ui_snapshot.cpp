@@ -216,6 +216,9 @@ static void checkSiblingOverlaps(lv_obj_t* parent,int depth)
     }
 }
 
+static int gTestFails=0;
+#define EXPECT(cond,msg) do{ if(cond) LOGF("PASS %s\n",msg); else { LOGF("FAIL %s\n",msg); ++gTestFails; } }while(0)
+
 static void checkLayout(const char* tag)
 {
     lv_display_t* d=lv_display_get_default();
@@ -223,13 +226,26 @@ static void checkLayout(const char* tag)
                         (lv_coord_t)(lv_display_get_vertical_resolution(d)-1)};
     gBoundFails=0; gOverlapFails=0;
     lv_obj_t* root=lv_screen_active();
+    // T0: an empty screen (tree never built) once passed every geometric
+    // check vacuously - bounds/overlap cannot fail over zero widgets. The
+    // standalone exe opened blank for exactly this reason (first build
+    // skipped at exact base scale). Every checkpoint must prove a
+    // non-trivial tree exists. Healthy default screen: 4 top-level children
+    // (header, dropdown-list, stage, keyboard strip); old buggy code left 0.
+    const uint32_t rootChildN=lv_obj_get_child_count(root);
+    LOGF("[%s] screen-children=%u\n",tag,rootChildN);
+    if(std::strcmp(tag,"default")==0){
+        EXPECT(rootChildN>=4,"default-screen-has-widgets");
+    }else{
+        EXPECT(rootChildN>=1,"checkpoint-screen-has-children");
+    }
     checkBounds(root,surf,0);
     checkSiblingOverlaps(root,0);
     // stage = second child of root (header, stage, keyboard strip): its three
     // columns are the main overlap hazard
     if(lv_obj_get_child_count(root)>=2)
         checkSiblingOverlaps(lv_obj_get_child(root,1),1);
-    LOGF("[%s] checks: bounds=%d overlap=%d\n",tag,gBoundFails,gOverlapFails);
+    LOGF("[%s] checks: bounds=%d overlap=%2d\n",tag,gBoundFails,gOverlapFails);
 }
 
 static void idleFrames(DISTRHO::UIExporter* exp, int n)
@@ -250,8 +266,7 @@ static void presentKick(HWND hwnd, DISTRHO::UIExporter* exp)
 }
 
 // ---- task-specific verification helpers ------------------------------------
-static int gTestFails=0;
-#define EXPECT(cond,msg) do{ if(cond) LOGF("PASS %s\n",msg); else { LOGF("FAIL %s\n",msg); ++gTestFails; } }while(0)
+// (EXPECT/gTestFails now defined above checkLayout, which needs them)
 
 static void pumpMsgs()
 {
