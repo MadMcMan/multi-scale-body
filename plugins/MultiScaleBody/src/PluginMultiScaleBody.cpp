@@ -15,7 +15,7 @@ PluginMultiScaleBody::PluginMultiScaleBody() : Plugin(kNumParams, 0, 2) {
     paramBase_[kParamRadiation]=0.45f; paramBase_[kParamAttack]=0.15f; paramBase_[kParamRelease]=0.45f;
     paramBase_[kParamLFORate]=0.30f; paramBase_[kParamLFODepth]=0.0f;
     paramBase_[kParamExciteMix]=0.f; paramBase_[kParamVelStrike]=0.35f; paramBase_[kParamDetune]=0.15f;
-    paramBase_[kParamGlide]=0.15f; paramBase_[kParamWet]=0.f; paramBase_[kParamMono]=0.f;
+    paramBase_[kParamGlide]=0.15f; paramBase_[kParamWet]=0.f; paramBase_[kParamMono]=0.f; paramBase_[kParamVolume]=1.f;
     double sr=getSampleRate(); if(sr<1000) sr=44100;
     engine_.prepare(sr);
     engine_.setPitchScale(paramBase_[kParamPitch]); engine_.setDecayScale(paramBase_[kParamDecay]);
@@ -30,7 +30,7 @@ PluginMultiScaleBody::PluginMultiScaleBody() : Plugin(kNumParams, 0, 2) {
     engine_.setDetuneSpread(paramBase_[kParamDetune]);
     engine_.setGlide(paramBase_[kParamGlide]);
     engine_.setReverbWet(paramBase_[kParamWet]);
-    engine_.setMonoMode(paramBase_[kParamMono]>0.5f);
+    engine_.setVolume(paramBase_[kParamVolume]);
     // look-ahead limiter delay: hosts compensate when aligning PDC.
     // Reporting requires DISTRHO_PLUGIN_WANT_LATENCY=1 in DistrhoPluginInfo.h
     // (left off for now; guarded so enabling the flag just works).
@@ -65,6 +65,7 @@ void PluginMultiScaleBody::initParameter(uint32_t index, Parameter& p){
         case kParamGlide: p.name="Glide"; p.symbol="glide"; p.ranges.def=0.15f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamWet: p.name="Body Reverb"; p.symbol="wet"; p.ranges.def=0.0f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamMono: p.name="Mono"; p.symbol="mono"; p.hints|=kParameterIsBoolean|kParameterIsInteger; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamVolume: p.name="Volume"; p.symbol="volume"; p.ranges.def=1.0f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         default:
             if(index>=kParamBand0 && index<=kParamBand15){
                 int band=index-kParamBand0;
@@ -109,6 +110,7 @@ void PluginMultiScaleBody::setParameterValue(uint32_t idx,float v){
         case kParamDetune: engine_.setDetuneSpread(v); break;
         case kParamGlide: engine_.setGlide(v); break;
         case kParamWet: engine_.setReverbWet(v); break;
+        case kParamVolume: engine_.setVolume(v); break;
         case kParamMono: engine_.setMonoMode(v>0.5f); break;
         default:
             if(idx>=kParamBand0 && idx<=kParamBand15){
@@ -139,6 +141,7 @@ void PluginMultiScaleBody::sampleRateChanged(double sr){
     engine_.setDetuneSpread(paramBase_[kParamDetune]);
     engine_.setGlide(paramBase_[kParamGlide]);
     engine_.setReverbWet(paramBase_[kParamWet]);
+    engine_.setVolume(paramBase_[kParamVolume]);
     engine_.setMonoMode(paramBase_[kParamMono]>0.5f);
 #if DISTRHO_PLUGIN_WANT_LATENCY
     setLatency(engine_.limiterLatency());

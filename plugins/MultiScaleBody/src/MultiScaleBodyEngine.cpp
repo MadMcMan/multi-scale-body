@@ -15,6 +15,7 @@ void MultiScaleBodyEngine::prepare(double sr) {
     rtSmCoef_ = 1.f - std::exp(-1.0f/(0.02f*(float)sampleRate_)); // ~20ms param smoothing
     exFollowRel_ = std::exp(-1.f/(0.080f*(float)sampleRate_)); // ~80 ms follower release
     widthCur_=width_; wetCur_=reverbWet_; exMixCur_=exciteMix_;   // start settled, no ramp-in
+    volCur_=volumeNorm_;                                          // volume: settled too (unity default)
     irDirty_=true; irBaking_=false;
     rebuildDetuneTable();
     computeDecayRef(); // uniform-damping ring anchor for the current preset
@@ -37,6 +38,7 @@ void MultiScaleBodyEngine::reset() {
     for (int c=1;c<16;++c) mpeZ_[c]=-1.f; // MPE: fresh latch set per reset (matches allSoundOff)
     limReset();
     widthCur_=width_; wetCur_=reverbWet_; exMixCur_=exciteMix_;
+    volCur_=volumeNorm_;
 }
 
 float MultiScaleBodyEngine::cubicInterp(float p0,float p1,float p2,float p3,float t){
@@ -322,6 +324,12 @@ void MultiScaleBodyEngine::setMonoMode(bool m){
     } else monoTopVoice_=-1;
 }
 void MultiScaleBodyEngine::setReverbWet(float v){ reverbWet_=std::clamp(v,0.f,1.f); }
+void MultiScaleBodyEngine::setVolume(float v){
+    v=std::clamp(v,0.f,1.f);
+    volumeNorm_=v;
+    // exact unity stays exact: no re-derivation noise at the default
+    if(v>=1.f-1e-6f) volumeNorm_=1.f;
+}
 
 // render current modal set into short IR for convolution send.
 // RT strategy: the full render (n modes x kIrLen samples of sin/exp) is far too
@@ -641,6 +649,16 @@ void MultiScaleBodyEngine::processSampleStereo(float &outL, float &outR) {
     widthCur_ += (width_-widthCur_)*rtSmCoef_;
     wetCur_   += (reverbWet_-wetCur_)*rtSmCoef_;
     exMixCur_ += (exciteMix_-exMixCur_)*rtSmCoef_;
+    // master volume: same ~20 ms one-pole as the other raw params; squared
+    // law applied at use (0.5 -> -12 dB). EXACT unity is a hard identity —
+    // while volCur_==1.0f the output multiply is skipped entirely so x*1.0f
+    // never rounds and legacy default renders stay bit-identical.
+    // snap-to-target inside 1e-3: the one-pole never lands exactly, so
+    // settled volume must be SNAPPED — 0 becomes a true mute (exact zeros),
+    // 1 keeps the bit-identity skip (volCur_==1.0f), and any other value
+    // converges to an exact deterministic gain.
+    volCur_ += (volumeNorm_-volCur_)*rtSmCoef_;
+    if(std::fabs(volumeNorm_-volCur_)<1e-3f) volCur_=volumeNorm_;
     // LFO modulates mode freqs + LP cutoff; refreshing all voice coefficients
     // per sample is unaffordable, so throttle to every 32 samples (~1.5 kHz at
     // 48k) - far above the <=12 Hz LFO band, inaudibly stepped
@@ -775,6 +793,13 @@ void MultiScaleBodyEngine::processSampleStereo(float &outL, float &outR) {
         outL = outL*(1.f-wetCur_*0.7f) + wl*wetCur_;
         outR = outR*(1.f-wetCur_*0.7f) + wr*wetCur_;
         wetPos_=(wetPos_+1)%(kIrLen*2);
+    }
+    // master volume: post-reverb, PRE-limiter — the brickwall ceiling is the
+    // last word on level no matter how the volume knob pushes it. Skipped at
+    // exact unity (bit-identity contract with tests/golden_default.bin).
+    if(volCur_!=1.f){
+        const float g=volCur_*volCur_;
+        outL*=g; outR*=g;
     }
     // === final stage: look-ahead brickwall limiter (stereo-linked) ====
     {

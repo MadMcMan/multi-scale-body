@@ -178,6 +178,8 @@ public:
     void setGlide(float v);          // portamento seconds 0..1 -> 0..600ms
     void setMonoMode(bool m);        // mono-legato vs poly
     void setReverbWet(float v);      // convolution reverb send 0..1
+    void setVolume(float v);         // master output gain 0..1 (squared law); 1 = exact unity
+    float getVolume() const { return volumeNorm_; }
     float getExciteMix() const { return exciteMix_; }
     float getVelStrike() const { return velStrike_; }
     float getDetuneSpread() const { return detuneSpread_; }
@@ -262,6 +264,12 @@ public:
     int monoTopVoice_=-1;
     // convolution reverb (block-based, small IR)
     float irL_[kIrLen]{}; float irR_[kIrLen]{};
+    // master output volume: squared-law gain, ~20 ms smoothed (volCur_),
+    // applied post-reverb / pre-limiter. Default 1.0 = EXACT unity — the
+    // sample-loop multiply is skipped while volCur_==1.0f so legacy default
+    // renders stay bit-identical (golden bit-identity contract).
+    float volumeNorm_ = 1.f;
+    float volCur_ = 1.f;
     float wetBufL_[kIrLen*2]{}; float wetBufR_[kIrLen*2]{}; // circular history (overlap-add tail)
     int   wetPos_=0; bool irDirty_=true; float reverbWet_=0.f;
     int   irBakeCursor_=0; bool irBaking_=false;

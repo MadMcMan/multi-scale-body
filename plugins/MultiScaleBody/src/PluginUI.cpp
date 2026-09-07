@@ -89,6 +89,7 @@ public:
         paramCache[PluginMultiScaleBody::kParamGlide]=0.15f;
         paramCache[PluginMultiScaleBody::kParamWet]=0.f;
         paramCache[PluginMultiScaleBody::kParamMono]=0.f;
+        paramCache[PluginMultiScaleBody::kParamVolume]=1.f;
         setSize(DISTRHO_UI_DEFAULT_WIDTH, DISTRHO_UI_DEFAULT_HEIGHT);
         fLVGL = new DGL_NAMESPACE::LVGLTopLevelWidget(getWindow());
         styles.init();
@@ -107,8 +108,7 @@ public:
             case P::kParamAttack: return "Attack";     case P::kParamRelease: return "Release";
             case P::kParamLFORate: return "LFO Rate";  case P::kParamLFODepth: return "LFO Depth";
             case P::kParamExciteMix: return "Exciter"; case P::kParamVelStrike: return "Vel Strike";
-            case P::kParamDetune: return "Imperfect";  case P::kParamGlide: return "Glide";
-            case P::kParamWet: return "Reverb";        case P::kParamMono: return "Mono";
+            case P::kParamWet: return "Reverb";        case P::kParamMono: return "Mono"; case P::kParamVolume: return "Volume";
             default: return {}; // bands and metering outputs have no knob title
         }
     }
@@ -131,8 +131,8 @@ public:
         if(i==PluginMultiScaleBody::kParamStrikeX || i==PluginMultiScaleBody::kParamStrikeY) updateStrikeMarker();
         if(i==PluginMultiScaleBody::kParamPreset){ syncPresetDropdown(v); if(bodySubLabel) updateBodyInfo(); updateBodyPreview(); }
         if(i==PluginMultiScaleBody::kParamDecay || i==PluginMultiScaleBody::kParamPreset) updateDampingDisplay();
-        if(i==PluginMultiScaleBody::kParamWet && fMasterValLbl){
-            char b[24]; formatParamValue(PluginMultiScaleBody::kParamWet,v,b,sizeof(b));
+        if(i==PluginMultiScaleBody::kParamVolume && fMasterValLbl){
+            char b[24]; formatParamValue(PluginMultiScaleBody::kParamVolume,v,b,sizeof(b));
             lv_label_set_text(fMasterValLbl,b);
         }
     }
@@ -184,8 +184,8 @@ public:
             // fDampDecayCache inside updateDampingDisplay so other params
             // cost nothing here.
             if(i==PluginMultiScaleBody::kParamDecay || i==PluginMultiScaleBody::kParamPreset) updateDampingDisplay();
-            if(i==PluginMultiScaleBody::kParamWet && fMasterValLbl){
-                char b[24]; formatParamValue(PluginMultiScaleBody::kParamWet,v,b,sizeof(b));
+            if(i==PluginMultiScaleBody::kParamVolume && fMasterValLbl){
+                char b[24]; formatParamValue(PluginMultiScaleBody::kParamVolume,v,b,sizeof(b));
                 lv_label_set_text(fMasterValLbl,b);
             }
         }
@@ -319,6 +319,9 @@ private:
     // single owner of every lv_obj_t* member default; ctor and rebuildForScale share it
     void clearWidgetRefs(){
         for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount;++i){ widgets[i]=nullptr; paramCache[i]=0.5f; }
+        // volume's default is 1.0 (unity), not the blanket 0.5 — a zoom
+        // rebuild must not display a phantom -12 dB
+        paramCache[PluginMultiScaleBody::kParamVolume]=1.f;
         extraWidgetCount=0; for(uint32_t i=0;i<kMaxExtraWidgets;++i) extraWidgets[i]={0,nullptr};
         strikeDisc=strikeDot=strikeCoordLabel=presetDropdown=bodySubLabel=nullptr;
         // piece-6: preset browser prev/next arrows
@@ -627,6 +630,12 @@ private:
                 if(hz>=10.f) snprintf(buf,cap,"%.0f HZ",hz);
                 else         snprintf(buf,cap,"%.2f HZ",hz);
                 break; }
+            case P::kParamVolume: {
+                // squared-law gain (engine applies v*v): dB = 40*log10(v)
+                if(v>=0.9995f) snprintf(buf,cap,"0.0 dB");
+                else if(v<=0.001f) snprintf(buf,cap,"-INF dB");
+                else snprintf(buf,cap,"%+.1f dB",20.f*std::log10(v*v));
+                break; }
             case P::kParamModeCount: snprintf(buf,cap,"%d",8+(int)(v*120.f)); break;
             case P::kParamPitch:     snprintf(buf,cap,"%+.1f ST",(v-0.5f)*48.f); break;
             default:                 snprintf(buf,cap,"%.2f",v); break;
@@ -642,11 +651,10 @@ private:
         if(!ui||!arc) return;
         int pi=(int)(intptr_t)lv_obj_get_user_data(arc);
         // Master arc writes its owned beside-arc label (the widget's own
-        // chip is hidden - it overflowed the 30px row and clipped).
-        if(pi==PluginMultiScaleBody::kParamWet && ui->fMasterValLbl){
-            char buf[24];
-            ui->formatParamValue(pi,lv_arc_get_value(arc)/1000.f,buf,sizeof(buf));
-            lv_label_set_text(ui->fMasterValLbl,buf);
+        // built-in labels are hidden) with the formatted dB readout.
+        if(pi==PluginMultiScaleBody::kParamVolume && ui->fMasterValLbl){
+            char b[24]; ui->formatParamValue(pi,lv_arc_get_value(arc)/1000.f,b,sizeof(b));
+            lv_label_set_text(ui->fMasterValLbl,b);
             return;
         }
         auto fIt=gArcVisualBindings.find(arc);
@@ -1266,7 +1274,7 @@ private:
         // with the arc at 44px so the whole cluster centers in 50px.
         lv_obj_t* masterCol=makeCol(topbar,scaled(150),lv_pct(100),scaled(2),LV_FLEX_ALIGN_CENTER);
         lv_obj_set_flex_align(masterCol,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);
-        addLabel(masterCol,"OUTPUT",getScaledMicroFont(),PLATE_LABEL_ACCENT,2);
+        addLabel(masterCol,"VOLUME",getScaledMicroFont(),PLATE_LABEL_ACCENT,2);
         lv_obj_t* masterRow=makeRow(masterCol,lv_pct(100),scaled(30),0,LV_FLEX_ALIGN_CENTER);
         {
             ArcVisualSpec mSpec=normalArcSpec();
@@ -1274,13 +1282,13 @@ private:
             mSpec.arcSize=scaled(28);
             mSpec.capInset=5; mSpec.needleTopOffset=1; mSpec.needleBottomInset=2;
             mSpec.labelMarginBottom=0; mSpec.valueMarginTop=0;
-            lv_obj_t* masterArc=UIWidgets::createArcKnob(masterRow,PluginMultiScaleBody::kParamWet,this,styles,mSpec);
-            regExtraWidget(PluginMultiScaleBody::kParamWet, masterArc);
+            lv_obj_t* masterArc=UIWidgets::createArcKnob(masterRow,PluginMultiScaleBody::kParamVolume,this,styles,mSpec);
+            regExtraWidget(PluginMultiScaleBody::kParamVolume, masterArc);
             lv_obj_add_event_cb(masterArc,valueFormatCb,LV_EVENT_ALL,this);
             // FIX: the widget stacks title + arc(28) + chip(~13) = ~41px in
             // a 30px container, so the chip spilled out of the 30px row and
             // clipped (the "cut off" text). Hide BOTH built-in labels - the
-            // OUTPUT caption above already names the cluster - and own a
+            // VOLUME caption above already names the cluster - and own a
             // value label beside the arc. Also hide this instance's white
             // PART_KNOB tip tick: at 28px it collides with the white needle
             // into "2 white lines"; the blue indicator arc still shows value.
@@ -1296,7 +1304,7 @@ private:
             fMasterValLbl=addLabel(masterRow,"",getScaledSmallFont(),PLATE_TEXT,0);
             {
                 char b[24];
-                formatParamValue(PluginMultiScaleBody::kParamWet,paramCache[PluginMultiScaleBody::kParamWet],b,sizeof(b));
+                formatParamValue(PluginMultiScaleBody::kParamVolume,paramCache[PluginMultiScaleBody::kParamVolume],b,sizeof(b));
                 lv_label_set_text(fMasterValLbl,b);
             }
         }

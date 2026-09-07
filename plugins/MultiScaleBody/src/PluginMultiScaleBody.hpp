@@ -28,7 +28,7 @@ public:
         kParamBand0,kParamBand1,kParamBand2,kParamBand3,kParamBand4,kParamBand5,kParamBand6,kParamBand7,
         kParamBand8,kParamBand9,kParamBand10,kParamBand11,kParamBand12,kParamBand13,kParamBand14,kParamBand15,
         kParamRadiation,kParamAttack,kParamRelease,kParamLFORate,kParamLFODepth,
-        kParamExciteMix,kParamVelStrike,kParamDetune,kParamGlide,kParamWet,kParamMono,
+        kParamExciteMix,kParamVelStrike,kParamDetune,kParamGlide,kParamWet,kParamMono,kParamVolume,
         // outputs (DSP -> UI metering; never automated, never serialized)
         kParamOutLevel,kParamOutBand0,kParamOutBand1,kParamOutBand2,kParamOutBand3,
         kParamOutBand4,kParamOutBand5,kParamOutBand6,kParamOutBand7,kParamOutBand8,

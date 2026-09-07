@@ -157,9 +157,11 @@ static void dumpTree(lv_obj_t* obj, int depth)
 {
     if(depth>6) return;
     lv_area_t c; lv_obj_get_coords(obj,&c);
-    LOGF("%*s%s @ %ld,%ld %ldx%ld\n",depth*2,"",
+    const char* txt = (obj->class_p==&lv_label_class) ? lv_label_get_text(obj) : nullptr;
+    LOGF("%*s%s @ %ld,%ld %ldx%ld%s%s%s\n",depth*2,"",
         obj->class_p?obj->class_p->name:"?",
-        (long)c.x1,(long)c.y1,(long)lv_obj_get_width(obj),(long)lv_obj_get_height(obj));
+        (long)c.x1,(long)c.y1,(long)lv_obj_get_width(obj),(long)lv_obj_get_height(obj),
+        txt?" \"":"", txt?txt:"", txt?"\"":"");
     const uint32_t n=lv_obj_get_child_count(obj);
     for(uint32_t i=0;i<n;++i) dumpTree(lv_obj_get_child(obj,i),depth+1);
 }
