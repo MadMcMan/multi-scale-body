@@ -219,6 +219,8 @@ static void checkSiblingOverlaps(lv_obj_t* parent,int depth)
 static int gTestFails=0;
 #define EXPECT(cond,msg) do{ if(cond) LOGF("PASS %s\n",msg); else { LOGF("FAIL %s\n",msg); ++gTestFails; } }while(0)
 
+static lv_obj_t* findPlate(lv_obj_t* root);   // defined after checkLayout
+
 static void checkLayout(const char* tag)
 {
     lv_display_t* d=lv_display_get_default();
@@ -230,21 +232,27 @@ static void checkLayout(const char* tag)
     // check vacuously - bounds/overlap cannot fail over zero widgets. The
     // standalone exe opened blank for exactly this reason (first build
     // skipped at exact base scale). Every checkpoint must prove a
-    // non-trivial tree exists. Healthy default screen: 4 top-level children
-    // (header, dropdown-list, stage, keyboard strip); old buggy code left 0.
+    // non-trivial tree exists. Since the fixed-aspect plate fix, the screen
+    // holds the plate (+ any open dropdown lists); healthy = a plate with
+    // its three regions (topbar/stage/keyboard strip).
     const uint32_t rootChildN=lv_obj_get_child_count(root);
     LOGF("[%s] screen-children=%u\n",tag,rootChildN);
+    lv_obj_t* plate=findPlate(root);
     if(std::strcmp(tag,"default")==0){
-        EXPECT(rootChildN>=4,"default-screen-has-widgets");
+        EXPECT(plate!=nullptr,"default-plate-exists");
+        EXPECT(plate && lv_obj_get_child_count(plate)>=3,"default-screen-has-regions");
     }else{
-        EXPECT(rootChildN>=1,"checkpoint-screen-has-children");
+        EXPECT(plate!=nullptr,"checkpoint-plate-exists");
     }
     checkBounds(root,surf,0);
     checkSiblingOverlaps(root,0);
-    // stage = second child of root (header, stage, keyboard strip): its three
-    // columns are the main overlap hazard
-    if(lv_obj_get_child_count(root)>=2)
-        checkSiblingOverlaps(lv_obj_get_child(root,1),1);
+    // the plate's three regions (topbar, stage, keyboard strip) must not
+    // overlap; the stage's columns are the main horizontal hazard
+    if(plate){
+        checkSiblingOverlaps(plate,0);
+        if(lv_obj_get_child_count(plate)>=2)
+            checkSiblingOverlaps(lv_obj_get_child(plate,1),1);
+    }
     LOGF("[%s] checks: bounds=%d overlap=%2d\n",tag,gBoundFails,gOverlapFails);
 }
 
@@ -279,6 +287,44 @@ static lv_obj_t* findByClass(lv_obj_t* root,const char* cls)
     if(root->class_p && 0==std::strcmp(root->class_p->name,cls)) return root;
     const uint32_t n=lv_obj_get_child_count(root);
     for(uint32_t i=0;i<n;++i){ lv_obj_t* r=findByClass(lv_obj_get_child(root,i),cls); if(r) return r; }
+    return nullptr;
+}
+
+// The fixed-aspect PLATE: the single plain lv_obj sized scaled(BASE_W x BASE_H)
+// that owns every region (topbar/stage/keyboard). Absent in the pre-fix tree
+// (regions were direct screen children), present after the "don't move the
+// presets/keyboard on zoom" fix. The disc is also a plain lv_obj but only
+// scaled(DISC_D); the plate is uniquely the only object with the base size.
+static lv_obj_t* findPlate(lv_obj_t* root)
+{
+    // never match the screen itself (a plain lv_obj of the exact base size at
+    // zoom 125), or the pre-fix checks would pass against the screen instead
+    // of the actual fixed-aspect plate. The screen is the parentless root; the
+    // plate always has a parent. Only THE MATCH is skipped for the screen -
+    // we still recurse into its children.
+    if(root){
+        if(lv_obj_get_parent(root)!=nullptr
+           && root->class_p && 0==std::strcmp(root->class_p->name,"lv_obj")
+           && !isDropdownList(root)
+           && lv_obj_get_width(root)==scaled(lay::BASE_W)
+           && lv_obj_get_height(root)==scaled(lay::BASE_H)) return root;
+        const uint32_t n=lv_obj_get_child_count(root);
+        for(uint32_t i=0;i<n;++i){ lv_obj_t* r=findPlate(lv_obj_get_child(root,i)); if(r) return r; }
+    }
+    return nullptr;
+}
+
+// A region (topbar/stage/keyboard strip): a DIRECT child of the plate with the
+// matching scaled height. Topbar = scaled(HEADER_H), stage = scaled(STAGE_H),
+// keyboard strip = scaled(KB_STRIP_H).
+static lv_obj_t* findRegion(const lv_obj_t* plate,lv_coord_t h)
+{
+    if(!plate) return nullptr;
+    const uint32_t n=lv_obj_get_child_count(plate);
+    for(uint32_t i=0;i<n;++i){
+        lv_obj_t* c=lv_obj_get_child(plate,i);
+        if(c && lv_obj_get_height(c)==h) return c;
+    }
     return nullptr;
 }
 
@@ -446,6 +492,17 @@ int main(int argc,char** argv)
         LOGF("[zoom125] display=%ldx%ld gUIScale=%.3f\n",dw,dh,(double)DISTRHO::gUIScale);
         EXPECT(dw==1800&&dh==1075,"display-exactly-1800x1075");
         EXPECT(dw*860==dh*1440,"aspect-ratio-exact");
+        {   // at an exact zoom step the plate must FILL the window (no letterbox)
+            lv_obj_t* plate=findPlate(lv_screen_active());
+            EXPECT(plate!=nullptr,"zoom125-plate-exists");
+            if(plate){
+                lv_area_t pc; lv_obj_get_coords(plate,&pc);
+                LOGF("[zoom125] plate=@%ld,%ld %ldx%ld\n",(long)pc.x1,(long)pc.y1,
+                    (long)lv_obj_get_width(plate),(long)lv_obj_get_height(plate));
+                EXPECT(pc.x1==0 && pc.y1==0 && lv_obj_get_width(plate)==1800
+                       && lv_obj_get_height(plate)==1075,"zoom125-plate-fills-window");
+            }
+        }
         checkLayout("zoom125");
         presentKick(hwnd,exp); idleFrames(exp,90); writeBMP(hwnd,"ui_zoom_step_125.bmp");
         // drift/stability: + then - twice must return to the EXACT base size
@@ -612,6 +669,83 @@ int main(int argc,char** argv)
             }
         }
     }
+    // ---- T4: fixed-aspect plate anchoring (zoom must NOT move presets/keyboard)
+    // User report: "why when we zoom do we move the presets and keyboard? dont
+    // do that". Root cause: the topbar/stage/keyboard were DIRECT children of
+    // the flex SCREEN with lv_pct(100) width, so at any surface not exactly
+    // 1440:860 (a big zoom step clamped to the monitor working area, or a free
+    // host resize) they stretched to the FULL window width and re-centered /
+    // re-flowed independent of the stage. Fix: build the whole chassis into a
+    // fixed-aspect PLATE of scaled(BASE_W x BASE_H) centered on the screen; the
+    // chassis bg letterboxes around it and everything inside the plate keeps its
+    // exact relative position at ANY surface size.
+    LOGF("=== T4 plate anchoring (clamped / aspect-broken sizes) ===\n");
+    {
+        const struct{int w,h; const char* tag;} clamps[]={
+            {1920,1048,"clamp125-1080p"},   // a 125% zoom clamped to a 1080p work area
+            {2000, 900,"wide900"},           // extreme aspect break (2.22 vs 1.67)
+            {2200,1280,"big2200"},           // taller than the 16:9 plate
+        };
+        for(const auto& c:clamps){
+            EXPECT(resizeWindow(hwnd,exp,c.w,c.h,first),c.tag);
+            idleFrames(exp,30); pumpMsgs(); lv_obj_update_layout(lv_screen_active());
+            lv_obj_t* plate=findPlate(lv_screen_active());
+            // the drop/lines below are the crux: on pre-fix code findPlate is
+            // null and every anchoring assertion fails (the defect the user saw)
+            EXPECT(plate!=nullptr,"plate-exists");
+            if(!plate){ LOGF("[%s] NO PLATE - tree not plate-based\n",c.tag); continue; }
+            lv_area_t p; lv_obj_get_coords(plate,&p);
+            const lv_coord_t pw=lv_obj_get_width(plate);
+            LOGF("[%s] display=%dx%d plate=@%ld,%ld %ldx%ld\n",c.tag,c.w,c.h,
+                (long)p.x1,(long)p.y1,(long)pw,(long)lv_obj_get_height(plate));
+            // 1) plate is centered: left margin == right margin (a rigid unit,
+            //    not crammed to the window's left edge with slack on the right)
+            const lv_coord_t ml=p.x1, mr=c.w-(p.x2+1);
+            LOGF("[%s] margins L=%ld R=%ld\n",c.tag,(long)ml,(long)mr);
+            EXPECT(std::abs(ml-mr)<=1,"plate-centered");
+            // 2) plate never exceeds the surface in either axis
+            EXPECT(pw<=c.w && lv_obj_get_height(plate)<=c.h,"plate-fits-surface");
+            // 3) keyboard strip spans the plate and is pinned to its bottom
+            lv_obj_t* kb=findRegion(plate,scaled(lay::KB_STRIP_H));
+            EXPECT(kb!=nullptr,"keyboard-region-found");
+            if(kb){
+                lv_area_t k; lv_obj_get_coords(kb,&k);
+                LOGF("[%s] kb=@%ld,%ld %ldx%ld plate-inner=[%ld,%ld]\n",c.tag,
+                    (long)k.x1,(long)k.y1,(long)lv_obj_get_width(kb),(long)lv_obj_get_height(kb),
+                    (long)(p.x1+scaled(lay::PAD)),(long)(p.x2-scaled(lay::PAD)));
+                // spans the plate width (its pct(100) is 100% OF THE PLATE now)
+                EXPECT(k.x1==p.x1+scaled(lay::PAD) && k.x2==p.x2-scaled(lay::PAD),
+                       "keyboard-spans-plate");
+                // pinned to the plate bottom within 2px: rounding (scaled(16)
+                // truncates) plus the strip's own 1px border make the strict
+                // bottom edge differ by 0-1px at fractional scales - invisible,
+                // and unrelated to the "zoom moves the presets/keyboard" bug.
+                EXPECT(std::abs((long)k.y2-((long)p.y2-scaled(lay::PAD)))<=2,
+                       "keyboard-pinned-plate-bottom");
+            }
+            // 4) topbar spans the plate
+            lv_obj_t* top=findRegion(plate,scaled(lay::HEADER_H));
+            EXPECT(top!=nullptr,"topbar-region-found");
+            if(top){
+                lv_area_t t; lv_obj_get_coords(top,&t);
+                EXPECT(t.x1==p.x1+scaled(lay::PAD) && t.x2==p.x2-scaled(lay::PAD),
+                       "topbar-spans-plate");
+            }
+            // 5) the preset dropdown stays in the plate's LEFT region (anchored
+            //    to the plate, never pushed toward the window's right edge)
+            lv_obj_t* dd=findByClass(plate,"lv_dropdown");
+            if(dd){
+                lv_area_t dc; lv_obj_get_coords(dd,&dc);
+                LOGF("[%s] preset=@%ld x-in-plate=[%ld,%ld] plate=[%ld,%ld]\n",c.tag,
+                    (long)dc.x1,(long)(dc.x1-p.x1),(long)(dc.x2-p.x1),
+                    (long)p.x1,(long)p.x2);
+                EXPECT(dc.x1>p.x1 && dc.x2<p.x2,"preset-inside-plate");
+                EXPECT((dc.x1-p.x1)<pw/2,"preset-anchored-plate-left");
+            }else EXPECT(false,"preset-dropdown-in-plate");
+            checkLayout(c.tag);
+        }
+    }
+
     LOGF("=== RESULT fails=%d bounds/overlap reported above ===\n",gTestFails);
 
     exp->quit();

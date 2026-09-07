@@ -1106,24 +1106,51 @@ private:
     //   +-- KEYBOARD  (octave + keys + ARP)
     // vertical budget @s=1: 32 + 72 + 610 + 128 + 3*6 gaps = 860 (exact).
     void buildUI(lv_obj_t* parent=nullptr){
-        lv_obj_t* root=parent ? parent : lv_screen_active();
-        if(!root){ lv_display_t* d=lv_display_get_default(); if(d) root=lv_display_get_screen_active(d); }
-        if(!root) return;
+        lv_obj_t* surface=parent ? parent : lv_screen_active();
+        if(!surface){ lv_display_t* d=lv_display_get_default(); if(d) surface=lv_display_get_screen_active(d); }
+        if(!surface) return;
         fUIBuilt=true; fMarkerPlaced=false;
 
-        // --- ROOT COLUMN (screen styling only on first build) ----------------
-        // The screen's bg/layout/padding is permanent; only the first build
-        // sets it. On rebuild, buildUI(parent=stash) re-runs the widget
-        // construction against a hidden overlay (see rebuildForScale), so
-        // re-applying screen-level styles to a non-screen parent would crash
-        // or visually reset the surface.
+        // --- SURFACE + FIXED-ASPECT PLATE -----------------------------------
+        // User report (2026-09-06): "why when we zoom do we move the presets
+        // and keyboard? dont do that". Root cause: the topbar/stage/keyboard
+        // used to be DIRECT children of the flex SCREEN with lv_pct(100)
+        // width, so at any surface not exactly 1440:860 - a big zoom step
+        // clamped to the monitor working area, or a free host resize - they
+        // stretched to the FULL window width and re-centered / re-flowed
+        // INDEPENDENT of the stage. The presets (top bar) and keyboard
+        // decoupled from the plate the moment the window got wider/taller
+        // than the base aspect.
+        //   Fix: the whole chassis lives in a rigid fixed-aspect PLATE of
+        // scaled(BASE_W x BASE_H) centered on the surface. The chassis bg
+        // letterboxes any slack and EVERYTHING inside the plate keeps its
+        // exact relative position at any surface size - zoom scales the plate
+        // as one unit, it never re-arranges its regions. At exact zoom steps
+        // the plate fills the window (zero letterbox, pixel-identical to the
+        // old layout).
+        //   On rebuild, buildUI(parent=stash) re-runs widget construction
+        // against a hidden full-surface overlay (see rebuildForScale); the
+        // plate is still created there so the swap moves exactly one flexible
+        // child back onto the real screen.
         if(!parent){
-            lv_obj_set_style_bg_color(root,PLATE_BG,0); lv_obj_set_style_bg_opa(root,LV_OPA_COVER,0);
-            lv_obj_set_layout(root,LV_LAYOUT_FLEX); lv_obj_set_flex_flow(root,LV_FLEX_FLOW_COLUMN);
-            lv_obj_set_flex_align(root,LV_FLEX_ALIGN_SPACE_BETWEEN,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);
-            lv_obj_set_style_pad_all(root,scaled(lay::PAD),0);
-            lv_obj_set_scrollbar_mode(root,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(root,LV_OBJ_FLAG_SCROLLABLE);
+            // surface = the real screen: chassis backdrop ONLY (layout NONE so
+            // the plate can center itself freely). Styling is first-build-only.
+            lv_obj_set_style_bg_color(surface,PLATE_BG,0); lv_obj_set_style_bg_opa(surface,LV_OPA_COVER,0);
+            lv_obj_set_layout(surface,LV_LAYOUT_NONE);
+            lv_obj_set_scrollbar_mode(surface,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(surface,LV_OBJ_FLAG_SCROLLABLE);
         }
+        lv_obj_t* root=lv_obj_create(surface);
+        lv_obj_set_size(root,scaled(lay::BASE_W),scaled(lay::BASE_H));
+        lv_obj_center(root);
+        lv_obj_set_style_bg_opa(root,LV_OPA_TRANSP,0);
+        lv_obj_set_style_border_width(root,0,0);
+        lv_obj_set_style_pad_all(root,0,0);
+        lv_obj_clear_flag(root,LV_OBJ_FLAG_SCROLLABLE); lv_obj_clear_flag(root,LV_OBJ_FLAG_CLICKABLE);
+        // the plate owns the flex column (SPACE_BETWEEN + PAD) the regions need
+        lv_obj_set_layout(root,LV_LAYOUT_FLEX); lv_obj_set_flex_flow(root,LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(root,LV_FLEX_ALIGN_SPACE_BETWEEN,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_all(root,scaled(lay::PAD),0);
+        lv_obj_set_scrollbar_mode(root,LV_SCROLLBAR_MODE_OFF); lv_obj_clear_flag(root,LV_OBJ_FLAG_SCROLLABLE);
         // --- TOP-BAR (h = 72): brand | preset browser | master | zoom --------
         // Same role Serum 2 fills with SERUM 2 / preset / MASTER / MENU.
         // Horizontal split:  brand(220) | preset(0,grow) | master(140) | zoom(116).
