@@ -15,6 +15,7 @@
 #include <cstring>
 #include <algorithm>
 #include <string>
+#include <functional>
 #include <cmath>
 START_NAMESPACE_DISTRHO
 float gUIScale = 1.0f;
@@ -41,6 +42,28 @@ static void rippleDelCb(lv_anim_t* a){ lv_obj_t* r=(lv_obj_t*)a->var; if(r) lv_o
 // mallet glow pulse: quick zoom pop + shadow bloom on the strike marker
 static void pulseZoomCb(void* var,int32_t v){ lv_obj_t* r=(lv_obj_t*)var; if(r) lv_obj_set_style_transform_zoom(r,v,0); }
 static void pulseGlowCb(void* var,int32_t v){ lv_obj_t* r=(lv_obj_t*)var; if(r) lv_obj_set_style_shadow_opa(r,(lv_opa_t)v,0); }
+
+// === RIGHT-CLICK CATCHER (idea 15: MIDI learn) ==============================
+// dpf-widgets' LVGL bridge (indev_mouse_read_cb) feeds ONLY the left mouse
+// button to the LVGL pointer indev, so right-click never reaches lv_event
+// handlers. DGL itself receives every button (LVGLWidget::onMouse runs the
+// BaseWidget dispatch BEFORE storing its button state), so we subclass the
+// top-level widget and relay button 2 (kMouseButtonRight) presses by absolute
+// window position. The event still passes through to LVGLTopLevelWidget::
+// onMouse untouched — the indev ignores non-left buttons, so nothing changes
+// on the LVGL side.
+class MultiScaleBodyLVGLWidget : public DGL_NAMESPACE::LVGLTopLevelWidget {
+public:
+    std::function<void(int,int)> onRightClick;   // absolute window x,y
+    explicit MultiScaleBodyLVGLWidget(DGL_NAMESPACE::Window& w)
+        : LVGLTopLevelWidget(w) {}
+protected:
+    bool onMouse(const DGL_NAMESPACE::Widget::MouseEvent& ev) override {
+        if(ev.button==DGL_NAMESPACE::kMouseButtonRight && ev.press && onRightClick)
+            onRightClick((int)ev.absolutePos.getX(),(int)ev.absolutePos.getY());
+        return LVGLTopLevelWidget::onMouse(ev);
+    }
+};
 
 // ============================================================================
 // DETERMINISTIC GEOMETRY REMAKE
@@ -90,8 +113,20 @@ public:
         paramCache[PluginMultiScaleBody::kParamWet]=0.f;
         paramCache[PluginMultiScaleBody::kParamMono]=0.f;
         paramCache[PluginMultiScaleBody::kParamVolume]=1.f;
+        // wave-2 defaults (everything off/identity; bandDecay blanket 0.5 fits
+        // the clearWidgetRefs wipe, but these four need explicit zeros)
+        paramCache[PluginMultiScaleBody::kParamBow]=0.f;
+        paramCache[PluginMultiScaleBody::kParamDamper]=0.f;
+        paramCache[PluginMultiScaleBody::kParamInharm]=0.f;
+        paramCache[PluginMultiScaleBody::kParamSlideMode]=0.f;
         setSize(DISTRHO_UI_DEFAULT_WIDTH, DISTRHO_UI_DEFAULT_HEIGHT);
-        fLVGL = new DGL_NAMESPACE::LVGLTopLevelWidget(getWindow());
+        fLVGL = new MultiScaleBodyLVGLWidget(getWindow());
+        // Right-click routing (DPF's LVGL indev only feeds the left button):
+        // DGL sees every button, so the subclass forwards right presses by
+        // absolute position. Knob hit -> MIDI learn; anywhere else -> cancel.
+        ((MultiScaleBodyLVGLWidget*)fLVGL)->onRightClick=[this](int x,int y){
+            this->handleRightClick(x,y);
+        };
         styles.init();
         // buildUI() is deferred to the first uiIdle(): a tree built inside the
         // constructor (before the first LVGL refresh) settles into a 0x0 layout
@@ -109,6 +144,8 @@ public:
             case P::kParamLFORate: return "LFO Rate";  case P::kParamLFODepth: return "LFO Depth";
             case P::kParamExciteMix: return "Exciter"; case P::kParamVelStrike: return "Vel Strike";
             case P::kParamWet: return "Reverb";        case P::kParamMono: return "Mono"; case P::kParamVolume: return "Volume";
+            case P::kParamBow: return "Bow";           case P::kParamDamper: return "Damper";
+            case P::kParamInharm: return "Inharm";     case P::kParamSlideMode: return "Slide";
             default: return {}; // bands and metering outputs have no knob title
         }
     }
@@ -130,7 +167,8 @@ public:
             fModeMapDirty=true;
         if(i==PluginMultiScaleBody::kParamStrikeX || i==PluginMultiScaleBody::kParamStrikeY) updateStrikeMarker();
         if(i==PluginMultiScaleBody::kParamPreset){ syncPresetDropdown(v); if(bodySubLabel) updateBodyInfo(); updateBodyPreview(); }
-        if(i==PluginMultiScaleBody::kParamDecay || i==PluginMultiScaleBody::kParamPreset) updateDampingDisplay();
+        if(i==PluginMultiScaleBody::kParamDecay || i==PluginMultiScaleBody::kParamPreset
+           || (i>=PluginMultiScaleBody::kParamBandDecay0 && i<=PluginMultiScaleBody::kParamBandDecay15)) updateDampingDisplay();
         if(i==PluginMultiScaleBody::kParamVolume && fMasterValLbl){
             char b[24]; formatParamValue(PluginMultiScaleBody::kParamVolume,v,b,sizeof(b));
             lv_label_set_text(fMasterValLbl,b);
@@ -176,6 +214,11 @@ public:
             fGotLiveViz=true; fLiveAge=0;
             return;
         }
+        // A real (non-metering) parameter just moved: if a MIDI-lean overlay is
+        // open, this is the learned CC binding it was waiting for (the target
+        // param was set by the plugin's run()). The shield blocks knob drags,
+        // so it cannot be a false positive.
+        if(fLearnOverlay) closeLearnOverlay();
         if(i<PluginMultiScaleBody::kParameterCount){ paramCache[i]=v; syncParamWidget(i,v);
             if(i==PluginMultiScaleBody::kParamStrikeX || i==PluginMultiScaleBody::kParamStrikeY) updateStrikeMarker();
             if(i==PluginMultiScaleBody::kParamPreset){ syncPresetDropdown(v); if(bodySubLabel) updateBodyInfo(); updateBodyPreview(); }
@@ -183,7 +226,8 @@ public:
             // preset changes always re-bake it). Gate by fDampPresetCache/
             // fDampDecayCache inside updateDampingDisplay so other params
             // cost nothing here.
-            if(i==PluginMultiScaleBody::kParamDecay || i==PluginMultiScaleBody::kParamPreset) updateDampingDisplay();
+            if(i==PluginMultiScaleBody::kParamDecay || i==PluginMultiScaleBody::kParamPreset
+               || (i>=PluginMultiScaleBody::kParamBandDecay0 && i<=PluginMultiScaleBody::kParamBandDecay15)) updateDampingDisplay();
             if(i==PluginMultiScaleBody::kParamVolume && fMasterValLbl){
                 char b[24]; formatParamValue(PluginMultiScaleBody::kParamVolume,v,b,sizeof(b));
                 lv_label_set_text(fMasterValLbl,b);
@@ -195,6 +239,40 @@ public:
             arpOnLocal = value && value[0]=='1';
             if(arpBtn){ if(arpOnLocal) lv_obj_add_state(arpBtn,LV_STATE_CHECKED); else lv_obj_clear_state(arpBtn,LV_STATE_CHECKED); }
         }
+        // host pushed a microtonal scale (patch load): mirror it in the UI
+        if(key && std::strcmp(key,"scale")==0){
+            scaleTxtCached_ = value ? value : "";
+            updateScaleLabel();
+            if(fScaleArea) lv_textarea_set_text(fScaleArea, scaleTxtCached_.c_str());
+        }
+    }
+    // label readout for the loaded .scl: first non-comment, non-count line,
+    // or the 12-EDO default when no scale is loaded.
+    void updateScaleLabel(){
+        if(!fScaleLbl) return;
+        char buf[48];
+        snprintf(buf,sizeof(buf),"SCALE: %s",scaleName(scaleTxtCached_).c_str());
+        lv_label_set_text(fScaleLbl,buf);
+    }
+    static std::string scaleName(const std::string& txt){
+        if(txt.empty()) return "12-EDO";
+        size_t pos=0;
+        while(pos<txt.size()){
+            size_t e=txt.find('\n',pos);
+            if(e==std::string::npos) e=txt.size();
+            std::string line=txt.substr(pos,e-pos);
+            pos=e+1;
+            size_t s0=line.find_first_not_of(" \t\r");
+            if(s0==std::string::npos) continue;
+            size_t s1=line.find_last_not_of(" \t\r");
+            line=line.substr(s0,s1-s0+1);
+            if(line.empty()||line[0]=='!') continue;
+            // a pure integer <= 128 is the degree count, not a name
+            char* end=nullptr; long c=strtol(line.c_str(),&end,10);
+            if(end && *end=='\0' && c>=2 && c<=128) return "(unnamed)";
+            return line;
+        }
+        return "12-EDO";
     }
     void uiIdle() override {
         // First build AND every rescale are owned by rebuildForScale(),
@@ -284,7 +362,15 @@ public:
                 }
             }
             fUIBuilt=false;
+            // Snapshot the live param cache BEFORE clearWidgetRefs() wipes it:
+            // knob positions must survive zoom/resize rebuilds instead of
+            // snapping back to defaults until a host echo arrives (DPF never
+            // re-sends params on resize). Restored right after the wipe so
+            // buildUI() lays every knob out at its current value.
+            float pcSnap[PluginMultiScaleBody::kParameterCount];
+            for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount;++i) pcSnap[i]=paramCache[i];
             clearWidgetRefs();
+            for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount;++i) paramCache[i]=pcSnap[i];
             fPrevEnergy=0.f; fLevelEnv=0.f; fMeterEnv=0.f; fMeterPeak=0.f; fPeakAge=0; gScopeMax=0.05f; fRippleCooldown=0; fStrikeHeld=false;
             fMarkerPlaced=false;
             styles.reset(); styles.init();
@@ -335,7 +421,10 @@ private:
         for(int i=0;i<5;++i) kbBlack[i]=nullptr;
         // R5: damping panel - bars + value labels
         for(int i=0;i<16;++i){ fDampBars[i]=nullptr; fDampVals[i]=nullptr; }
-        fDampMax=1.f; fDampPresetCache=-1; fDampDecayCache=-1.f;
+        fDampMax=1.f; fDampPresetCache=-1; fDampDecayCache=-1.f; fDampBandSumCache=-1.f;
+        fScrubMode=0; fScrubParamIdx=-1; fScrubToggle=nullptr;
+        fLearnOverlay=nullptr; fLearnParam=-1;
+        fScaleMenu=nullptr; fScaleArea=nullptr; fScaleLbl=nullptr;
         fMasterValLbl=nullptr; fStrikeChannel=0; fNextStrikeChannel=1; fLiveAge=1000; fRebuildInFlight=false;
     }
     static void previewGeometry(int& cell,int& gap,int& off){
@@ -461,8 +550,16 @@ private:
         int idx = (int)std::round(paramCache[PluginMultiScaleBody::kParamPreset]*(float)mx);
         idx = std::clamp(idx,0,mx);
         float decayV = paramCache[PluginMultiScaleBody::kParamDecay];
-        if(idx==fDampPresetCache && std::abs(decayV-fDampDecayCache)<1e-4f) return;
-        fDampPresetCache=idx; fDampDecayCache=decayV;
+        // idea 2: per-band decay trims also rescale the display (and gate the
+        // recompute). Trim curve mirrors the engine: v 0.5 -> EXACT 1.0.
+        float bdSum=0.f, bandTrim[16];
+        for(int b=0;b<16;++b){
+            bandTrim[b]=std::pow(2.f,(paramCache[PluginMultiScaleBody::kParamBandDecay0+b]-0.5f)*2.f);
+            bdSum+=paramCache[PluginMultiScaleBody::kParamBandDecay0+b];
+        }
+        if(idx==fDampPresetCache && std::abs(decayV-fDampDecayCache)<1e-4f
+           && std::abs(bdSum-fDampBandSumCache)<1e-4f) return;
+        fDampPresetCache=idx; fDampDecayCache=decayV; fDampBandSumCache=bdSum;
         const auto& pr = modal::kPresets[idx];
         // mirror the engine's setDecayScale curve: larger v = longer tail
         // (smaller rate multiplier). The display tracks 1/(decay*scale).
@@ -480,8 +577,9 @@ private:
                 sum += d; ++cnt;
             }
             float meanRate = (float)(sum/(double)cnt);
-            // effective rate scaled by the DECAY knob, T60 = 6.91/rate
-            float t60 = 6.9078f / (meanRate * scale);
+            // effective rate scaled by the DECAY knob and the per-band trim
+            // (rate up = shorter tail, T60 = 6.91/rate)
+            float t60 = 6.9078f / (meanRate * scale * bandTrim[b]);
             bandT60[b]=t60;
             if(t60>maxT60) maxT60=t60;
         }
@@ -638,6 +736,14 @@ private:
                 break; }
             case P::kParamModeCount: snprintf(buf,cap,"%d",8+(int)(v*120.f)); break;
             case P::kParamPitch:     snprintf(buf,cap,"%+.1f ST",(v-0.5f)*48.f); break;
+            case P::kParamBow:       snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
+            case P::kParamDamper:    snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
+            case P::kParamInharm:    snprintf(buf,cap,"x%.2f",1.f+v); break;
+            case P::kParamSlideMode: {
+                static const char* const kSlideNames[3]={"PITCH","MODE","BRIGHT"};
+                const int m=std::clamp((int)std::lround(v*2.f),0,2);
+                snprintf(buf,cap,"%s",kSlideNames[m]);
+                break; }
             default:                 snprintf(buf,cap,"%.2f",v); break;
         }
     }
@@ -784,21 +890,26 @@ private:
         float level = std::clamp(fy,0.f,1.f);
         auto code = lv_event_get_code(e);
         if(code==LV_EVENT_PRESSED || code==LV_EVENT_PRESSING){
+            const int pIdx = ui->fScrubMode
+                ? (int)PluginMultiScaleBody::kParamBandDecay0+band
+                : (int)PluginMultiScaleBody::kParamBand0+band;
             if(band!=ui->fScrubBand){
                 // drag crossed into another band: close the old edit bracket,
                 // open the new one (RELEASED closes by member, not by position)
-                if(ui->fScrubBand>=0) ui->editParameter(PluginMultiScaleBody::kParamBand0+ui->fScrubBand,false);
+                if(ui->fScrubParamIdx>=0) ui->editParameter((uint32_t)ui->fScrubParamIdx,false);
                 ui->fScrubBand=band;
+                ui->fScrubParamIdx=pIdx;
                 ui->fScrubLevel=level;
-                ui->editParameter(PluginMultiScaleBody::kParamBand0+band,true);
-                ui->setParamValue(PluginMultiScaleBody::kParamBand0+band, level);
+                ui->editParameter((uint32_t)pIdx,true);
+                ui->setParamValue((uint32_t)pIdx, level);
             } else if(level!=ui->fScrubLevel){   // same band: write only on change
                 ui->fScrubLevel=level;
-                ui->setParamValue(PluginMultiScaleBody::kParamBand0+band, level);
+                ui->setParamValue((uint32_t)pIdx, level);
             }
         } else if(code==LV_EVENT_RELEASED || code==LV_EVENT_PRESS_LOST){
-            if(ui->fScrubBand>=0){
-                ui->editParameter(PluginMultiScaleBody::kParamBand0+ui->fScrubBand,false);
+            if(ui->fScrubParamIdx>=0){
+                ui->editParameter((uint32_t)ui->fScrubParamIdx,false);
+                ui->fScrubParamIdx=-1;
                 ui->fScrubBand=-1;
             }
         }
@@ -911,6 +1022,142 @@ private:
             set(PluginMultiScaleBody::kParamBand0+b, std::clamp(rnd(0.3f,0.75f),0.f,1.f));
         int mx=modal::kNumPresets-1;
         set(PluginMultiScaleBody::kParamPreset,(float)(std::rand()%(mx+1))/(float)mx);
+    }
+
+    // ---- idea 15: MIDI learn (right-click a knob -> next CC binds) ---------
+    // Resolution uses the exact LVGL click path (lv_indev_search_obj, the
+    // same search the pointer indev runs) and walks up until an lv_arc is
+    // found — only knobs carry a param index in user_data; buttons and
+    // decorative objects can't be mistaken for them. Right-click anywhere
+    // else (or a second right-click) cancels.
+    void handleRightClick(int wx,int wy){
+        lv_obj_t* scr=lv_screen_active();
+        if(!scr) return;
+        closeLearnOverlay();
+        closeScaleMenu();
+        lv_point_t pt={ (lv_coord_t)wx, (lv_coord_t)wy };
+        lv_obj_t* o=lv_indev_search_obj(scr,&pt);
+        lv_obj_t* arc=o;
+        while(arc && !lv_obj_check_type(arc,&lv_arc_class)) arc=lv_obj_get_parent(arc);
+        if(!arc) return;
+        const intptr_t ud=(intptr_t)lv_obj_get_user_data(arc);
+        if(ud<0 || ud>=(intptr_t)PluginMultiScaleBody::kNumInputParams) return;
+        openLearnOverlay((int)ud);
+    }
+    void openLearnOverlay(int pi){
+        lv_obj_t* scr=lv_screen_active();
+        if(!scr) return;
+        fLearnParam=pi;
+        // full-screen shield: any left-click cancels (LVGL bubbles CLICKED
+        // from the card up to the shield, so the handler fires either way)
+        fLearnOverlay=lv_obj_create(scr);
+        lv_obj_set_size(fLearnOverlay,lv_pct(100),lv_pct(100));
+        lv_obj_set_style_bg_color(fLearnOverlay,PLATE_BG,0);
+        lv_obj_set_style_bg_opa(fLearnOverlay,LV_OPA_70,0);
+        lv_obj_set_style_border_width(fLearnOverlay,0,0);
+        lv_obj_set_style_pad_all(fLearnOverlay,0,0);
+        lv_obj_set_layout(fLearnOverlay,LV_LAYOUT_NONE);
+        lv_obj_clear_flag(fLearnOverlay,LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_event_cb(fLearnOverlay,learnShieldCb,LV_EVENT_CLICKED,this);
+        lv_obj_t* card=makeCard(fLearnOverlay,scaled(360),scaled(128),scaled(8),LV_FLEX_ALIGN_CENTER);
+        lv_obj_align(card,LV_ALIGN_CENTER,0,0);
+        addLabel(card,"MIDI LEARN",getScaledSmallFont(),COL_HIGHLIGHT,2);
+        char b[96];
+        snprintf(b,sizeof(b),"Move a CC (channel 0) -> %s",parameterName((uint32_t)pi).c_str());
+        addLabel(card,b,getScaledMicroFont(),PLATE_TEXT,0);
+        addLabel(card,"Right-click again or click away to cancel",getScaledMicroFont(),PLATE_TEXT_DIM,0);
+        setState("learn", std::to_string(pi).c_str());   // arm the plugin
+    }
+    static void learnShieldCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        if(ui) ui->closeLearnOverlay();
+    }
+    void closeLearnOverlay(){
+        if(fLearnOverlay){ lv_obj_del(fLearnOverlay); fLearnOverlay=nullptr; }
+        if(fLearnParam>=0){
+            setState("learn","");   // disarm the plugin's pending learn
+            fLearnParam=-1;
+        }
+    }
+    // ---- idea 13: microtonal scale editor (.scl paste) ---------------------
+    void openScaleMenu(){
+        lv_obj_t* scr=lv_screen_active();
+        if(!scr || fScaleMenu) return;
+        fScaleMenu=lv_obj_create(scr);
+        lv_obj_set_size(fScaleMenu,lv_pct(100),lv_pct(100));
+        lv_obj_set_style_bg_color(fScaleMenu,PLATE_BG,0);
+        lv_obj_set_style_bg_opa(fScaleMenu,LV_OPA_80,0);
+        lv_obj_set_style_border_width(fScaleMenu,0,0);
+        lv_obj_set_style_pad_all(fScaleMenu,0,0);
+        lv_obj_set_layout(fScaleMenu,LV_LAYOUT_NONE);
+        lv_obj_clear_flag(fScaleMenu,LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_event_cb(fScaleMenu,scaleShieldCb,LV_EVENT_CLICKED,this);
+        lv_obj_t* card=makeCard(fScaleMenu,scaled(560),scaled(320),scaled(8),LV_FLEX_ALIGN_START);
+        lv_obj_align(card,LV_ALIGN_CENTER,0,0);
+        lv_obj_t* head=makeRow(card,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
+        addLabel(head,"MICROTONAL SCALE  (.SCL)",getScaledSmallFont(),COL_HIGHLIGHT,2);
+        addLabel(head,scaleName(scaleTxtCached_).c_str(),getScaledMicroFont(),PLATE_AMBER,1);
+        fScaleArea=lv_textarea_create(card);
+        lv_obj_set_size(fScaleArea,lv_pct(100),scaled(190));
+        lv_textarea_set_placeholder_text(fScaleArea,
+            "! Scala .scl text (paste)\n"
+            "! 19-edo example:\n"
+            "19\n"
+            "! 19 equal divisions of the octave\n"
+            "63.157895\n126.315789\n189.473684\n...");
+        lv_obj_set_style_bg_color(fScaleArea,PLATE_WELL,0);
+        lv_obj_set_style_bg_opa(fScaleArea,LV_OPA_COVER,0);
+        lv_obj_set_style_border_color(fScaleArea,PLATE_EDGE,0);
+        lv_obj_set_style_border_width(fScaleArea,1,0);
+        lv_obj_set_style_radius(fScaleArea,scaled(lay::RADIUS_SM),0);
+        lv_obj_set_style_text_color(fScaleArea,PLATE_TEXT,0);
+        lv_obj_set_style_text_font(fScaleArea,getScaledMicroFont(),0);
+        lv_textarea_set_accepted_chars(fScaleArea,"0123456789./\\! \t\r\n,;:-");
+        lv_textarea_set_one_line(fScaleArea,false);
+        if(!scaleTxtCached_.empty()) lv_textarea_set_text(fScaleArea,scaleTxtCached_.c_str());
+        lv_obj_t* row=makeRow(card,lv_pct(100),scaled(lay::BTN_H),scaled(8),LV_FLEX_ALIGN_CENTER);
+        lv_obj_t* apply=addButton(row,96,lay::BTN_H,"APPLY",COL_HIGHLIGHT);
+        lv_obj_add_event_cb(apply,scaleApplyCb,LV_EVENT_CLICKED,this);
+        lv_obj_t* clear=addButton(row,96,lay::BTN_H,"CLEAR",PLATE_TEXT_MID);
+        lv_obj_add_event_cb(clear,scaleClearCb,LV_EVENT_CLICKED,this);
+        addLabel(row,"degree 0 sits on middle C; Tune stays a global offset",getScaledMicroFont(),PLATE_TEXT_DIM,0);
+    }
+    static void scaleBtnCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        if(ui) ui->openScaleMenu();
+    }
+    static void scaleShieldCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        if(ui) ui->closeScaleMenu();
+    }
+    static void scaleApplyCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        if(!ui||!ui->fScaleArea) return;
+        const char* txt=lv_textarea_get_text(ui->fScaleArea);
+        ui->scaleTxtCached_ = txt ? txt : "";
+        ui->setState("scale", ui->scaleTxtCached_.c_str());   // plugin parses + pushes engine
+        ui->updateScaleLabel();
+    }
+    static void scaleClearCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        if(!ui) return;
+        ui->scaleTxtCached_="";
+        ui->setState("scale","");
+        ui->updateScaleLabel();
+    }
+    void closeScaleMenu(){
+        if(fScaleMenu){ lv_obj_del(fScaleMenu); fScaleMenu=nullptr; }
+        fScaleArea=nullptr;
+    }
+    // ---- spectrum scrub target (idea 2): GAIN vs DECAY ---------------------
+    static void scrubToggleCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* btn=(lv_obj_t*)lv_event_get_target(e);
+        if(!ui||!btn) return;
+        ui->fScrubMode=!ui->fScrubMode;
+        lv_obj_t* lbl=lv_obj_get_child(btn,0);
+        if(lbl && lv_obj_check_type(lbl,&lv_label_class))
+            lv_label_set_text(lbl, ui->fScrubMode?"DECAY":"GAIN");
     }
 
     // ---- small builder helpers (all sizes flow through scaled()) ----------
@@ -1044,6 +1291,16 @@ private:
         lv_obj_t* kbHead=makeRow(kbContainer,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         lv_obj_t* kbTitle=addLabel(kbHead,"KEYBOARD  -  3 OCTAVES  -  CLICK TO AUDITION",getScaledMicroFont(),COL_HIGHLIGHT,2);
         lv_obj_set_style_text_opa(kbTitle,LV_OPA_80,0);
+        // idea 13: microtonal scale status + editor (middle of the head row)
+        lv_obj_t* scaleCluster=makeRow(kbHead,scaled(230),scaled(lay::BTN_H),scaled(8),LV_FLEX_ALIGN_CENTER);
+        fScaleLbl=addLabel(scaleCluster,"SCALE: 12-EDO",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        {
+            const char* sn=scaleName(scaleTxtCached_).c_str();
+            char bu[48]; snprintf(bu,sizeof(bu),"SCALE: %s",sn);
+            lv_label_set_text(fScaleLbl,bu);
+        }
+        lv_obj_t* scaleBtn=addButton(scaleCluster,lay::RND_W,lay::BTN_H,"EDIT",PLATE_TEXT_MID);
+        lv_obj_add_event_cb(scaleBtn,scaleBtnCb,LV_EVENT_CLICKED,this);
         // cluster width: ARP 46 + 6 + oct 28 + 6 + label 70 + 6 + oct 28 = 190
         lv_obj_t* octRow=makeRow(kbHead,scaled(190),scaled(lay::BTN_H),scaled(6));
         arpBtn=lv_btn_create(octRow);
@@ -1328,16 +1585,21 @@ private:
         // heights: BODY 16+6+116=138, others 16+6+98=120; SPACE_BETWEEN spreads
         // the leftover 112 across three inter-cluster gaps (~37) - deliberate air
         lv_obj_t* left=makeCol(stage,scaled(lay::LEFT_W),scaled(lay::STAGE_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
-        const uint32_t groupParams[4][4]={
+        const uint32_t groupParams[5][4]={
             {PluginMultiScaleBody::kParamPitch,PluginMultiScaleBody::kParamDecay,PluginMultiScaleBody::kParamBrightness,PluginMultiScaleBody::kParamModeCount},
             {PluginMultiScaleBody::kParamWidth,PluginMultiScaleBody::kParamRadiation,PluginMultiScaleBody::kParamDetune,PluginMultiScaleBody::kParamGlide},
             {PluginMultiScaleBody::kParamVelStrike,PluginMultiScaleBody::kParamExciteMix,PluginMultiScaleBody::kParamAttack,PluginMultiScaleBody::kParamRelease},
-            {PluginMultiScaleBody::kParamLFORate,PluginMultiScaleBody::kParamLFODepth,PluginMultiScaleBody::kParamWet,PluginMultiScaleBody::kParamMono}
+            {PluginMultiScaleBody::kParamLFORate,PluginMultiScaleBody::kParamLFODepth,PluginMultiScaleBody::kParamWet,PluginMultiScaleBody::kParamMono},
+            {PluginMultiScaleBody::kParamBow,PluginMultiScaleBody::kParamDamper,PluginMultiScaleBody::kParamInharm,PluginMultiScaleBody::kParamSlideMode}
         };
-        const char* groupNames[4]={"BODY","RESONATE","EXCITER","SPACE"};
-        for(int g=0;g<4;++g){
+        // FEEL = the wave-2 excitation/modulation row: bow, felt damper,
+        // inharmonicity, MPE slide routing. Compact knobs (arc 48) so the
+        // 5th row fits the 610px column: 138+120+120+120+106 = 604 <= 610.
+        const char* groupNames[5]={"BODY","RESONATE","EXCITER","SPACE","FEEL"};
+        for(int g=0;g<5;++g){
             const bool primary=(g==0);
-            const int kh=primary?lay::KNOB_H_N:lay::KNOB_H_C;
+            const bool feel=(g==4);
+            const int kh=primary?lay::KNOB_H_N:(feel?lay::KNOB_H_FEEL:lay::KNOB_H_C);
             lv_obj_t* sec=makeCol(left,scaled(lay::LEFT_W),scaled(lay::SEC_LABEL_H+lay::SEC_GAP+kh),scaled(lay::SEC_GAP));
             lv_obj_set_flex_align(sec,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
             // R4: per-section color identity (Pigments-style categorical
@@ -1346,7 +1608,7 @@ private:
             // fix that defined SEC_* was lost in a revert cycle (macros
             // existed but were never applied) - the R3 critic read the left
             // bank as "single cyan accent across every section".
-            static const lv_color_t secColors[4]={SEC_BODY,SEC_RESONATE,SEC_EXCITER,SEC_SPACE};
+            static const lv_color_t secColors[5]={SEC_BODY,SEC_RESONATE,SEC_EXCITER,SEC_SPACE,SEC_EXCITER};
             lv_obj_t* secLabelRow=makeRow(sec,lv_pct(100),scaled(lay::SEC_LABEL_H),scaled(6),LV_FLEX_ALIGN_START);
             lv_obj_t* secRule=makeBox(secLabelRow,scaled(3),scaled(lay::SEC_LABEL_H));
             lv_obj_set_style_bg_color(secRule,secColors[g],0);
@@ -1368,7 +1630,9 @@ private:
             // (64) so the visual size hierarchy still reads (BODY knobs
             // are visibly larger). The 4-pixel added per container is
             // padding inside, not a wider arc - no UIWidgets clipping.
-            if(!primary){ groupSpec.containerW=scaled(lay::KNOB_W_N); groupSpec.containerH=scaled(lay::KNOB_H_C); groupSpec.arcSize=scaled(lay::KNOB_ARC_C); }
+            if(primary){ /* default: 92/116/76 */ }
+            else if(feel){ groupSpec.containerW=scaled(lay::KNOB_W_N); groupSpec.containerH=scaled(lay::KNOB_H_FEEL); groupSpec.arcSize=scaled(lay::KNOB_ARC_FEEL); groupSpec.capInset=9; groupSpec.needleTopOffset=2; groupSpec.needleBottomInset=3; }
+            else { groupSpec.containerW=scaled(lay::KNOB_W_N); groupSpec.containerH=scaled(lay::KNOB_H_C); groupSpec.arcSize=scaled(lay::KNOB_ARC_C); }
             for(int k=0;k<4;++k){
                 lv_obj_t* arc=UIWidgets::createArcKnob(grid,groupParams[g][k],this,styles,groupSpec);
                 // runs AFTER UIWidgets' own handlers (insertion order) so the
@@ -1739,9 +2003,14 @@ private:
         // spectrum card: 24 pad + 22 head + 8 + 294 chart + 8 + 14 band ticks = 370
         // (the B1..B16 strip makes the chart read as an analyzer, not a bar chart)
         lv_obj_t* spectrumCard=makeCard(right,lv_pct(100),scaled(lay::SPECTRUM_CARD_H),scaled(8));
-        lv_obj_t* specHead=makeRow(spectrumCard,lv_pct(100),scaled(lay::HEAD_H),scaled(8),LV_FLEX_ALIGN_SPACE_BETWEEN);
+        lv_obj_t* specHead=makeRow(spectrumCard,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         addLabel(specHead,"MODE SPECTRUM",getScaledSmallFont(),COL_HIGHLIGHT,2);
-        lv_obj_t* rndBtn=addButton(specHead,lay::RND_W,lay::BTN_H,"RANDOMIZE",COL_HIGHLIGHT);
+        lv_obj_t* specBtns=makeRow(specHead,scaled(2*96+6),scaled(lay::BTN_H),scaled(6));
+        // idea 2: scrub target toggle — drag writes per-band GAIN (default)
+        // or per-band DECAY trim (drag levels the tail time).
+        fScrubToggle=addButton(specBtns,lay::RND_W,lay::BTN_H,"GAIN",PLATE_TEXT_MID);
+        lv_obj_add_event_cb(fScrubToggle,scrubToggleCb,LV_EVENT_CLICKED,this);
+        lv_obj_t* rndBtn=addButton(specBtns,lay::RND_W,lay::BTN_H,"RANDOMIZE",COL_HIGHLIGHT);
         lv_obj_add_event_cb(rndBtn,rndBtnCb,LV_EVENT_CLICKED,this);
         lv_obj_t* chart=lv_chart_create(spectrumCard);
         lv_obj_set_size(chart,lv_pct(100),scaled(lay::CHART_H));
@@ -2224,6 +2493,19 @@ private:
     float fDampMax=1.f;
     int fDampPresetCache=-1;
     float fDampDecayCache=-1.f;
+    float fDampBandSumCache=-1.f;
+    // idea 2: spectrum scrub target (0 = per-band GAIN, 1 = per-band DECAY)
+    int fScrubMode=0;
+    int fScrubParamIdx=-1;
+    lv_obj_t* fScrubToggle=nullptr;
+    // idea 15: MIDI-learn overlay (right-click knob -> bind next CC)
+    lv_obj_t* fLearnOverlay=nullptr;
+    int fLearnParam=-1;
+    // idea 13: microtonal scale editor overlay + status label
+    lv_obj_t* fScaleMenu=nullptr;
+    lv_obj_t* fScaleArea=nullptr;
+    lv_obj_t* fScaleLbl=nullptr;
+    std::string scaleTxtCached_;
 };
 UI* createUI(){ return new MultiScaleBodyUI(); }
 END_NAMESPACE_DISTRHO

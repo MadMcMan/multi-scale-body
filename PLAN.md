@@ -111,3 +111,39 @@ Verified against `paper_47.md` (Eq. 1 + prose; several forms are RECONSTRUCTED p
 - Convergence theory is empirical (4³ "converged"); frequency‑shift vs. resolution not analytically characterized.
 - Real‑time FEM is impossible → precompute a fixed mesh; user "Pitch/Stiffness" are global scalings only, not true re‑meshing.
 - Damping decoupling validity under uniform Rayleigh damping for mixed materials is approximate.
+
+## 11. Wave-2 Feature Wave (shipped 2026-09-08)
+
+### New input parameters (all identity-safe defaults; golden bit-identity md5 `f509d7f…` unchanged)
+
+| Param | Symbol | Norm range | Default | Meaning |
+|---|---|---|---|---|
+| Bow | `bow` | 0..1 | 0 | Friction-drive pressure. >0 turns note-ons into bowed swells (stick-slip bridge = same modal bank); 0 = classic mallet bit-identical |
+| Damper | `damper` | 0..1 | 0 | Felt mute: per-mode rate × (1 + felt·8·(f/1kHz)³) — frequency-dependent absorption |
+| Inharm | `inharm` | 0..1 | 0 | Inharmonicity: f' = f·(1 + B·(i/(n−1))²) — quadratic partial stretch, fundamental pinned |
+| Slide Mode | `slidemode` | 0..1 (int, 3 steps) | 0 | MPE slide routing: 0 classic bend · 0.5 per-mode dispersion bend · 1.0 per-voice brightness macro |
+| Band N Decay | `bandNdecay` | 0..1 (16×) | 0.5 | Per-band decay-RATE trim via curve 2^((v−0.5)·2): 0.5→EXACT 1.0, 0.25×..4× |
+
+### Engine contracts
+
+- **Identity branches** (default paths bit-identical, proven by golden regen): bow gate at noteOn (`bowPressure_>1e-4f` → `armExcitation` else `startStrikeBurst` unchanged); band trim `if(bt!=1.0f)`; felt `if(felt_>1e-4f)`; inharm `if(inharm_>1e-4f)`; slide mode 0 = untouched `setPitchBend` path; tuning inactive = classic `std::pow` in noteOn; all multiplied-into sums use bendTilt (exact unity when idle).
+- CC64 `setSustainPedal(float)` is now continuous: ≥0.5 defers note-offs (existing bool semantics), lift releases; 0..0.5 is a half-pedal that deadens the ring without extending sustain.
+- The reverb IR bake (`stepIrBake`) mirrors band-trims + felt + inharm so the wet send tracks the dry body.
+- `recomputeVoiceCoeffs` applies: slide-mode bend (1: per-mode 1.5× top span; 2: no pitch, tilt cached in `bendTilt[]`), inharm, band trim, felt — all event-rate, no per-sample branches beyond the existing ones.
+
+### Plugin state keys (in addition to `patch`, `arpon`)
+
+| Key | Content | Notes |
+|---|---|---|
+| `scale` | raw Scala `.scl` text | Parsed on setState; degree 0 sits on MIDI 60 by default; Tune stays a global offset. Empty/invalid = 12-EDO |
+| `kbm` | `"first,last[;n0,n1,…]"` | Optional degree→note placement; explicit lists must be consecutive |
+| `ccmap` | `"param=cc;…"` | MIDI-learned bindings; consulted in `run()` before built-in CC dispatch |
+| `learn` | `"<param>"` or `""` | Pending MIDI-learn target (armed by UI right-click; consumed by next ch0 CC) |
+
+### UI (PluginUI.cpp)
+
+- New FEEL bank row (5th knob group, compact 84px/arc-48): Bow, Damper, Inharm, Slide. Left column budget: 138+120+120+120+106 = 604 ≤ 610.
+- Spectrum scrub GAIN/DECAY toggle (header button) — drag level remaps to `kParamBandDecay*`; DAMPING card mirrors the trims (t60 / trim).
+- Right-click catcher (`MultiScaleBodyLVGLWidget`) — knob hit starts MIDI learn (state `learn`), anywhere else cancels; learn overlay is a full-screen shield, closed by any click or by the first parameterChanged after the binding.
+- Keyboard header: `SCALE:` status + EDIT button opening the .scl paste editor (textarea + APPLY/CLEAR, state `scale`).
+- `rebuildForScale` now snapshots/restores paramCache so knob positions survive zoom (DPF never re-sends params on resize).

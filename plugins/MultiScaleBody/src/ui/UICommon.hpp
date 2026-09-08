@@ -136,6 +136,7 @@ namespace lay {
     // machined knobs (containers; arc/cap/needle internals live in UIWidgets law)
     constexpr int KNOB_W_N = 92, KNOB_H_N = 116, KNOB_ARC_N = 76;   // primary group (BODY)
     constexpr int KNOB_W_C = 88, KNOB_H_C = 98,  KNOB_ARC_C = 64;   // secondary groups
+    constexpr int KNOB_H_FEEL = 84, KNOB_ARC_FEEL = 48;             // wave-2 FEEL row (compact)
     constexpr int GRID_GUT_X = 8;                // knob pitch gutter (column math above)
     constexpr int SEC_LABEL_H = 16;              // group caption row
     constexpr int SEC_GAP = 6;                   // caption -> knob grid

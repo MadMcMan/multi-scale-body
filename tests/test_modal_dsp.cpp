@@ -837,6 +837,170 @@ int main(){
 
 
 
+    // ================= wave-2 feature sections ==============================
+    // --- idea 1: BOW — held note becomes an indefinite bowed swell ----------
+    {
+        MultiScaleBodyEngine e; e.prepare(44100); e.reset();
+        e.setBow(0.9f);
+        e.noteOn(60,1.f,0);
+        // 2.5 s: a struck note dies by ~1 s; the bow must keep it ringing
+        std::vector<float> x; x.reserve(122880);
+        for(int i=0;i<122880;++i) x.push_back(e.processSampleMono());
+        double late=0.0; int n=0;
+        for(int i=90000;i<122880;++i){ late+=std::fabs((double)x[i]); ++n; }
+        const double lateRms=late/(double)n;
+        require(lateRms>0.002,"bow: sustained swell after 2s (not a decaying strike)");
+        require(lateRms<0.5,"bow: swell stays bounded");
+        float pk=0.f; for(float v:x) pk=std::max(pk,std::fabs(v));
+        require(pk<0.98f,"bow: output bounded by limiter");
+        // release ends the bow cleanly: 1 s after noteOff the tail stays bounded
+        e.noteOff(60,0);
+        float tailPk=0.f;
+        for(int i=0;i<48000;++i){ const float s=e.processSampleMono(); tailPk=std::max(tailPk,std::fabs(s)); }
+        require(tailPk<0.98f,"bow: release bounded");
+        printf("bow swell late-rms %.4f peak %.3f PASS\n",lateRms,pk);
+    }
+    {
+        // bow pressure 0 == classic strike, bit-identical
+        MultiScaleBodyEngine a,b;
+        a.prepare(44100); a.reset(); b.prepare(44100); b.reset();
+        b.setBow(0.f);
+        a.noteOn(60,1.f,0); b.noteOn(60,1.f,0);
+        std::vector<float> xa,xb; xa.reserve(8192); xb.reserve(8192);
+        for(int i=0;i<8192;++i){ xa.push_back(a.processSampleMono()); xb.push_back(b.processSampleMono()); }
+        require(xa==xb,"bow: 0 pressure bit-identical to classic strike");
+        printf("bow identity PASS\n");
+    }
+    // --- idea 2: per-band decay trims ---------------------------------------
+    {
+        MultiScaleBodyEngine a,b,c;
+        a.prepare(44100); a.reset(); b.prepare(44100); b.reset(); c.prepare(44100); c.reset();
+        b.setBandDecayTrim(0,1.f);           // exact identity
+        c.setBandDecayTrim(0,4.f);           // rate up = shorter tail
+        a.noteOn(60,1.f,0); b.noteOn(60,1.f,0); c.noteOn(60,1.f,0);
+        require(a.voice(0).R[0]==b.voice(0).R[0],"bandDecay: trim 1.0 is exact identity (bit)");
+        require(c.voice(0).R[0] < b.voice(0).R[0],"bandDecay: trim>1 shortens the band's modes");
+        const int hi=std::clamp((int)(b.voice(0).n*0.9f),0,modal::kMaxModes-1);
+        if(hi>0 && (hi*16)/std::max(1,b.voice(0).n)!=0)
+            require(c.voice(0).R[hi]==b.voice(0).R[hi],"bandDecay: other bands untouched (bit)");
+        printf("band decay identity + direction PASS\n");
+    }
+    // --- idea 5: damper/felt + CC64 half-pedal ------------------------------
+    {
+        MultiScaleBodyEngine a,b;
+        a.prepare(44100); a.reset(); b.prepare(44100); b.reset();
+        b.setDamper(1.f);
+        a.noteOn(60,1.f,0); b.noteOn(60,1.f,0);
+        const int hi=std::clamp((int)(a.voice(0).n*0.8f),1,modal::kMaxModes-1);
+        const double dALo=-std::log((double)a.voice(0).R[0])*44100.0;
+        const double dB0=-std::log((double)b.voice(0).R[0])*44100.0;
+        const double dBHi=-std::log((double)b.voice(0).R[hi])*44100.0;
+        require(dALo>0.0 && dB0>dALo,"damper: low modes damp more with felt on");
+        require(dBHi>dALo*3.0,"damper: absorption grows with frequency (highs hit harder)");
+        printf("damper felt PASS (low %.1f -> high %.1f 1/s)\n",dALo,dBHi);
+    }
+    {
+        // CC64 continuous: full pedal defers note-off, half-pedal mutes, lift releases
+        MultiScaleBodyEngine e0,e1;
+        e0.prepare(44100); e0.reset(); e1.prepare(44100); e1.reset();
+        e0.noteOn(60,1.f,0); e1.noteOn(60,1.f,0);
+        e1.setSustainPedal(0.25f);          // half-pedal: below deferral, felt on
+        require(e1.voice(0).R[0] < e0.voice(0).R[0],"half-pedal deadens the ring (felt)");
+        e0.setSustainPedal(1.f);            // full pedal
+        e0.noteOff(60,0);
+        require(e0.voice(0).sustainHold,"full pedal defers note-off");
+        e0.setSustainPedal(0.f);            // lift
+        require(!e0.voice(0).sustainHold && e0.voice(0).envState==modal::Voice::Release,
+                "pedal lift releases held voices");
+        printf("damper half-pedal + pedal deferral PASS\n");
+    }
+    // --- idea 13: microtonal note-ratio table (identity + 7-EDO octave) -----
+    {
+        MultiScaleBodyEngine a,b;
+        a.prepare(44100); a.reset(); b.prepare(44100); b.reset();
+        a.noteOn(69,1.f,0);
+        float rat[128]; for(int n=0;n<128;++n) rat[n]=std::pow(2.f,(n-60)/12.f);
+        b.setTuning(rat,true);
+        b.noteOn(69,1.f,0);
+        require(a.voice(0).freq[0]==b.voice(0).freq[0],
+                "tuning: 12-TET table reproduces the pow path (bit)");
+        // 7-EDO table: note 67 (=60+7) is the octave of note 60
+        float rat7[128];
+        for(int n=0;n<128;++n){
+            int rel=n-60; int oct=rel/7; int d=rel-oct*7;
+            if(d<0){ d+=7; oct-=1; }
+            rat7[n]=std::pow(2.0,(double)d/7.0+(double)oct);
+        }
+        MultiScaleBodyEngine c,d;
+        c.prepare(44100); c.reset(); d.prepare(44100); d.reset();
+        c.setTuning(rat7,true);
+        c.noteOn(67,1.f,0);
+        d.noteOn(72,1.f,0);   // 12-EDO octave
+        require(c.voice(0).freq[0]==d.voice(0).freq[0],
+                "tuning: 7-edo note 67 == 12-edo octave above C4 (bit)");
+        printf("tuning table identity + 7-EDO PASS\n");
+    }
+    // --- idea 14: inharmonicity/spread --------------------------------------
+    {
+        MultiScaleBodyEngine a,b,c;
+        a.prepare(44100); a.reset(); b.prepare(44100); b.reset(); c.prepare(44100); c.reset();
+        c.setInharmSpread(0.f);
+        b.setInharmSpread(1.f);
+        a.noteOn(60,1.f,0); b.noteOn(60,1.f,0); c.noteOn(60,1.f,0);
+        const int hi0=std::clamp((int)(a.voice(0).n-1),0,modal::kMaxModes-1);
+        require(c.voice(0).cosTheta[hi0]==a.voice(0).cosTheta[hi0],"inharm: B=0 is exact identity (bit)");
+        require(b.voice(0).cosTheta[0]==a.voice(0).cosTheta[0],"inharm: fundamental pinned (bit)");
+        // the TOP partial (near 17.8 kHz on Bowl) hits the 18 kHz clamp at
+        // full stretch — pick the highest partial that stays below it and
+        // verify the quadratic-spacing LAW: ratio = 1 + B*(i/(n-1))².
+        const int nn=a.voice(0).n;
+        int hi=nn-1; while(hi>1 && a.voice(0).freq[hi]*2.05f>=18000.f) --hi;
+        require(hi>1,"inharm: a stretchable partial exists below the clamp");
+        const double fHiA=std::acos(std::clamp((double)a.voice(0).cosTheta[hi],-1.0,1.0))*44100.0;
+        const double fHiB=std::acos(std::clamp((double)b.voice(0).cosTheta[hi],-1.0,1.0))*44100.0;
+        const double ratio=fHiB/fHiA;
+        const double mul=(double)hi/(double)(nn-1);
+        const double expect=1.0+mul*mul;                 // B=1, quadratic spacing
+        require(std::fabs(ratio-expect)<0.02,"inharm: stretch follows 1+B*(i/(n-1))^2 law");
+        printf("inharm PASS (partial %d ratio %.3f law %.3f)\n",hi,ratio,expect);
+    }
+    // --- idea 20: MPE slide modes -------------------------------------------
+    {
+        auto effHz=[](const modal::Voice& v,int i){
+            return std::acos(std::clamp((double)v.cosTheta[i],-1.0,1.0))*44100.0;
+        };
+        // mode 0 (default): classic whole-voice bend
+        MultiScaleBodyEngine a,b;
+        a.prepare(44100); a.reset(); b.prepare(44100); b.reset();
+        a.noteOn(60,1.f,0);
+        b.noteOn(60,1.f,0);
+        b.setPitchBend(0,2.f);
+        const double base=effHz(a.voice(0),0)*std::pow(2.0,2.0/12.0);
+        require(std::fabs(effHz(b.voice(0),0)-base)<1.0,
+                "slide0: classic bend shifts every mode by the same ratio");
+        // mode 1: partials bend MORE with mode index (dispersion)
+        MultiScaleBodyEngine c;
+        c.prepare(44100); c.reset();
+        c.setSlideMode(1);
+        c.noteOn(60,1.f,0);
+        c.setPitchBend(0,2.f);
+        const int hi=std::clamp((int)(c.voice(0).n-1),0,modal::kMaxModes-1);
+        const double fHi0=effHz(a.voice(0),hi);       // no bend
+        const double fHi1=effHz(c.voice(0),hi);       // 2 ST + extra dispersion
+        require(fHi1>fHi0*std::pow(2.0,2.5/12.0) && fHi1<fHi0*std::pow(2.0,3.5/12.0),
+                "slide1: top partial bends at ~1.5x the semitone span");
+        // mode 2: no pitch change; high modes tilt bright (per-voice macro)
+        MultiScaleBodyEngine d;
+        d.prepare(44100); d.reset();
+        d.setSlideMode(2);
+        d.noteOn(60,1.f,0);
+        d.setPitchBend(0,2.f);
+        require(d.voice(0).cosTheta[0]==a.voice(0).cosTheta[0],"slide2: fundamental pitch untouched (bit)");
+        require(d.voice(0).bendTilt[hi]>1.f,"slide2: high modes brightened by positive bend");
+        require(d.voice(0).bendTilt[0]==1.f,"slide2: fundamental tilt pinned at exact 1.0");
+        printf("slide modes PASS\n");
+    }
+
     printf("=== ALL TESTS PASSED ===\n");
     return 0;
 }

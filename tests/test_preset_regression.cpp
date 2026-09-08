@@ -2,11 +2,24 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <cstring>
+#include <string>
 static void require(bool c,const char* m){ if(!c){ fprintf(stderr,"FAIL: %s\n",m); std::exit(1);} }
+// expose protected state plumbing for the wave-2 state tests
+struct TestPlug : DISTRHO::PluginMultiScaleBody {
+    using DISTRHO::PluginMultiScaleBody::setState;
+    using DISTRHO::PluginMultiScaleBody::getState;
+};
 int main(){
     using namespace DISTRHO;
     PluginMultiScaleBody plug;
     require(plug.testGetParameterCount()==PluginMultiScaleBody::kParameterCount,"param count");
+    // wave-2 defaults are identity: bow/damper/inharm off, band decays 0.5 (-> 1.0)
+    require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamBow))<1e-6f,"bow default 0");
+    require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamDamper))<1e-6f,"damper default 0");
+    require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamInharm))<1e-6f,"inharm default 0");
+    require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamSlideMode))<1e-6f,"slide default 0 (classic)");
+    require(plug.testEngine().getBandDecayTrim(0)==1.f,"bandDecay default trim 1.0");
     plug.testSetParameterValue(PluginMultiScaleBody::kParamPreset, 0.0f);
     float v=plug.testGetParameterValue(PluginMultiScaleBody::kParamPreset);
     require(std::abs(v-0.0f)<0.01f,"preset round-trip 0.0");
@@ -44,6 +57,73 @@ int main(){
         }
         require(resid<1e-4f,"CC120 all-sound-off silences output");
         printf("cc120 residual %.2e\n",resid);
+    }
+    // --- idea 15: MIDI learn binds a CC, learned CC drives the param ----------
+    {
+        TestPlug p;
+        p.testSampleRate2(44100); p.testActivate();
+        p.setState("learn","1");   // arm: next ch0 CC binds to Decay
+        MidiEvent cc{}; cc.frame=0; cc.size=3; cc.data[0]=0xB0; cc.data[1]=74; cc.data[2]=100;
+        p.testRun2(nullptr,out,512,&cc,1);   // consumed by the binding
+        std::string ccmap=p.getState("ccmap").buffer();
+        require(ccmap.find("1=74")!=std::string::npos,"learn: CC74 bound to Decay in ccmap");
+        const float before=p.testGetParameterValue(PluginMultiScaleBody::kParamDecay);
+        p.testRun2(nullptr,out,512,&cc,1);   // now a normal learned write
+        const float after=p.testGetParameterValue(PluginMultiScaleBody::kParamDecay);
+        require(std::fabs(after-before)>0.01f,"learn: learned CC drives the param");
+        require(after>0.75f,"learn: CC74=100/127 lands Decay near 0.79");
+        printf("midi learn PASS (ccmap %s)\n",ccmap.c_str());
+    }
+    {
+        // persistence: a saved ccmap parses and drives on load
+        TestPlug q;
+        q.testSampleRate2(44100); q.testActivate();
+        q.setState("ccmap","2=74;");   // Brightness (=2, not 3: StrikeX occupies 3)
+        MidiEvent cc{}; cc.frame=0; cc.size=3; cc.data[0]=0xB0; cc.data[1]=74; cc.data[2]=63;
+        q.testRun2(nullptr,out,512,&cc,1);
+        require(std::fabs(q.testGetParameterValue(PluginMultiScaleBody::kParamBrightness)-63.f/127.f)<1e-4f,
+                "ccmap load: CC74 drives Brightness");
+        printf("ccmap persistence PASS\n");
+    }
+    // --- idea 13: .scl text parses into a working note table ---------------
+    {
+        TestPlug p;
+        p.testSampleRate2(44100); p.testActivate();
+        // 7-EDO: first degree 171.4c (implicit tonic -> note 60 = 1.0),
+        // last line 1200c = the octave boundary.
+        const char* scl7="seven-edo\n7\n171.428571\n342.857143\n514.285714\n685.714286\n857.142857\n1028.571429\n1200.0\n";
+        p.setState("scale",scl7);
+        MidiEvent on{}; on.frame=0; on.size=3; on.data[0]=0x90; on.data[1]=67; on.data[2]=100;
+        p.testRun2(nullptr,out,512,&on,1);
+        // 7-EDO note 67 == octave above C4: mode-0 freq doubles vs 12-EDO C4
+        TestPlug q;
+        q.testSampleRate2(44100); q.testActivate();
+        MidiEvent on2{}; on2.frame=0; on2.size=3; on2.data[0]=0x90; on2.data[1]=72; on2.data[2]=100;
+        q.testRun2(nullptr,out,512,&on2,1);
+        const double f67=std::acos(std::clamp((double)p.testEngine().voice(0).cosTheta[0],-1.0,1.0))*44100.0;
+        const double f72=std::acos(std::clamp((double)q.testEngine().voice(0).cosTheta[0],-1.0,1.0))*44100.0;
+        require(std::fabs(f67-f72)<1.0,"scl: 7-edo note 67 == octave (degree 0 + 1 octave)");
+        // clearing the scale restores 12-EDO math
+        p.setState("scale","");
+        p.testRun2(nullptr,out,512,&on2,1);
+        const double f67c=std::acos(std::clamp((double)p.testEngine().voice(0).cosTheta[0],-1.0,1.0))*44100.0;
+        require(std::fabs(f67c-f72)<1.0,"scl clear: back to equal temperament");
+        printf("scl parse + clear PASS\n");
+    }
+    // --- 12-TET .scl reproduces the classic table exactly -------------------
+    {
+        TestPlug p;
+        p.testSampleRate2(44100); p.testActivate();
+        char scl[256]="12-tet\n12\n100.0\n200.0\n300.0\n400.0\n500.0\n600.0\n700.0\n800.0\n900.0\n1000.0\n1100.0\n1200.0\n";
+        p.setState("scale",scl);
+        MidiEvent on{}; on.frame=0; on.size=3; on.data[0]=0x90; on.data[1]=60; on.data[2]=100;
+        p.testRun2(nullptr,out,512,&on,1);
+        TestPlug q2;
+        q2.testSampleRate2(44100); q2.testActivate();
+        q2.testRun2(nullptr,out,512,&on,1);
+        require(p.testEngine().voice(0).cosTheta[0]==q2.testEngine().voice(0).cosTheta[0],
+                "12-TET scl == classic path (bit-identical mode-0 coeff)");
+        printf("12-TET scl identity PASS\n");
     }
     printf("=== ALL TESTS PASSED ===\n");
     return 0;

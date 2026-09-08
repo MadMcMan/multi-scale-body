@@ -29,6 +29,17 @@ public:
         kParamBand8,kParamBand9,kParamBand10,kParamBand11,kParamBand12,kParamBand13,kParamBand14,kParamBand15,
         kParamRadiation,kParamAttack,kParamRelease,kParamLFORate,kParamLFODepth,
         kParamExciteMix,kParamVelStrike,kParamDetune,kParamGlide,kParamWet,kParamMono,kParamVolume,
+        // wave-2 features (inserted before kParamOutLevel so serializeParams —
+        // which iterates exactly kNumInputParams — saves them with zero extra
+        // work; every consumer names them by enum, never by literal index)
+        kParamBow,            // bow/friction excitation pressure 0..1 (0 = mallet strikes)
+        kParamDamper,         // felt damper depth 0..1 (frequency-dependent mute)
+        kParamInharm,         // inharmonicity/spread 0..1 (partial stretch)
+        kParamSlideMode,      // MPE slide routing: 0 pitch / 1 mode-bend / 2 brightness
+        kParamBandDecay0,kParamBandDecay1,kParamBandDecay2,kParamBandDecay3,
+        kParamBandDecay4,kParamBandDecay5,kParamBandDecay6,kParamBandDecay7,
+        kParamBandDecay8,kParamBandDecay9,kParamBandDecay10,kParamBandDecay11,
+        kParamBandDecay12,kParamBandDecay13,kParamBandDecay14,kParamBandDecay15,
         // outputs (DSP -> UI metering; never automated, never serialized)
         kParamOutLevel,kParamOutBand0,kParamOutBand1,kParamOutBand2,kParamOutBand3,
         kParamOutBand4,kParamOutBand5,kParamOutBand6,kParamOutBand7,kParamOutBand8,
@@ -45,6 +56,24 @@ private:
     // arpeggiator — fixed up-pattern; pattern/gate tables live at the use site in run()
     bool arpOn_=false; int arpPos_=0;
     double arpSamplesPerStep_=0.0; double arpCounter_=0.0;
+    // --- wave-2 state (idea 13/15): MIDI-learned CC map + pending learn + tuning
+    // ccToParam_[cc] = parameter index, -1 = not learned. Parse/write on the
+    // "ccmap" state key ("param=cc;param2=cc2;..."), consumed in run() BEFORE
+    // the built-in CC dispatch (learned bindings override defaults). "learn"
+    // state carries the pending param index while the UI waits for the next
+    // CC on channel 0 (MIDI learn, idea 15).
+    int ccToParam_[128];            // initialized to -1 in ctor
+    int learnPending_=-1;
+    // Microtonal tuning (idea 13): the "scale" state key holds the raw .scl
+    // text (parsed here, pushed to the engine as a note->ratio table); the
+    // "kbm" state key holds an optional degree->note placement.
+    std::string scaleTxt_;
+    std::string kbmTxt_;
+    float scaleRatios_[128];        // note-relative ratios (note 60 = degree 0)
+    bool  scaleActive_=false;
+    void  rebuildScaleFromScl(const char* sclText);
+    void  parseCcmap(const char* str);
+    static String serializeCcmap(const int ccToParam[128]);
 #ifdef HOST_BINARY
 public:
     void testSetParameterValue(uint32_t i,float v){ setParameterValue(i,v); }

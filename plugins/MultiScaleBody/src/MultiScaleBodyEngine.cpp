@@ -14,6 +14,7 @@ void MultiScaleBodyEngine::prepare(double sr) {
     glideMs_ = glideNorm_*600.f;
     rtSmCoef_ = 1.f - std::exp(-1.0f/(0.02f*(float)sampleRate_)); // ~20ms param smoothing
     exFollowRel_ = std::exp(-1.f/(0.080f*(float)sampleRate_)); // ~80 ms follower release
+    bowSmCoef_ = 1.f - std::exp(-1.f/(0.005f*(float)sampleRate_)); // ~5 ms bow friction smoothing
     widthCur_=width_; wetCur_=reverbWet_; exMixCur_=exciteMix_;   // start settled, no ramp-in
     volCur_=volumeNorm_;                                          // volume: settled too (unity default)
     irDirty_=true; irBaking_=false;
@@ -28,6 +29,7 @@ void MultiScaleBodyEngine::reset() {
     for (auto& v : voices_) {
         v.active=false; v.midiNote=-1; v.silenceCount=0; v.sustainHold=false;
         v.burstLen=0; v.burstLeft=0; v.transLen=0; v.transLeft=0; v.transLP=0.f;
+        v.bowOn=false; v.bowF=0.f; v.bowYPrev=0.f;
         for (int i=0;i<kMaxModes;++i) v.s1[i]=v.s2[i]=0.f;
         v.envState=Voice::Idle; v.env=0.f;
     }
@@ -210,6 +212,20 @@ void MultiScaleBodyEngine::startStrikeBurst(Voice& v,float vx,float vy){
     v.rngState=seed|1u;                                  // xorshift32 state must be nonzero
     v.burstLeft=v.burstLen;
 }
+void MultiScaleBodyEngine::armExcitation(Voice& v,float vx,float vy){
+    // Bow engaged (pressure > 1e-4): arm the friction bridge INSTEAD of the
+    // mallet pulse. No contact transient either — the bow is a continuous
+    // driver, and its force ramps from zero (bowF smoothing in the sample
+    // loop), so engage is click-free. Default (bow off) routes exactly as
+    // before: startStrikeBurst with the same arguments, unchanged.
+    if(bowPressure_>1e-4f){
+        v.bowOn=true; v.bowF=0.f; v.bowYPrev=0.f;
+        v.burstLen=0; v.burstLeft=0; v.transLen=0; v.transLeft=0;
+        return;
+    }
+    v.bowOn=false;
+    startStrikeBurst(v,vx,vy);
+}
 void MultiScaleBodyEngine::recomputeVoiceCoeffs(Voice& v) {
     // Radiation aperture per body (~L/4). Sized implicitly: adding/removing a preset
     // in ModalData.hpp without updating this list now fails to compile instead of
@@ -224,12 +240,45 @@ void MultiScaleBodyEngine::recomputeVoiceCoeffs(Voice& v) {
     float bend = bendSemitones_[std::clamp(v.midiChannel,0,15)];
     float bendRatio = std::pow(2.f, bend/12.f);
     for (int i=0;i<v.n;++i) {
+        // MPE slide routing (idea 20). Mode 0 = the classic path above,
+        // completely untouched (bit-identity contract). Mode 1 = per-mode
+        // dispersion: partials bend MORE the higher their index (up to 1.5x
+        // the semitone span at the top). Mode 2 = per-voice brightness
+        // macro: the bend stops shifting pitch entirely and is cached as a
+        // per-mode output tilt (bendTilt) applied in the sample loop.
         float f = v.freq[i] * pitchScale_ * bendRatio * detuneTable_[i];
+        float tilt = 1.f;
+        if(slideMode_==1){
+            const float dm = bend + bend*0.5f*((float)i/std::max(1,v.n-1));
+            f = v.freq[i] * pitchScale_ * std::pow(2.f, dm/12.f) * detuneTable_[i];
+        } else if(slideMode_==2){
+            f = v.freq[i] * pitchScale_ * detuneTable_[i];
+            if(bend!=0.f)
+                tilt = std::pow(2.f, (bend/12.f)*((float)i/std::max(1,v.n-1)));
+        }
+        // Inharmonicity/spread (idea 14): quadratic stretch, mode 0 pinned.
+        // factor = 1 + B*harmonicSpacing², so the top mode reaches 1+B at
+        // full knob — bell-like partial spread without moving the fundamental.
+        if(inharm_>1e-4f)
+            f *= 1.f + inharm_*v.inharmMul[i];
         if(lfoDepth_>1e-4f){
             double lfo = std::sin(lfoPhase_) * lfoDepth_ * 0.0105;
             f *= (float)(1.0 + lfo);
         }
         float d = v.decay[i] * decayScale_;
+        // Per-band decay trim (idea 2): rate multiplier per 16-band cell.
+        // 1.0 is a hard identity skip so nothing re-rounds at the default.
+        {
+            const int band=(i*16)/std::max(1,v.n);
+            const float bt=bandDecay_[std::clamp(band,0,15)];
+            if(bt!=1.0f) d *= bt;
+        }
+        // Felt damper (idea 5): frequency-dependent absorption — a felt strip
+        // loaded against the body kills highs first (rate grows ~f³).
+        if(felt_>1e-4f){
+            double fr=(double)f/1000.0;
+            d *= (float)(1.0 + (double)felt_*8.0*fr*fr*fr);
+        }
         if (f < 20.f) f=20.f;
         if (f > 18000.f) f=18000.f;
         if (d < 0.2f) d=0.2f;
@@ -238,6 +287,7 @@ void MultiScaleBodyEngine::recomputeVoiceCoeffs(Voice& v) {
         double theta = f / sampleRate_;
         v.R[i] = (float)R;
         v.cosTheta[i] = (float)std::cos(theta);
+        v.bendTilt[i]=tilt;
         double omega = (double)f;
         double ka = omega * a / c;
         double eff = (ka*ka)/(1.0+ka*ka);
@@ -331,6 +381,47 @@ void MultiScaleBodyEngine::setVolume(float v){
     if(v>=1.f-1e-6f) volumeNorm_=1.f;
 }
 
+// --- wave-2 feature setters (bit-identity-safe: every default is a no-op) --
+void MultiScaleBodyEngine::setBow(float v){
+    bowPressure_=std::clamp(v,0.f,1.f);
+}
+void MultiScaleBodyEngine::applyFeltRemap(){
+    // Felt = damper knob + the half-pedal zone of CC64 (pedal below the
+    // sustain-deferral threshold still presses the dampers part-way).
+    float felt = damperKnob_;
+    if(sustainPedalAmt_>0.f && sustainPedalAmt_<0.5f)
+        felt += (0.5f - sustainPedalAmt_)*2.f;
+    felt = std::clamp(felt,0.f,1.f);
+    if(std::fabs(felt-felt_)<1e-5f) return; // settle: no recompute churn
+    felt_=felt;
+    for(auto& v:voices_) if(v.active) recomputeVoiceCoeffs(v);
+}
+void MultiScaleBodyEngine::setDamper(float v){
+    damperKnob_=std::clamp(v,0.f,1.f);
+    applyFeltRemap();
+    irDirty_=true; // the reverb IR mirrors the same damping
+}
+void MultiScaleBodyEngine::setInharmSpread(float v){
+    inharm_=std::clamp(v,0.f,1.f);
+    for(auto& voice:voices_) if(voice.active) recomputeVoiceCoeffs(voice);
+    irDirty_=true;
+}
+void MultiScaleBodyEngine::setSlideMode(int m){
+    slideMode_=std::clamp(m,0,2);
+    for(auto& voice:voices_) if(voice.active) recomputeVoiceCoeffs(voice);
+}
+void MultiScaleBodyEngine::setBandDecayTrim(int band,float v){
+    band=std::clamp(band,0,15);
+    v=std::clamp(v,0.25f,4.f);
+    bandDecay_[band]=v;
+    for(auto& voice:voices_) if(voice.active) recomputeVoiceCoeffs(voice);
+    irDirty_=true;
+}
+void MultiScaleBodyEngine::setTuning(const float ratios[128], bool active){
+    for(int n=0;n<128;++n) noteRatio_[n]=std::clamp(ratios[n],0.25f,4.f);
+    tuningActive_=active;
+}
+
 // render current modal set into short IR for convolution send.
 // RT strategy: the full render (n modes x kIrLen samples of sin/exp) is far too
 // heavy for one audio block, so it is split: beginIrBake() clears, then
@@ -359,8 +450,24 @@ bool MultiScaleBodyEngine::stepIrBake(int budgetModes){
         }
         float g=cubicInterp(col[0],col[1],col[2],col[3],ty);
         float f=p.freq[m]*pitchScale_;
+        // idea 14: inharmonicity stretch mirrors the voice path (mode 0 pinned)
+        if(inharm_>1e-4f){
+            const float im=(n>1)?(float)(m*m)/(float)((n-1)*(n-1)):0.f;
+            f *= 1.f + inharm_*im;
+        }
         if(f<20.f||f>18000.f){ continue; }
         float d=shapeDecayRate(p.decay[m])*decayScale_; // same ring shaping as voices
+        // idea 2: per-band decay trim mirrors the voice path (1.0 = identity skip)
+        {
+            const int band=(m*16)/std::max(1,n);
+            const float bt=bandDecay_[std::clamp(band,0,15)];
+            if(bt!=1.0f) d *= bt;
+        }
+        // idea 5: felt absorption mirrors the voice path
+        if(felt_>1e-4f){
+            double fr=(double)f/1000.0;
+            d *= (float)(1.0 + (double)felt_*8.0*fr*fr*fr);
+        }
         double w=f/sampleRate_;
         double rEnv=std::exp(-(double)d/sampleRate_);
         float envl=1.f;
@@ -537,9 +644,12 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
                 v.freq[i]=cur+(targetF-cur)*std::clamp(frac*64.f,0.02f,1.f); // chunked glide on retrig
             } else v.freq[i]=targetF;
             v.gain[i]=tmp[i]*drive;
+            // idea 14: harmonic-spacing inharmonicity multiplier (n>1 else 0)
+            v.inharmMul[i]=(v.n>1)?(float)(i*i)/(float)((v.n-1)*(v.n-1)):0.f;
+            v.bendTilt[i]=1.f;
         }
         recomputeVoiceCoeffs(v);
-        startStrikeBurst(v,vx,vy); // re-strike the contact pulse on mono retrigger
+        armExcitation(v,vx,vy); // bow bridge or re-strike on mono retrigger
         return;
     }
 
@@ -571,17 +681,23 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
     vx=std::clamp(vx,0.f,1.f); vy=std::clamp(vy,0.f,1.f);
     float gains[kMaxModes];
     interpolateGainsFor(gains,vx,vy);
-    float noteShift = std::pow(2.f, (midiNote - 60) / 12.f);
+    // Microtonal tuning (idea 13): the plugin parses .scl/.kbm into a
+    // note-relative ratio table; inactive keeps the classic pow path
+    // bit-identical. Tune (pitchScale_) stays a global offset applied after.
+    float noteShift = tuningActive_ ? noteRatio_[std::clamp(midiNote,0,127)]
+                                    : std::pow(2.f, (midiNote - 60) / 12.f);
     for (int i=0;i<v.n;++i) {
         v.freq[i] = p.freq[i]*noteShift;
         v.decay[i] = shapeDecayRate(p.decay[i]); // uniform-damping ring pull
         v.gain[i] = gains[i] * drive;
+        v.inharmMul[i]=(v.n>1)?(float)(i*i)/(float)((v.n-1)*(v.n-1)):0.f;
+        v.bendTilt[i]=1.f;
         v.s1[i]=v.s2[i]=0.f;
     }
     for (int i=v.n;i<kMaxModes;++i) { v.gain[i]=0.f; v.s1[i]=v.s2[i]=0.f; }
     v.env=0.f; v.envState=Voice::Attack;
     recomputeVoiceCoeffs(v);
-    startStrikeBurst(v,vx,vy);
+    armExcitation(v,vx,vy);
     v.silenceCount = 0; // strike is carried by the force pulse, not a Dirac flag
     monoTopVoice_=target;
 }
@@ -601,7 +717,10 @@ void MultiScaleBodyEngine::noteOff(int midiNote, int channel) {
         if (channel>=1 && channel<=15 && v.midiChannel==channel) mpeZ_[channel]=-1.f;
         bool match = (channel<0)? (v.midiNote==midiNote) : (v.midiNote==midiNote && v.midiChannel==channel);
         if(match && v.envState!=Voice::Idle && v.envState!=Voice::Release){
-            if(sustainPedal_) v.sustainHold=true; else v.envState=Voice::Release;
+            // note-off = bow LIFT: friction stops when the key goes up (a
+            // pedal-deferred key keeps bowing under sustain, like a real bow
+            // held while the pedal sustains the previous notes).
+            if(sustainPedal_) v.sustainHold=true; else { v.envState=Voice::Release; v.bowOn=false; }
         }
     }
 }
@@ -610,7 +729,7 @@ void MultiScaleBodyEngine::allNotesOff() {
     for(auto& v:voices_){
         if(!v.active) continue;
         if(v.envState!=Voice::Idle && v.envState!=Voice::Release){
-            v.envState=Voice::Release; v.sustainHold=false;   // natural release tail
+            v.envState=Voice::Release; v.sustainHold=false; v.bowOn=false;   // natural release tail
         }
     }
     monoTopVoice_=-1;
@@ -620,18 +739,25 @@ void MultiScaleBodyEngine::allSoundOff() {
     for(auto& v:voices_){
         v.active=false; v.midiNote=-1; v.envState=Voice::Idle; v.env=0.f; v.silenceCount=0; v.sustainHold=false;
         v.burstLen=0; v.burstLeft=0; v.transLen=0; v.transLeft=0; v.transLP=0.f;
+        v.bowOn=false; v.bowF=0.f; v.bowYPrev=0.f;
         for(int i=0;i<kMaxModes;++i){ v.s1[i]=0.f; v.s2[i]=0.f; }
     }
     for (int c=1;c<16;++c) mpeZ_[c]=-1.f; // MPE panic: drop every latched pressure
     monoTopVoice_=-1;
 }
 
-void MultiScaleBodyEngine::setSustainPedal(bool down) {
-    if(sustainPedal_==down) return;
-    sustainPedal_=down;
-    if(!down) for(auto& v:voices_)
-        if(v.sustainHold){ v.sustainHold=false;
-            if(v.envState!=Voice::Idle && v.envState!=Voice::Release) v.envState=Voice::Release; }
+void MultiScaleBodyEngine::setSustainPedal(float amt01) {
+    amt01=std::clamp(amt01,0.f,1.f);
+    const bool down = amt01>=0.5f;
+    if(down && !sustainPedal_) sustainPedal_=true;   // engage on crossing
+    if(!down && sustainPedal_){                       // lift: release held notes
+        sustainPedal_=false;
+        for(auto& v:voices_)
+            if(v.sustainHold){ v.sustainHold=false;
+                if(v.envState!=Voice::Idle && v.envState!=Voice::Release) v.envState=Voice::Release; }
+    }
+    sustainPedalAmt_=amt01;
+    applyFeltRemap();   // half-pedal zone changes the felt depth live
 }
 
 float MultiScaleBodyEngine::processSampleMono() {
@@ -694,6 +820,31 @@ void MultiScaleBodyEngine::processSampleStereo(float &outL, float &outR) {
         }
         int vIdx=0; for(int k=0;k<kVoiceCount;++k) if(&voices_[k]==&v) vIdx=k;
         float voicePan = ((float)vIdx / (kVoiceCount-1) - 0.5f) * widthCur_ * 0.6f;
+        // Bow/friction bridge (idea 1): velocity-driven stick-slip excitation
+        // feeding the SAME modal bank. Displacement at the bow point is the
+        // mode sum Σ gain·s1 (last sample's resonator states); surface
+        // velocity = its one-sample difference. The friction force is used
+        // RAW — smoothing it would low-pass the stick-slip alternation and
+        // decorrelate it from the surface motion, killing the energy pump —
+        // and is scaled by a ~5 ms engage ENVELOPE (v.bowF rises 0->1 at
+        // noteOn so the bow never clicks on). Injected into every mode
+        // through the same sustained-drive normalizer the audio exciter
+        // uses, so bowed loudness stays Q-independent. Gated per voice at
+        // noteOn (bowOn); default renders never reach this code.
+        float bowF=0.f;
+        if(v.bowOn){
+            float yb=0.f;
+            for(int i=0;i<v.n;++i) yb += v.gain[i]*v.s1[i];
+            const float vy=(yb-v.bowYPrev)*(float)sampleRate_*kBowVelScale;
+            v.bowYPrev=yb;
+            const float vRel=kBowBowSpeed-vy;              // constant bow speed
+            const float fn=0.16f*bowPressure_;          // normal force (global pressure)
+            const float fraw = (std::fabs(vRel)<kBowVStick)
+                ? fn*vRel/kBowVStick                     // stick: elastic restoring
+                : fn*kBowMuD*(vRel>0.f?1.f:-1.f);        // slip: dynamic friction
+            v.bowF += (1.f-v.bowF)*bowSmCoef_;           // engage envelope 0->1
+            bowF=fraw*v.bowF;
+        }
         for (int i=0;i<v.n;++i) {
             float R = v.R[i];
             float c = v.cosTheta[i];
@@ -724,6 +875,7 @@ void MultiScaleBodyEngine::processSampleStereo(float &outL, float &outR) {
             } else {
                 exc = strikeExc;
             }
+            if(bowF!=0.f) exc += bowF*v.gain[i]*v.excNorm[i]*kBowTrim; // bowed swell
             float y = a1 * v.s1[i] + a2 * v.s2[i] + exc;
             v.s2[i] = v.s1[i];
             v.s1[i] = y;
@@ -733,8 +885,9 @@ void MultiScaleBodyEngine::processSampleStereo(float &outL, float &outR) {
             float gl = std::cos(angle);
             float gr = std::sin(angle);
             float rad = v.radGain[i];
-            voiceL += y * gl * rad * env;
-            voiceR += y * gr * rad * env;
+            // bendTilt = exact 1.0f when slide mode 0/1 (bit-safe unity multiply)
+            voiceL += y * gl * rad * env * v.bendTilt[i];
+            voiceR += y * gr * rad * env * v.bendTilt[i];
         }
         // Contact-transient layer: xorshift32 white noise -> one-pole LP
         // (bandwidth set by strike position at arm time) -> linear fade,

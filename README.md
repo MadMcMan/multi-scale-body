@@ -21,9 +21,19 @@ VST3 · CLAP · LV2 · JACK standalone (DPF), with an LVGL-based UI.
 - **12 baked bodies**: Bowl, WoodBlock, Plate, Squirrel, Blade, Shell, Bar, Membrane, Bell, Glass, Chime, Gong — up to 128 modes each
 - **Playable strike disc**: click sets strike position (X/Y) and triggers a hit; onset-triggered ripple rings
 - **Tone shaping**: tune, decay, brightness, stereo width
-- **Exciter**: exciter mix, velocity-to-strike, detune spread, glide, mono mode, LFO (rate/depth)
+- **Exciter**: exciter mix, velocity-to-strike, detune spread, glide, mono mode, LFO (rate/depth), bow/friction excitation (held notes swell instead of decaying — a stick-slip friction bridge feeding the same modal bank, a documented extension: see below)
 - **Space**: radiation mix, 16-band output EQ trims, wet/dry
+- **Per-band decay trims**: the 16-band spectrum chart scrubs gain (default) or per-band decay via the GAIN/DECAY toggle, so highs can dull while lows bloom
+- **Felt damper + half-pedal**: a Damper knob loads a felt strip (frequency-dependent absorption); CC64 is continuous — full pedal defers note-offs, half-pedal deadens the ring
+- **Microtonal tuning**: paste a Scala `.scl` in the on-screen editor (KEYBOARD row → EDIT) or via DAW state; the keyboard remaps chromatically, Tune stays a global offset. Optional kbm-style mapping ("first,last" + optional consecutive note list).
+- **Inharmonicity**: one knob stretches partials from the baked pure ratios toward bell-like quadratic spacing
+- **MIDI learn**: right-click any knob → move a CC on channel 0 → the binding saves with the patch
+- **MPE slide routing**: Slide mode routes per-channel pitch bend to classic whole-voice bend (default), per-mode dispersion bend, or a per-voice brightness macro
 - **Live visuals**: 16-band spectrum, decay scope, mode spectrum chart, on-screen keyboard
+
+### Bow / friction excitation
+
+Beyond paper 47's Dirac strike, the Bow knob turns held notes into bowed swells: a velocity-driven stick-slip friction bridge (constant bow speed, static/dynamic friction hysteresis, stick window) excites the *same* modal bank at the strike position, injected through the sustained-drive normalizer so bowed loudness stays Q-independent. Velocities, decay, band trims, felt and the limiter all apply as for struck notes; note-off (or disc release) lifts the bow and the body rings free. Default (bow off) keeps the classic mallet path bit-identical.
 
 ### Reverb as self-IR convolution
 

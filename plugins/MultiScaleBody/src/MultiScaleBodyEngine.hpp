@@ -153,6 +153,25 @@ struct Voice {
     EnvState envState=Idle;
     float env=0.f;
     bool sustainHold=false; // CC64 sustain: note-off received while pedal down
+    // Bow/friction excitation state (idea 1, engine side): a velocity-driven
+    // stick-slip friction bridge feeds the SAME modal bank while the key is
+    // held — no mallet pulse is armed. bowOn set at noteOn when the Bow param
+    // is engaged; bowF is a one-pole smoothed friction force; bowYPrev holds
+    // the previous sample's displacement at the bow point (velocity is
+    // computed from its difference, the SPF-style bridge). All fixed-size
+    // scalars: RT-safe, zero allocation.
+    bool   bowOn=false;
+    float  bowF=0.f;
+    float  bowYPrev=0.f;
+    // Inharmonicity stretch multiplier per mode (idea 14): f' = f * inharmMul
+    // with inharmMul=1 at B=0 (unused). Precomputed at noteOn from the mode
+    // index so recomputeVoiceCoeffs() is a pure multiply (gated by inharm_).
+    float  inharmMul[kMaxModes]{};
+    // Per-voice brightness tilt per mode (MPE slide mode 2): radGain is
+    // shared across voices, so the bend-to-brightness macro is applied as a
+    // per-mode output multiplier cached at coefficient recompute. 1.0 when
+    // inactive — an exact unity multiply, bit-safe on every path.
+    float  bendTilt[kMaxModes]{};
 };
 class MultiScaleBodyEngine {
 public:
@@ -179,13 +198,34 @@ public:
     void setMonoMode(bool m);        // mono-legato vs poly
     void setReverbWet(float v);      // convolution reverb send 0..1
     void setVolume(float v);         // master output gain 0..1 (squared law); 1 = exact unity
-    float getVolume() const { return volumeNorm_; }
-    float getExciteMix() const { return exciteMix_; }
-    float getVelStrike() const { return velStrike_; }
-    float getDetuneSpread() const { return detuneSpread_; }
-    float getGlideNorm() const { return glideNorm_; }
-    bool  getMonoMode() const { return monoMode_; }
-    float getReverbWet() const { return reverbWet_; }
+    // --- wave-2 feature params (all default to identity/no-op) ---
+    // Bow/friction excitation pressure 0..1 (idea 1). 0 = classic mallet
+    // strikes untouched (attach path gated at noteOn); >0 turns held notes
+    // into bowed swells fed through the same modal bank.
+    void setBow(float v);
+    // Damper/felt mute depth 0..1 (idea 5): frequency-dependent damping that
+    // progressively deadens high modes like felt. 0 = no damper (identity).
+    void setDamper(float v);
+    // Inharmonicity/spread 0..1 (idea 14): stretches higher partials away
+    // from the baked pure ratios toward bell-like inharmonicity. 0 = off.
+    void setInharmSpread(float v);
+    // MPE slide routing (idea 20): 0 = classic per-channel pitch bend
+    // (existing path bit-identical), 1 = mode-frequency bend (partials bend
+    // more as mode index rises — per-mode dispersion), 2 = per-voice
+    // brightness macro (bend tilts the voice's partial spectrum).
+    void setSlideMode(int m);
+    // Per-band decay trim (idea 2): 16 frequency bands, each scaling the
+    // per-mode decay RATE (larger = shorter tail). 1.0 = exact identity.
+    void setBandDecayTrim(int band,float v);
+    // Microtonal tuning (idea 13): 128-entry ratio table indexed by MIDI
+    // note (note 60 = degree 0 reference). active=false keeps the classic
+    // std::pow path bit-identical.
+    void setTuning(const float ratios[128], bool active);
+    float getBow() const { return bowPressure_; }
+    float getDamper() const { return damperKnob_; }
+    float getInharmSpread() const { return inharm_; }
+    int   getSlideMode() const { return slideMode_; }
+    float getBandDecayTrim(int b) const { return bandDecay_[std::clamp(b,0,15)]; }
     // pitch bend per MIDI channel (MPE)
     void setPitchBend(int channel, float semitones); // -12..+12
     // MPE per-note pressure: member channels (1..15) latch the latest
@@ -198,7 +238,11 @@ public:
     void noteOn(int midiNote,float vel01,int channel=0);
     void noteOff(int midiNote,int channel=-1);
     void allNotesOff();   // CC123 — release every active voice (normal tails)
-    void setSustainPedal(bool down); // CC64 — defer note-offs while held, release on lift
+    // CC64 sustain pedal, continuous 0..1 (idea 5 half-pedal): >=0.5 defers
+    // note-offs while held and releases them on lift; values below 0.5 are a
+    // half-pedal that progressively deadens ringing high modes (felt) without
+    // extending sustain. 0.0 = pedal fully up (no felt either).
+    void setSustainPedal(float amt01);
     void allSoundOff();   // CC120 — immediate silence (panic)
     float processSampleMono();
     void processSampleStereo(float &l,float &r);
@@ -240,6 +284,10 @@ public:
     void computeDecayRef();
     float shapeDecayRate(float d) const;
     void startStrikeBurst(Voice& v,float vx,float vy);
+    // noteOn excitation router: bow engaged (pressure > 1e-4) arms the
+    // friction bridge instead of the mallet pulse + contact transient;
+    // otherwise calls startStrikeBurst unchanged (bit-identity default).
+    void armExcitation(Voice& v,float vx,float vy);
     double sampleRate_=44100; int presetIdx_=0; int modeCount_=80;
     float pitchScale_=1.f, decayScale_=1.f, brightness_=0.65f, strikeX_=0.5f, strikeY_=0.5f, width_=0.3f;
     float bandTrim_[16] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
@@ -275,6 +323,39 @@ public:
     int   irBakeCursor_=0; bool irBaking_=false;
     int   irBakeGate_=0; // sample countdown: IR bake steps run ~once per 256 samples, never per sample
     bool  sustainPedal_=false;
+    // --- wave-2 feature state (all identity-safe defaults) -----------------
+    // Bow friction bridge (idea 1): pressure 0..1, one-pole smoothing of the
+    // friction force (~5 ms), and a constant bow speed in normalized
+    // displacement/sec derived from the stick threshold. kBowTrim stages the
+    // injection against the sustained-drive normalizer (excNorm=(1-R)) so
+    // bowed steady-state loudness is Q-independent like the audio exciter.
+    float bowPressure_=0.f;
+    float bowSmCoef_=0.02f;
+    inline static constexpr float kBowBowSpeed = 0.025f; // normalized bow speed (comparable to the
+                                               // surface velocity so v_rel crosses the stick
+                                               // window every cycle -> real stick-slip pump)
+    inline static constexpr float kBowVStick = 0.004f;   // |v_rel| stick window
+    inline static constexpr float kBowMuD   = 0.85f;     // dynamic friction coef
+    inline static constexpr float kBowTrim  = 9000.f;    // force->mode injection gain
+    inline static constexpr float kBowVelScale = 8.0e-4f;// displacement->velocity units
+    // Damper/felt (idea 5): damperKnob_ = felt pressed against the body
+    // (0..1); sustainPedalAmt_ = CC64 raw 0..1; felt_ = combined felt depth
+    // recomputed on any setter (damper + half-pedal zone), consumed per-mode
+    // in recomputeVoiceCoeffs as a frequency-dependent rate multiplier.
+    float damperKnob_=0.f;
+    float sustainPedalAmt_=0.f;
+    float felt_=0.f;
+    // Inharmonicity (idea 14): 0..1 stretch of partials above the first.
+    float inharm_=0.f;
+    // MPE slide routing (idea 20): 0 classic, 1 mode-bend, 2 brightness.
+    int   slideMode_=0;
+    // Per-band decay rate multipliers (idea 2): 16 bands, 1.0 = identity.
+    float bandDecay_[16] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
+    // Microtonal tuning (idea 13): note->ratio table (note 60 = degree 0)
+    // built by the plugin from parsed .scl/.kbm; idle = classic pow path.
+    bool  tuningActive_=false;
+    float noteRatio_[128]={};
+    void  applyFeltRemap();             // recompute felt_ + active voice coeffs
     // ~20ms one-pole smoothing for params consumed raw in the sample loop (width/wet/exciter)
     float widthCur_=0.3f, wetCur_=0.f, exMixCur_=0.f;
     float rtSmCoef_=0.0075f;
