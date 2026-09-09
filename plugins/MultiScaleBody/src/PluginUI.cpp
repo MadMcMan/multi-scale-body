@@ -1,3 +1,8 @@
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
 #include "DistrhoPluginInfo.h"
 #include <unordered_map>  // pulled in before DistrhoUI.hpp so std:: is fully populated when DPF's
                           // `namespace std { ... }` opens inside DISTRHO (otherwise <unordered_map>
@@ -17,6 +22,48 @@
 #include <string>
 #include <functional>
 #include <cmath>
+#ifdef _WIN32
+#include <commdlg.h>   // GetOpenFileNameA (windows.h already pulled by DGL)
+#endif
+// idea 13: generate the .scl text of an N-EDO scale (name, count, N degree
+// lines in cents). The plugin parser handles this exact shape (implicit
+// tonic: degree k sits on note 60+k, the last line is the octave boundary),
+// so 12-EDO here reproduces the classic ratios exactly.
+static std::string edoSclText(int n){
+    char head[32]; snprintf(head,sizeof(head),"%d-edo",n);
+    std::string s=head; s+="\n";
+    char tmp[16]; snprintf(tmp,sizeof(tmp),"%d\n",n); s+=tmp;
+    char b[32];
+    for(int k=1;k<=n;++k){
+        snprintf(b,sizeof(b),"%.6f\n",1200.0*(double)k/(double)n);
+        s+=b;
+    }
+    return s;
+}
+// Windows .scl file picker: returns false when cancelled or unreadable.
+// Reads at most 64 KiB of text (a scale file is a few hundred bytes).
+static bool loadSclFileDialog(std::string& outText){
+#ifdef _WIN32
+    char path[MAX_PATH]={0};
+    OPENFILENAMEA ofn{}; ofn.lStructSize=sizeof(ofn);
+    ofn.lpstrFilter="Scala scale files (*.scl)\0*.scl\0All files (*.*)\0*.*\0";
+    ofn.lpstrFile=path; ofn.nMaxFile=(DWORD)sizeof(path);
+    ofn.lpstrTitle="Load a Scala .scl tuning";
+    ofn.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_HIDEREADONLY;
+    if(GetOpenFileNameA(&ofn)==0) return false;
+    FILE* f=std::fopen(path,"rb");
+    if(!f) return false;
+    std::fseek(f,0,SEEK_END); const long sz=std::ftell(f); std::fseek(f,0,SEEK_SET);
+    if(sz<=0||sz>64*1024){ std::fclose(f); return false; }
+    outText.assign((size_t)sz,'\0');
+    const bool ok=std::fread(&outText[0],1,(size_t)sz,f)==(size_t)sz;
+    std::fclose(f);
+    return ok;
+#else
+    (void)outText;
+    return false;
+#endif
+}
 START_NAMESPACE_DISTRHO
 float gUIScale = 1.0f;
 // Scale from the ACTUAL LVGL surface, not DPF's size bookkeeping: the layout must
@@ -243,7 +290,10 @@ public:
         if(key && std::strcmp(key,"scale")==0){
             scaleTxtCached_ = value ? value : "";
             updateScaleLabel();
-            if(fScaleArea) lv_textarea_set_text(fScaleArea, scaleTxtCached_.c_str());
+            if(fEdoDropdown){
+                const int idx=autoEdoOf(scaleTxtCached_);
+                if(idx>=0) lv_dropdown_set_selected(fEdoDropdown,idx);
+            }
         }
     }
     // label readout for the loaded .scl: first non-comment, non-count line,
@@ -424,7 +474,7 @@ private:
         fDampMax=1.f; fDampPresetCache=-1; fDampDecayCache=-1.f; fDampBandSumCache=-1.f;
         fScrubMode=0; fScrubParamIdx=-1; fScrubToggle=nullptr;
         fLearnOverlay=nullptr; fLearnParam=-1;
-        fScaleMenu=nullptr; fScaleArea=nullptr; fScaleLbl=nullptr;
+        fScaleMenu=nullptr; fEdoDropdown=nullptr; fScaleLbl=nullptr;
         fMasterValLbl=nullptr; fStrikeChannel=0; fNextStrikeChannel=1; fLiveAge=1000; fRebuildInFlight=false;
     }
     static void previewGeometry(int& cell,int& gap,int& off){
@@ -1079,7 +1129,7 @@ private:
             fLearnParam=-1;
         }
     }
-    // ---- idea 13: microtonal scale editor (.scl paste) ---------------------
+    // ---- idea 13: microtonal scale editor (EDO selectors + .scl file load) ----
     void openScaleMenu(){
         lv_obj_t* scr=lv_screen_active();
         if(!scr || fScaleMenu) return;
@@ -1092,35 +1142,74 @@ private:
         lv_obj_set_layout(fScaleMenu,LV_LAYOUT_NONE);
         lv_obj_clear_flag(fScaleMenu,LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_event_cb(fScaleMenu,scaleShieldCb,LV_EVENT_CLICKED,this);
-        lv_obj_t* card=makeCard(fScaleMenu,scaled(560),scaled(320),scaled(8),LV_FLEX_ALIGN_START);
+        lv_obj_t* card=makeCard(fScaleMenu,scaled(480),scaled(232),scaled(10),LV_FLEX_ALIGN_START);
         lv_obj_align(card,LV_ALIGN_CENTER,0,0);
         lv_obj_t* head=makeRow(card,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
-        addLabel(head,"MICROTONAL SCALE  (.SCL)",getScaledSmallFont(),COL_HIGHLIGHT,2);
+        addLabel(head,"MICROTONAL TUNING",getScaledSmallFont(),COL_HIGHLIGHT,2);
         addLabel(head,scaleName(scaleTxtCached_).c_str(),getScaledMicroFont(),PLATE_AMBER,1);
-        fScaleArea=lv_textarea_create(card);
-        lv_obj_set_size(fScaleArea,lv_pct(100),scaled(190));
-        lv_textarea_set_placeholder_text(fScaleArea,
-            "! Scala .scl text (paste)\n"
-            "! 19-edo example:\n"
-            "19\n"
-            "! 19 equal divisions of the octave\n"
-            "63.157895\n126.315789\n189.473684\n...");
-        lv_obj_set_style_bg_color(fScaleArea,PLATE_WELL,0);
-        lv_obj_set_style_bg_opa(fScaleArea,LV_OPA_COVER,0);
-        lv_obj_set_style_border_color(fScaleArea,PLATE_EDGE,0);
-        lv_obj_set_style_border_width(fScaleArea,1,0);
-        lv_obj_set_style_radius(fScaleArea,scaled(lay::RADIUS_SM),0);
-        lv_obj_set_style_text_color(fScaleArea,PLATE_TEXT,0);
-        lv_obj_set_style_text_font(fScaleArea,getScaledMicroFont(),0);
-        lv_textarea_set_accepted_chars(fScaleArea,"0123456789./\\! \t\r\n,;:-");
-        lv_textarea_set_one_line(fScaleArea,false);
-        if(!scaleTxtCached_.empty()) lv_textarea_set_text(fScaleArea,scaleTxtCached_.c_str());
-        lv_obj_t* row=makeRow(card,lv_pct(100),scaled(lay::BTN_H),scaled(8),LV_FLEX_ALIGN_CENTER);
-        lv_obj_t* apply=addButton(row,96,lay::BTN_H,"APPLY",COL_HIGHLIGHT);
-        lv_obj_add_event_cb(apply,scaleApplyCb,LV_EVENT_CLICKED,this);
-        lv_obj_t* clear=addButton(row,96,lay::BTN_H,"CLEAR",PLATE_TEXT_MID);
+        // standard EDO selector: pick one, it applies immediately
+        lv_obj_t* edoRow=makeRow(card,lv_pct(100),scaled(30),scaled(10),LV_FLEX_ALIGN_CENTER);
+        addLabel(edoRow,"EDO",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        fEdoDropdown=lv_dropdown_create(edoRow);
+        lv_obj_set_flex_grow(fEdoDropdown,1);
+        {
+            const char* opts="5\n7\n10\n12\n15\n17\n19\n22\n24\n31\n41\n53\n72";
+            lv_dropdown_set_options(fEdoDropdown,opts);
+        }
+        lv_dropdown_set_selected(fEdoDropdown,3); // 12-EDO default
+        lv_obj_add_style(fEdoDropdown,&styles.compactSelectMain,0);
+        lv_obj_set_style_bg_color(fEdoDropdown,PLATE_WELL,0);
+        lv_obj_set_style_border_color(fEdoDropdown,PLATE_EDGE,0);
+        lv_obj_set_style_radius(fEdoDropdown,scaled(lay::RADIUS_SM),0);
+        {   // cap the list to ~8 rows so wheel scrolling engages
+            lv_obj_t* list=lv_dropdown_get_list(fEdoDropdown);
+            if(list) lv_obj_set_style_max_height(list,scaled(lay::DROPDOWN_MAX_ROWS*lay::DROPDOWN_ROW_H),0);
+        }
+        lv_group_remove_obj(fEdoDropdown); // wheel must not defocus/close the list
+        lv_obj_add_event_cb(fEdoDropdown,edoDropdownCb,LV_EVENT_VALUE_CHANGED,this);
+        if(autoEdoOf(scaleTxtCached_)>=0) lv_dropdown_set_selected(fEdoDropdown,autoEdoOf(scaleTxtCached_));
+        // file load / clear row
+        lv_obj_t* fileRow=makeRow(card,lv_pct(100),scaled(lay::BTN_H),scaled(10),LV_FLEX_ALIGN_CENTER);
+        lv_obj_t* load=addButton(fileRow,150,lay::BTN_H,"LOAD .SCL...",COL_HIGHLIGHT);
+        lv_obj_add_event_cb(load,scaleLoadCb,LV_EVENT_CLICKED,this);
+        lv_obj_t* clear=addButton(fileRow,96,lay::BTN_H,"CLEAR",PLATE_TEXT_MID);
         lv_obj_add_event_cb(clear,scaleClearCb,LV_EVENT_CLICKED,this);
-        addLabel(row,"degree 0 sits on middle C; Tune stays a global offset",getScaledMicroFont(),PLATE_TEXT_DIM,0);
+        addLabel(card,"Degree 0 sits on middle C; Tune stays a global offset",
+                 getScaledMicroFont(),PLATE_TEXT_DIM,0);
+    }
+    // N-EDO menu index for a cached scale text ("<n>-edo" name line), -1 if not
+    int autoEdoOf(const std::string& txt) const {
+        static const int kEdos[13]={5,7,10,12,15,17,19,22,24,31,41,53,72};
+        if(txt.empty()) return 3;                       // 12-EDO
+        size_t p=txt.find("-edo");
+        if(p==std::string::npos || p>4) return -1;
+        const int n=std::atoi(txt.substr(0,p).c_str());
+        for(int i=0;i<13;++i) if(kEdos[i]==n) return i;
+        return -1;
+    }
+    static void edoDropdownCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* dd=(lv_obj_t*)lv_event_get_target(e);
+        if(!ui||!dd) return;
+        static const int kEdos[13]={5,7,10,12,15,17,19,22,24,31,41,53,72};
+        const int sel=lv_dropdown_get_selected(dd);
+        if(sel<0||sel>=13) return;
+        ui->scaleTxtCached_=edoSclText(kEdos[sel]);
+        ui->setState("scale",ui->scaleTxtCached_.c_str());   // plugin generates the table
+        ui->updateScaleLabel();
+    }
+    static void scaleLoadCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        if(!ui) return;
+        std::string txt;
+        if(!loadSclFileDialog(txt)) return;              // cancelled
+        ui->scaleTxtCached_=txt;
+        ui->setState("scale",txt.c_str());
+        ui->updateScaleLabel();
+        if(ui->fEdoDropdown){
+            const int idx=ui->autoEdoOf(txt);
+            if(idx>=0) lv_dropdown_set_selected(ui->fEdoDropdown,idx);
+        }
     }
     static void scaleBtnCb(lv_event_t* e){
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
@@ -1130,24 +1219,17 @@ private:
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
         if(ui) ui->closeScaleMenu();
     }
-    static void scaleApplyCb(lv_event_t* e){
-        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
-        if(!ui||!ui->fScaleArea) return;
-        const char* txt=lv_textarea_get_text(ui->fScaleArea);
-        ui->scaleTxtCached_ = txt ? txt : "";
-        ui->setState("scale", ui->scaleTxtCached_.c_str());   // plugin parses + pushes engine
-        ui->updateScaleLabel();
-    }
     static void scaleClearCb(lv_event_t* e){
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
         if(!ui) return;
         ui->scaleTxtCached_="";
         ui->setState("scale","");
         ui->updateScaleLabel();
+        if(ui->fEdoDropdown) lv_dropdown_set_selected(ui->fEdoDropdown,3); // 12-EDO
     }
     void closeScaleMenu(){
         if(fScaleMenu){ lv_obj_del(fScaleMenu); fScaleMenu=nullptr; }
-        fScaleArea=nullptr;
+        fEdoDropdown=nullptr;
     }
     // ---- spectrum scrub target (idea 2): GAIN vs DECAY ---------------------
     static void scrubToggleCb(lv_event_t* e){
@@ -2503,7 +2585,7 @@ private:
     int fLearnParam=-1;
     // idea 13: microtonal scale editor overlay + status label
     lv_obj_t* fScaleMenu=nullptr;
-    lv_obj_t* fScaleArea=nullptr;
+    lv_obj_t* fEdoDropdown=nullptr;
     lv_obj_t* fScaleLbl=nullptr;
     std::string scaleTxtCached_;
 };

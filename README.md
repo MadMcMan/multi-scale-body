@@ -25,7 +25,7 @@ VST3 · CLAP · LV2 · JACK standalone (DPF), with an LVGL-based UI.
 - **Space**: radiation mix, 16-band output EQ trims, wet/dry
 - **Per-band decay trims**: the 16-band spectrum chart scrubs gain (default) or per-band decay via the GAIN/DECAY toggle, so highs can dull while lows bloom
 - **Felt damper + half-pedal**: a Damper knob loads a felt strip (frequency-dependent absorption); CC64 is continuous — full pedal defers note-offs, half-pedal deadens the ring
-- **Microtonal tuning**: paste a Scala `.scl` in the on-screen editor (KEYBOARD row → EDIT) or via DAW state; the keyboard remaps chromatically, Tune stays a global offset. Optional kbm-style mapping ("first,last" + optional consecutive note list).
+- **Microtonal tuning**: pick an EDO (5, 7, 10, 12, 15, 17, 19, 22, 24, 31, 41, 53, 72) or LOAD a Scala `.scl` file (keyboard row → EDIT); the keyboard remaps chromatically, Tune stays a global offset. Optional kbm-style mapping ("first,last" + optional consecutive note list).
 - **Inharmonicity**: one knob stretches partials from the baked pure ratios toward bell-like quadratic spacing
 - **MIDI learn**: right-click any knob → move a CC on channel 0 → the binding saves with the patch
 - **MPE slide routing**: Slide mode routes per-channel pitch bend to classic whole-voice bend (default), per-mode dispersion bend, or a per-voice brightness macro

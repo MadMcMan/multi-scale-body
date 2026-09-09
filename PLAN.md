@@ -145,5 +145,5 @@ Verified against `paper_47.md` (Eq. 1 + prose; several forms are RECONSTRUCTED p
 - New FEEL bank row (5th knob group, compact 84px/arc-48): Bow, Damper, Inharm, Slide. Left column budget: 138+120+120+120+106 = 604 ≤ 610.
 - Spectrum scrub GAIN/DECAY toggle (header button) — drag level remaps to `kParamBandDecay*`; DAMPING card mirrors the trims (t60 / trim).
 - Right-click catcher (`MultiScaleBodyLVGLWidget`) — knob hit starts MIDI learn (state `learn`), anywhere else cancels; learn overlay is a full-screen shield, closed by any click or by the first parameterChanged after the binding.
-- Keyboard header: `SCALE:` status + EDIT button opening the .scl paste editor (textarea + APPLY/CLEAR, state `scale`).
+- Keyboard header: `SCALE:` status + EDIT button opening the tuning editor — an EDO selector (5/7/10/12/15/17/19/22/24/31/41/53/72, applied on selection) plus a LOAD .SCL... Windows file dialog and a CLEAR button (state `scale`); the editor generates the .scl text for EDOs client-side.
 - `rebuildForScale` now snapshots/restores paramCache so knob positions survive zoom (DPF never re-sends params on resize).
