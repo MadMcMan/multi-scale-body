@@ -20,6 +20,17 @@ int main(){
     require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamInharm))<1e-6f,"inharm default 0");
     require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamSlideMode))<1e-6f,"slide default 0 (classic)");
     require(plug.testEngine().getBandDecayTrim(0)==1.f,"bandDecay default trim 1.0");
+    // wave-3 defaults are identity: physical model off, eco off, budget mid
+    require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamSupport))<1e-6f,"support default 0");
+    require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamHoldDamp))<1e-6f,"holddamp default 0");
+    require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamResMorph))<1e-6f,"resmorph default 0");
+    require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamMorphTarget))<1e-6f,"morphtarget default 0");
+    require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamMorphAmt))<1e-6f,"morphamt default 0");
+    require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamMaterial))<1e-6f,"material default 0");
+    require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamRayleighA))<1e-6f,"rayleighA default 0");
+    require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamRayleighB))<1e-6f,"rayleighB default 0");
+    require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamEcoMode))<1e-6f,"ecomode default 0");
+    require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamEcoBudget)-0.5f)<1e-6f,"ecobudget default 0.5");
     plug.testSetParameterValue(PluginMultiScaleBody::kParamPreset, 0.0f);
     float v=plug.testGetParameterValue(PluginMultiScaleBody::kParamPreset);
     require(std::abs(v-0.0f)<0.01f,"preset round-trip 0.0");

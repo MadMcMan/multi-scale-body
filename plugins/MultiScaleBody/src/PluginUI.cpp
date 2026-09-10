@@ -166,6 +166,16 @@ public:
         paramCache[PluginMultiScaleBody::kParamDamper]=0.f;
         paramCache[PluginMultiScaleBody::kParamInharm]=0.f;
         paramCache[PluginMultiScaleBody::kParamSlideMode]=0.f;
+        // wave-3 defaults: physical model off (EcoBudget blanket 0.5 matches)
+        paramCache[PluginMultiScaleBody::kParamSupport]=0.f;
+        paramCache[PluginMultiScaleBody::kParamHoldDamp]=0.f;
+        paramCache[PluginMultiScaleBody::kParamResMorph]=0.f;
+        paramCache[PluginMultiScaleBody::kParamMorphTarget]=0.f;
+        paramCache[PluginMultiScaleBody::kParamMorphAmt]=0.f;
+        paramCache[PluginMultiScaleBody::kParamMaterial]=0.f;
+        paramCache[PluginMultiScaleBody::kParamRayleighA]=0.f;
+        paramCache[PluginMultiScaleBody::kParamRayleighB]=0.f;
+        paramCache[PluginMultiScaleBody::kParamEcoMode]=0.f;
         setSize(DISTRHO_UI_DEFAULT_WIDTH, DISTRHO_UI_DEFAULT_HEIGHT);
         fLVGL = new MultiScaleBodyLVGLWidget(getWindow());
         // Right-click routing (DPF's LVGL indev only feeds the left button):
@@ -193,6 +203,11 @@ public:
             case P::kParamWet: return "Reverb";        case P::kParamMono: return "Mono"; case P::kParamVolume: return "Volume";
             case P::kParamBow: return "Bow";           case P::kParamDamper: return "Damper";
             case P::kParamInharm: return "Inharm";     case P::kParamSlideMode: return "Slide";
+            case P::kParamSupport: return "Support";   case P::kParamHoldDamp: return "Hold Damp";
+            case P::kParamResMorph: return "Resolution"; case P::kParamMorphAmt: return "Morph";
+            case P::kParamMorphTarget: return "Morph Tgt"; case P::kParamMaterial: return "Material";
+            case P::kParamRayleighA: return "Rayl A";   case P::kParamRayleighB: return "Rayl B";
+            case P::kParamEcoMode: return "Eco";       case P::kParamEcoBudget: return "Eco Budget";
             default: return {}; // bands and metering outputs have no knob title
         }
     }
@@ -206,15 +221,32 @@ public:
         // MODE MAP, or the scope preview until a host echo.
         if(i==PluginMultiScaleBody::kParamPreset || i==PluginMultiScaleBody::kParamDecay
            || i==PluginMultiScaleBody::kParamModeCount || i==PluginMultiScaleBody::kParamStrikeX
-           || i==PluginMultiScaleBody::kParamStrikeY)
+           || i==PluginMultiScaleBody::kParamStrikeY || i==PluginMultiScaleBody::kParamSupport
+           || i==PluginMultiScaleBody::kParamHoldDamp || i==PluginMultiScaleBody::kParamResMorph
+           || i==PluginMultiScaleBody::kParamMorphTarget || i==PluginMultiScaleBody::kParamMorphAmt
+           || i==PluginMultiScaleBody::kParamMaterial || i==PluginMultiScaleBody::kParamRayleighA
+           || i==PluginMultiScaleBody::kParamRayleighB)
             fScopePreviewReady=false;
         if(i==PluginMultiScaleBody::kParamPreset || i==PluginMultiScaleBody::kParamModeCount
            || i==PluginMultiScaleBody::kParamStrikeX || i==PluginMultiScaleBody::kParamStrikeY
+           || i==PluginMultiScaleBody::kParamResMorph || i==PluginMultiScaleBody::kParamMorphTarget
+           || i==PluginMultiScaleBody::kParamMorphAmt
            || (i>=PluginMultiScaleBody::kParamBand0 && i<=PluginMultiScaleBody::kParamBand15))
             fModeMapDirty=true;
+        // wave-3: gain-affecting params also invalidate the disc heatmap
+        if(i==PluginMultiScaleBody::kParamPreset || i==PluginMultiScaleBody::kParamModeCount
+           || i==PluginMultiScaleBody::kParamResMorph || i==PluginMultiScaleBody::kParamMorphTarget
+           || i==PluginMultiScaleBody::kParamMorphAmt
+           || (i>=PluginMultiScaleBody::kParamBand0 && i<=PluginMultiScaleBody::kParamBand15))
+            fHeatDirty=true;
         if(i==PluginMultiScaleBody::kParamStrikeX || i==PluginMultiScaleBody::kParamStrikeY) updateStrikeMarker();
         if(i==PluginMultiScaleBody::kParamPreset){ syncPresetDropdown(v); if(bodySubLabel) updateBodyInfo(); updateBodyPreview(); }
+        // wave-3: support/hold/res/morph/rayleigh reshape the ring like Decay does
         if(i==PluginMultiScaleBody::kParamDecay || i==PluginMultiScaleBody::kParamPreset
+           || i==PluginMultiScaleBody::kParamSupport || i==PluginMultiScaleBody::kParamHoldDamp
+           || i==PluginMultiScaleBody::kParamResMorph || i==PluginMultiScaleBody::kParamMorphTarget
+           || i==PluginMultiScaleBody::kParamMorphAmt || i==PluginMultiScaleBody::kParamRayleighA
+           || i==PluginMultiScaleBody::kParamRayleighB
            || (i>=PluginMultiScaleBody::kParamBandDecay0 && i<=PluginMultiScaleBody::kParamBandDecay15)) updateDampingDisplay();
         if(i==PluginMultiScaleBody::kParamVolume && fMasterValLbl){
             char b[24]; formatParamValue(PluginMultiScaleBody::kParamVolume,v,b,sizeof(b));
@@ -243,14 +275,25 @@ public:
         // R3: the idle scope preview depends on these params - recompute lazily
         if(i==PluginMultiScaleBody::kParamPreset || i==PluginMultiScaleBody::kParamDecay
            || i==PluginMultiScaleBody::kParamModeCount || i==PluginMultiScaleBody::kParamStrikeX
-           || i==PluginMultiScaleBody::kParamStrikeY)
+           || i==PluginMultiScaleBody::kParamStrikeY || i==PluginMultiScaleBody::kParamSupport
+           || i==PluginMultiScaleBody::kParamHoldDamp || i==PluginMultiScaleBody::kParamResMorph
+           || i==PluginMultiScaleBody::kParamMorphTarget || i==PluginMultiScaleBody::kParamMorphAmt
+           || i==PluginMultiScaleBody::kParamMaterial || i==PluginMultiScaleBody::kParamRayleighA
+           || i==PluginMultiScaleBody::kParamRayleighB)
             fScopePreviewReady=false;
         // ROUND-6: the MODE MAP re-derives from these (plus band trims)
         if(i==PluginMultiScaleBody::kParamPreset || i==PluginMultiScaleBody::kParamModeCount
            || i==PluginMultiScaleBody::kParamStrikeX || i==PluginMultiScaleBody::kParamStrikeY
+           || i==PluginMultiScaleBody::kParamResMorph || i==PluginMultiScaleBody::kParamMorphTarget
+           || i==PluginMultiScaleBody::kParamMorphAmt
            || (i>=PluginMultiScaleBody::kParamBand0 && i<=PluginMultiScaleBody::kParamBand15))
             fModeMapDirty=true;
-        // metering outputs arrive here every audio block - the bridge-safe DSP->UI link
+        // wave-3: gain-affecting params also invalidate the disc heatmap
+        if(i==PluginMultiScaleBody::kParamPreset || i==PluginMultiScaleBody::kParamModeCount
+           || i==PluginMultiScaleBody::kParamResMorph || i==PluginMultiScaleBody::kParamMorphTarget
+           || i==PluginMultiScaleBody::kParamMorphAmt
+           || (i>=PluginMultiScaleBody::kParamBand0 && i<=PluginMultiScaleBody::kParamBand15))
+            fHeatDirty=true;
         // FIX: kParamOutLevel was falling through to the generic branch so
         // fVizLevel stayed 0 forever (flat scope + dead meter once live).
         // fLiveAge resets on every metering write so the idle preview
@@ -274,11 +317,25 @@ public:
             // fDampDecayCache inside updateDampingDisplay so other params
             // cost nothing here.
             if(i==PluginMultiScaleBody::kParamDecay || i==PluginMultiScaleBody::kParamPreset
+               || i==PluginMultiScaleBody::kParamSupport || i==PluginMultiScaleBody::kParamHoldDamp
+               || i==PluginMultiScaleBody::kParamResMorph || i==PluginMultiScaleBody::kParamMorphTarget
+               || i==PluginMultiScaleBody::kParamMorphAmt || i==PluginMultiScaleBody::kParamRayleighA
+               || i==PluginMultiScaleBody::kParamRayleighB
                || (i>=PluginMultiScaleBody::kParamBandDecay0 && i<=PluginMultiScaleBody::kParamBandDecay15)) updateDampingDisplay();
             if(i==PluginMultiScaleBody::kParamVolume && fMasterValLbl){
                 char b[24]; formatParamValue(PluginMultiScaleBody::kParamVolume,v,b,sizeof(b));
                 lv_label_set_text(fMasterValLbl,b);
             }
+            // wave-3: MODEL panel controls follow host automation too
+            // (set_selected / add_state never re-fire VALUE_CHANGED: no loops)
+            if(i==PluginMultiScaleBody::kParamEcoMode && fEcoBtn){
+                if(v>0.5f) lv_obj_add_state(fEcoBtn,LV_STATE_CHECKED);
+                else lv_obj_clear_state(fEcoBtn,LV_STATE_CHECKED);
+            }
+            if(i==PluginMultiScaleBody::kParamMaterial && fMaterialDd)
+                lv_dropdown_set_selected(fMaterialDd,std::clamp((int)std::lround(v*10.f),0,10));
+            if(i==PluginMultiScaleBody::kParamMorphTarget && fMorphDd)
+                lv_dropdown_set_selected(fMorphDd,std::clamp((int)std::lround(v*(float)(modal::kNumPresets-1)),0,modal::kNumPresets-1));
         }
     }
     void stateChanged(const char* key,const char* value) override {
@@ -376,6 +433,8 @@ public:
             // resize rebuild: release held notes BEFORE touching the screen
             if(kbHeldNote>=0 && kbHeldNote<=127){ sendNote(0,(uint8_t)kbHeldNote,0); kbHeldNote=-1; }
             if(fStrikeHeld){ sendNote((uint8_t)fStrikeChannel,(uint8_t)fStrikeNote,0); fStrikeHeld=false; }
+            // wave-3 (idea 10): never strand a playback note across a rebuild
+            if(fPlayHeld||fRecPlaying) stopPlayback();
             for(int o=0;o<lay::KEY_WHITE_N*2;++o){ int n=kbBaseNote+o; if(n>=0&&n<=127) sendNote(0,(uint8_t)n,0); }
             // Delete the old timer FIRST so the rebuild can't be tickled
             // mid-construction (the tick dereferences fSpectrumChart etc.,
@@ -471,10 +530,14 @@ private:
         for(int i=0;i<5;++i) kbBlack[i]=nullptr;
         // R5: damping panel - bars + value labels
         for(int i=0;i<16;++i){ fDampBars[i]=nullptr; fDampVals[i]=nullptr; }
-        fDampMax=1.f; fDampPresetCache=-1; fDampDecayCache=-1.f; fDampBandSumCache=-1.f;
+        fDampMax=1.f; fDampPresetCache=-1; fDampDecayCache=-1.f; fDampBandSumCache=-1.f; fDampPhysSumCache=-1.f;
+        for(int i=0;i<100;++i) fHeatDots[i]=nullptr; fHeatCount=0; fHeatDirty=true; fModeFocus=-1;
         fScrubMode=0; fScrubParamIdx=-1; fScrubToggle=nullptr;
         fLearnOverlay=nullptr; fLearnParam=-1;
         fScaleMenu=nullptr; fEdoDropdown=nullptr; fScaleLbl=nullptr;
+        fRecBtn=fPlayBtn=nullptr; fRecOn=false; fRecPlaying=false; fRecN=0; fRecCursor=0; fPlayHeld=false;
+        fModelMenu=fMaterialDd=fMorphDd=fEcoBtn=nullptr;
+        for(int i=0;i<7;++i) fModelArcs[i]=nullptr;
         fMasterValLbl=nullptr; fStrikeChannel=0; fNextStrikeChannel=1; fLiveAge=1000; fRebuildInFlight=false;
     }
     static void previewGeometry(int& cell,int& gap,int& off){
@@ -607,13 +670,34 @@ private:
             bandTrim[b]=std::pow(2.f,(paramCache[PluginMultiScaleBody::kParamBandDecay0+b]-0.5f)*2.f);
             bdSum+=paramCache[PluginMultiScaleBody::kParamBandDecay0+b];
         }
+        // wave-3: support/hold/res/morph/rayleigh reshape the ring; they join
+        // the gate so the display never lies about the tail.
+        float sup=paramCache[PluginMultiScaleBody::kParamSupport];
+        float hd=paramCache[PluginMultiScaleBody::kParamHoldDamp];
+        float rm=paramCache[PluginMultiScaleBody::kParamResMorph];
+        float mAmt=paramCache[PluginMultiScaleBody::kParamMorphAmt];
+        float mTgt=paramCache[PluginMultiScaleBody::kParamMorphTarget];
+        float rA=paramCache[PluginMultiScaleBody::kParamRayleighA];
+        float rB=paramCache[PluginMultiScaleBody::kParamRayleighB];
+        float physSum=sup+hd+rm+mAmt+mTgt+rA+rB;
         if(idx==fDampPresetCache && std::abs(decayV-fDampDecayCache)<1e-4f
-           && std::abs(bdSum-fDampBandSumCache)<1e-4f) return;
-        fDampPresetCache=idx; fDampDecayCache=decayV; fDampBandSumCache=bdSum;
+           && std::abs(bdSum-fDampBandSumCache)<1e-4f
+           && std::abs(physSum-fDampPhysSumCache)<1e-4f) return;
+        fDampPresetCache=idx; fDampDecayCache=decayV; fDampBandSumCache=bdSum; fDampPhysSumCache=physSum;
         const auto& pr = modal::kPresets[idx];
+        const int mtx=std::clamp((int)std::lround(mTgt*(float)mx),0,mx);
+        const auto& pt = modal::kPresets[mtx];
+        const int tN=std::max(1,pt.n);
         // mirror the engine's setDecayScale curve: larger v = longer tail
         // (smaller rate multiplier). The display tracks 1/(decay*scale).
         const float scale = 0.1f * std::pow(100.f, 1.f - decayV);
+        // wave-3 live factors (engine mirrors): support + hold raise the rate,
+        // Rayleigh adds the absolute law 0.5*(a + b*w^2) at the band-mid freq.
+        const float supMul = 1.f + 0.5f*sup;
+        float edge=std::max(std::fabs(paramCache[PluginMultiScaleBody::kParamStrikeX]-0.5f),
+                            std::fabs(paramCache[PluginMultiScaleBody::kParamStrikeY]-0.5f))*2.f;
+        const float holdMul = 1.f + 2.f*hd*std::max(0.f,1.f-edge);
+        const float rayA2 = 5.f*rA*rA, rayB2 = 1.2436e-4f*rB*rB;
         // per-band mean decay, per-band T60
         float bandT60[16]={};
         float maxT60=1e-6f;
@@ -621,15 +705,24 @@ private:
             int m0 = (b*pr.n)/16;
             int m1 = ((b+1)*pr.n)/16;
             if(m0>=m1) continue;   // empty band (e.g. Bar preset bands 8..15)
-            double sum=0.0; int cnt=0;
+            double sum=0.0, fsum=0.0; int cnt=0;
             for(int m=m0;m<m1;++m){
-                float d = std::max(0.2f, pr.decay[m]);
-                sum += d; ++cnt;
+                // wave-3: morphed base decay (resolution + body morph, target
+                // index clamped to the target's mode count like the engine)
+                float dm = pr.decay[m];
+                if(rm>1e-4f) dm = dm + (pr.fineDecay[m]-dm)*rm;
+                if(mAmt>1e-4f){ const int ti=std::min(m,tN-1); dm = dm + (pt.decay[ti]-dm)*mAmt; }
+                float fm = pr.freq[m];
+                if(rm>1e-4f) fm = fm + (pr.fineFreq[m]-fm)*rm;
+                if(mAmt>1e-4f){ const int ti=std::min(m,tN-1); fm = fm + (pt.freq[ti]-fm)*mAmt; }
+                sum += std::max(0.2f, dm); fsum += fm; ++cnt;
             }
             float meanRate = (float)(sum/(double)cnt);
-            // effective rate scaled by the DECAY knob and the per-band trim
-            // (rate up = shorter tail, T60 = 6.91/rate)
-            float t60 = 6.9078f / (meanRate * scale * bandTrim[b]);
+            float meanF = (float)(fsum/(double)cnt);
+            // effective rate: DECAY knob x band trim x support x hold, plus
+            // the Rayleigh absolute term at the band-mid frequency
+            float rate = meanRate * scale * supMul * holdMul + rayA2 + rayB2*meanF*meanF;
+            float t60 = 6.9078f / (rate * bandTrim[b]);
             bandT60[b]=t60;
             if(t60>maxT60) maxT60=t60;
         }
@@ -653,6 +746,119 @@ private:
                 else                      snprintf(vbuf,sizeof(vbuf),"%.2f s",bandT60[b]);
             }
             lv_label_set_text(fDampVals[b],vbuf);
+        }
+    }
+    // wave-3 (idea 5): disc heatmap painter. Dots are tracked in fHeatDots
+    // for deletion. Focused mode (>=0): per-cell |gain| of THAT mode, so its
+    // vibration nodes read as gaps ("hit the gaps to mute it"); otherwise the
+    // aggregate max over active modes (the original heatmap). Gains blend
+    // toward the morph target exactly like the engine's noteOn path.
+    void paintDiscHeatmap(){
+        for(int i=0;i<fHeatCount;++i) if(fHeatDots[i]&&lv_obj_is_valid(fHeatDots[i])) lv_obj_del(fHeatDots[i]);
+        fHeatCount=0;
+        if(!strikeDisc) return;
+        lv_coord_t D=lv_obj_get_width(strikeDisc);
+        if(D<=0) return;
+        using namespace modal;
+        int preset=(int)std::round(paramCache[PluginMultiScaleBody::kParamPreset]*(float)(kNumPresets-1));
+        const auto& pr=kPresets[std::clamp(preset,0,kNumPresets-1)];
+        float mAmt=paramCache[PluginMultiScaleBody::kParamMorphAmt];
+        const int mtx=std::clamp((int)std::lround(paramCache[PluginMultiScaleBody::kParamMorphTarget]*(float)(kNumPresets-1)),0,kNumPresets-1);
+        const auto& pt=kPresets[mtx];
+        const int tN=std::max(1,pt.n);
+        const int focus=std::clamp(fModeFocus,-1,kMaxModes-1);
+        const int GS=10;
+        const int dotS=3;
+        const int margin=(int)(D*0.10f);
+        const int inner=D-margin*2;
+        const int cell=inner/GS;
+        int cellPeak[GS*GS]={0};
+        float gMax=1e-9f;
+        for(int gy=0;gy<GS;++gy){
+            for(int gx=0;gx<GS;++gx){
+                float gxN=(gx+0.5f)/(float)GS;
+                float gyN=(gy+0.5f)/(float)GS;
+                float fx=gxN*14.f, fy=gyN*14.f;
+                int x0=std::clamp((int)fx,0,14), y0=std::clamp((int)fy,0,14);
+                int x1=x0+1, y1=y0+1; float dx=fx-x0, dy=fy-y0;
+                float w00=(1-dx)*(1-dy), w10=dx*(1-dy), w01=(1-dx)*dy, w11=dx*dy;
+                float pk=0.f;
+                int n=std::clamp((int)(8+paramCache[PluginMultiScaleBody::kParamModeCount]*120.f),8,pr.n);
+                if(focus>=0 && focus<n){
+                    float g=pr.gain[focus][y0][x0]*w00+pr.gain[focus][y0][x1]*w10
+                           +pr.gain[focus][y1][x0]*w01+pr.gain[focus][y1][x1]*w11;
+                    if(mAmt>1e-4f){
+                        const int ti=std::min(focus,tN-1);
+                        float tg=pt.gain[ti][y0][x0]*w00+pt.gain[ti][y0][x1]*w10
+                               +pt.gain[ti][y1][x0]*w01+pt.gain[ti][y1][x1]*w11;
+                        g=g+(tg-g)*mAmt;
+                    }
+                    pk=std::fabs(g);
+                } else {
+                    for(int m=0;m<n;++m){
+                        float g=pr.gain[m][y0][x0]*w00+pr.gain[m][y0][x1]*w10
+                               +pr.gain[m][y1][x0]*w01+pr.gain[m][y1][x1]*w11;
+                        if(mAmt>1e-4f){
+                            const int ti=std::min(m,tN-1);
+                            float tg=pt.gain[ti][y0][x0]*w00+pt.gain[ti][y0][x1]*w10
+                                   +pt.gain[ti][y1][x0]*w01+pt.gain[ti][y1][x1]*w11;
+                            g=g+(tg-g)*mAmt;
+                        }
+                        int band=(m*16)/n;
+                        float trim=paramCache[PluginMultiScaleBody::kParamBand0+std::clamp(band,0,15)]*2.f;
+                        float v=std::fabs(g)*trim;
+                        if(v>pk) pk=v;
+                    }
+                }
+                cellPeak[gy*GS+gx]=(int)(pk*1000.f);
+                if(pk>gMax) gMax=pk;
+            }
+        }
+        const bool hl=(focus>=0);
+        for(int gy=0;gy<GS;++gy){
+            for(int gx=0;gx<GS;++gx){
+                float v=(float)cellPeak[gy*GS+gx]/1000.f / gMax;
+                if(v<0.02f) continue;
+                if(fHeatCount>=100) return;
+                lv_obj_t* dot=lv_obj_create(strikeDisc);
+                lv_obj_set_size(dot, scaled(dotS), scaled(dotS));
+                lv_obj_set_pos(dot, margin + gx*cell + (cell-scaled(dotS))/2,
+                                   margin + gy*cell + (cell-scaled(dotS))/2);
+                lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+                lv_obj_set_style_bg_color(dot, hl?PLATE_AMBER_PALE:COL_HIGHLIGHT, 0);
+                // R4: raised floor/ceiling (was LV_OPA_10..LV_OPA_70) -
+                // the R3 critic read the faint 2px dots as an "empty
+                // dotted canvas" at the 1600x1000 staging scale.
+                lv_obj_set_style_bg_opa(dot, (lv_opa_t)(LV_OPA_20 + v*(LV_OPA_90-LV_OPA_20)), 0);
+                lv_obj_set_style_border_width(dot, 0, 0);
+                lv_obj_set_style_pad_all(dot, 0, 0);
+                lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE);
+                lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
+                fHeatDots[fHeatCount++]=dot;
+            }
+        }
+    }
+    // wave-3 (idea 5): MODE MAP bar click toggles the node-focus overlay.
+    // Click the same bar again (or strike a peak) to clear.
+    static void modeBarCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* bar=(lv_obj_t*)lv_event_get_target(e);
+        if(!ui||!bar) return;
+        int m=(int)(intptr_t)lv_obj_get_user_data(bar);
+        if(m<0||m>=modal::kMaxModes) return;
+        ui->fModeFocus=(ui->fModeFocus==m)?-1:m;
+        ui->fHeatDirty=true;
+        if(ui->fModePeakLbl){
+            char nm[32];
+            if(ui->fModeFocus>=0) snprintf(nm,sizeof(nm),"M%d NODE",ui->fModeFocus+1);
+            else {
+                int mxp=modal::kNumPresets-1;
+                int preset=(int)std::round(ui->paramCache[PluginMultiScaleBody::kParamPreset]*(float)mxp);
+                const auto& pr=modal::kPresets[std::clamp(preset,0,mxp)];
+                int pi=std::clamp(ui->fModePeakIdx,0,modal::kMaxModes-1);
+                snprintf(nm,sizeof(nm),"M%d  -  %.0f HZ",ui->fModePeakIdx+1,pr.freq[pi]/(2.f*3.14159f));
+            }
+            lv_label_set_text(ui->fModePeakLbl,nm);
         }
     }
     void syncPresetDropdown(float v){
@@ -794,6 +1000,23 @@ private:
                 const int m=std::clamp((int)std::lround(v*2.f),0,2);
                 snprintf(buf,cap,"%s",kSlideNames[m]);
                 break; }
+            case P::kParamSupport:   snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
+            case P::kParamHoldDamp:  snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
+            case P::kParamResMorph:  snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
+            case P::kParamMorphAmt:   snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
+            case P::kParamMorphTarget: {
+                const int t=std::clamp((int)std::lround(v*(float)(modal::kNumPresets-1)),0,modal::kNumPresets-1);
+                snprintf(buf,cap,"%s",modal::kPresets[t].name);
+                break; }
+            case P::kParamMaterial: {
+                static const char* const kMatNames[11]={"DEFAULT","ALUMINIUM","STEEL","BRONZE","PINE","ROSEWOOD","MAHOGANY","GLASS","BRASS","TITANIUM","CARBON"};
+                const int m=std::clamp((int)std::lround(v*10.f),0,10);
+                snprintf(buf,cap,"%s",kMatNames[m]);
+                break; }
+            case P::kParamRayleighA: snprintf(buf,cap,"%.2f",v); break;
+            case P::kParamRayleighB: snprintf(buf,cap,"%.2f",v); break;
+            case P::kParamEcoMode:   snprintf(buf,cap,"%s",v>0.5f?"ECO":"OFF"); break;
+            case P::kParamEcoBudget: snprintf(buf,cap,"%d",(int)std::lround(64.f+v*896.f)); break;
             default:                 snprintf(buf,cap,"%.2f",v); break;
         }
     }
@@ -898,6 +1121,15 @@ private:
         lv_coord_t ph = coords.y2 - coords.y1 +1;
         float fx = std::clamp((float)(p.x - coords.x1)/(float)pw, 0.f,1.f);
         float fy = std::clamp(1.f - (float)(p.y - coords.y1)/(float)ph, 0.f,1.f);
+        // wave-3 (idea 10): capture the drag path while REC is armed
+        if(ui->fRecOn && ui->fRecN<512){
+            bool dup=false;
+            if(ui->fRecN>0){
+                float dx=fx-ui->fRecX[ui->fRecN-1], dy=fy-ui->fRecY[ui->fRecN-1];
+                dup=(dx*dx+dy*dy)<(0.004f*0.004f);
+            }
+            if(!dup){ ui->fRecX[ui->fRecN]=fx; ui->fRecY[ui->fRecN]=fy; ++ui->fRecN; }
+        }
         auto code = lv_event_get_code(e);
         if(code==LV_EVENT_PRESSED || code==LV_EVENT_PRESSING){
             if(code==LV_EVENT_PRESSED){
@@ -1231,6 +1463,142 @@ private:
         if(fScaleMenu){ lv_obj_del(fScaleMenu); fScaleMenu=nullptr; }
         fEdoDropdown=nullptr;
     }
+    // ---- wave-3: MODEL panel (physical-model knobs/selects) ------------------
+    // On-demand overlay like the scale editor: built on open, deleted on
+    // close (panel knob arcs are tracked in fModelArcs and unregistered from
+    void addModelKnob(lv_obj_t* grid,uint32_t pi,int slot){
+        ArcVisualSpec spec=normalArcSpec();
+        spec.containerW=scaled(92); spec.containerH=scaled(74); spec.arcSize=scaled(44);
+        spec.capInset=7; spec.needleTopOffset=2; spec.needleBottomInset=3;
+        lv_obj_t* arc=UIWidgets::createArcKnob(grid,pi,this,styles,spec);
+        lv_obj_add_event_cb(arc,valueFormatCb,LV_EVENT_ALL,this);
+        widgets[pi]=arc;
+        fModelArcs[slot]=arc;
+        lv_obj_t* cont=lv_obj_get_parent(arc);
+        lv_obj_t* lbl=cont?lv_obj_get_child(cont,lv_obj_get_child_count(cont)-1):nullptr;
+        if(lbl&&lv_obj_check_type(lbl,&lv_label_class)){
+            char b[24];
+            formatParamValue(pi,paramCache[pi],b,sizeof(b));
+            lv_label_set_text(lbl,b);
+        }
+    }
+    void openModelPanel(){
+        lv_obj_t* scr=lv_screen_active();
+        if(!scr||fModelMenu) return;
+        using P=PluginMultiScaleBody;
+        fModelMenu=lv_obj_create(scr);
+        lv_obj_set_size(fModelMenu,lv_pct(100),lv_pct(100));
+        lv_obj_set_style_bg_color(fModelMenu,PLATE_BG,0);
+        lv_obj_set_style_bg_opa(fModelMenu,LV_OPA_80,0);
+        lv_obj_set_style_border_width(fModelMenu,0,0);
+        lv_obj_set_style_pad_all(fModelMenu,0,0);
+        lv_obj_set_layout(fModelMenu,LV_LAYOUT_NONE);
+        lv_obj_clear_flag(fModelMenu,LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_event_cb(fModelMenu,modelShieldCb,LV_EVENT_CLICKED,this);
+        lv_obj_t* card=makeCard(fModelMenu,scaled(560),scaled(340),scaled(8),LV_FLEX_ALIGN_START);
+        lv_obj_align(card,LV_ALIGN_CENTER,0,0);
+        lv_obj_t* head=makeRow(card,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
+        addLabel(head,"PHYSICAL MODEL",getScaledSmallFont(),COL_HIGHLIGHT,2);
+        addLabel(head,"paper-47 extensions",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        lv_obj_t* row1=makeRow(card,lv_pct(100),scaled(74),scaled(8),LV_FLEX_ALIGN_CENTER);
+        addModelKnob(row1,P::kParamSupport,0);
+        addModelKnob(row1,P::kParamHoldDamp,1);
+        addModelKnob(row1,P::kParamResMorph,2);
+        addModelKnob(row1,P::kParamMorphAmt,3);
+        lv_obj_t* row2=makeRow(card,lv_pct(100),scaled(74),scaled(8),LV_FLEX_ALIGN_CENTER);
+        addModelKnob(row2,P::kParamRayleighA,4);
+        addModelKnob(row2,P::kParamRayleighB,5);
+        addModelKnob(row2,P::kParamEcoBudget,6);
+        lv_obj_t* selRow=makeRow(card,lv_pct(100),scaled(30),scaled(8),LV_FLEX_ALIGN_CENTER);
+        fMaterialDd=lv_dropdown_create(selRow);
+        lv_dropdown_set_options(fMaterialDd,"DEFAULT\nALUMINIUM\nSTEEL\nBRONZE\nPINE\nROSEWOOD\nMAHOGANY\nGLASS\nBRASS\nTITANIUM\nCARBON");
+        lv_dropdown_set_selected(fMaterialDd,std::clamp((int)std::lround(paramCache[P::kParamMaterial]*10.f),0,10));
+        lv_obj_set_width(fMaterialDd,scaled(170));
+        lv_obj_add_style(fMaterialDd,&styles.compactSelectMain,0);
+        lv_obj_set_style_bg_color(fMaterialDd,PLATE_WELL,0);
+        lv_obj_set_style_border_color(fMaterialDd,PLATE_EDGE,0);
+        lv_obj_set_style_radius(fMaterialDd,scaled(lay::RADIUS_SM),0);
+        { lv_obj_t* list=lv_dropdown_get_list(fMaterialDd);
+          if(list){ lv_obj_add_style(list,&styles.compactSelectListMain,0);
+                    lv_obj_set_style_max_height(list,scaled(lay::DROPDOWN_MAX_ROWS*lay::DROPDOWN_ROW_H),0); } }
+        lv_group_remove_obj(fMaterialDd);
+        lv_obj_add_event_cb(fMaterialDd,materialDdCb,LV_EVENT_VALUE_CHANGED,this);
+        fMorphDd=lv_dropdown_create(selRow);
+        { std::string opts; for(int i=0;i<modal::kNumPresets;++i){ if(i) opts+="\n"; opts+=modal::kPresets[i].name; }
+          lv_dropdown_set_options(fMorphDd,opts.c_str()); }
+        lv_dropdown_set_selected(fMorphDd,std::clamp((int)std::lround(paramCache[P::kParamMorphTarget]*(float)(modal::kNumPresets-1)),0,modal::kNumPresets-1));
+        lv_obj_set_width(fMorphDd,scaled(170));
+        lv_obj_add_style(fMorphDd,&styles.compactSelectMain,0);
+        lv_obj_set_style_bg_color(fMorphDd,PLATE_WELL,0);
+        lv_obj_set_style_border_color(fMorphDd,PLATE_EDGE,0);
+        lv_obj_set_style_radius(fMorphDd,scaled(lay::RADIUS_SM),0);
+        { lv_obj_t* list=lv_dropdown_get_list(fMorphDd);
+          if(list){ lv_obj_add_style(list,&styles.compactSelectListMain,0);
+                    lv_obj_set_style_max_height(list,scaled(lay::DROPDOWN_MAX_ROWS*lay::DROPDOWN_ROW_H),0); } }
+        lv_group_remove_obj(fMorphDd);
+        lv_obj_add_event_cb(fMorphDd,morphDdCb,LV_EVENT_VALUE_CHANGED,this);
+        fEcoBtn=lv_btn_create(selRow);
+        lv_obj_set_size(fEcoBtn,scaled(76),scaled(lay::BTN_H));
+        styles.applyToggleButton(fEcoBtn,paramCache[P::kParamEcoMode]>0.5f);
+        lv_obj_set_style_radius(fEcoBtn,scaled(lay::RADIUS_SM),0);
+        lv_obj_set_style_pad_all(fEcoBtn,0,0);
+        lv_obj_add_event_cb(fEcoBtn,ecoBtnCb,LV_EVENT_VALUE_CHANGED,this);
+        lv_obj_t* elbl=lv_label_create(fEcoBtn); lv_label_set_text(elbl,"ECO"); lv_obj_center(elbl);
+        addLabel(card,"Support clamps the edge - Hold damps the belly - Resolution morphs 4^3 to 8^3 - Morph blends bodies",
+                 getScaledMicroFont(),PLATE_TEXT_DIM,0);
+    }
+    static void modelBtnCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        if(!ui) return;
+        if(ui->fModelMenu) ui->closeModelPanel();
+        else ui->openModelPanel();
+    }
+    static void modelShieldCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        if(ui) ui->closeModelPanel();
+    }
+    static void materialDdCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* dd=(lv_obj_t*)lv_event_get_target(e);
+        if(!ui||!dd) return;
+        int sel=std::clamp((int)lv_dropdown_get_selected(dd),0,10);
+        ui->editParameter(PluginMultiScaleBody::kParamMaterial,true);
+        ui->setParamValue(PluginMultiScaleBody::kParamMaterial,(float)sel/10.f);
+        ui->editParameter(PluginMultiScaleBody::kParamMaterial,false);
+    }
+    static void morphDdCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* dd=(lv_obj_t*)lv_event_get_target(e);
+        if(!ui||!dd) return;
+        int mx=modal::kNumPresets-1;
+        int sel=std::clamp((int)lv_dropdown_get_selected(dd),0,mx);
+        float v=mx?(float)sel/(float)mx:0.f;
+        ui->editParameter(PluginMultiScaleBody::kParamMorphTarget,true);
+        ui->setParamValue(PluginMultiScaleBody::kParamMorphTarget,v);
+        ui->editParameter(PluginMultiScaleBody::kParamMorphTarget,false);
+    }
+    static void ecoBtnCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* btn=(lv_obj_t*)lv_event_get_target(e);
+        if(!ui||!btn) return;
+        bool on=lv_obj_has_state(btn,LV_STATE_CHECKED);
+        ui->editParameter(PluginMultiScaleBody::kParamEcoMode,true);
+        ui->setParamValue(PluginMultiScaleBody::kParamEcoMode,on?1.f:0.f);
+        ui->editParameter(PluginMultiScaleBody::kParamEcoMode,false);
+    }
+    void closeModelPanel(){
+        if(!fModelMenu) return;
+        using P=PluginMultiScaleBody;
+        for(int s=0;s<7;++s){
+            if(fModelArcs[s]){
+                for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount;++i)
+                    if(widgets[i]==fModelArcs[s]) widgets[i]=nullptr;
+                fModelArcs[s]=nullptr;
+            }
+        }
+        lv_obj_del(fModelMenu); fModelMenu=nullptr;
+        fMaterialDd=fMorphDd=fEcoBtn=nullptr;
+    }
     // ---- spectrum scrub target (idea 2): GAIN vs DECAY ---------------------
     static void scrubToggleCb(lv_event_t* e){
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
@@ -1242,6 +1610,67 @@ private:
             lv_label_set_text(lbl, ui->fScrubMode?"DECAY":"GAIN");
     }
 
+    // ---- wave-3 (idea 10): disc motion recorder ------------------------------
+    // REC arms capture of the drag path (up to 512 points at ~33 ms cadence);
+    // PLAY replays it as timed strikes with velocity from gesture speed.
+    static void recBtnCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* btn=(lv_obj_t*)lv_event_get_target(e);
+        if(!ui||!btn) return;
+        if(ui->fRecPlaying) ui->stopPlayback();
+        ui->fRecOn=!ui->fRecOn;
+        if(ui->fRecOn) ui->fRecN=0;
+        if(ui->fRecOn) lv_obj_add_state(btn,LV_STATE_CHECKED);
+        else lv_obj_clear_state(btn,LV_STATE_CHECKED);
+    }
+    static void playBtnCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* btn=(lv_obj_t*)lv_event_get_target(e);
+        if(!ui||!btn) return;
+        if(ui->fRecPlaying){ ui->stopPlayback(); return; }
+        if(ui->fRecN<=0) return;
+        ui->fRecOn=false;
+        if(ui->fRecBtn) lv_obj_clear_state(ui->fRecBtn,LV_STATE_CHECKED);
+        ui->fRecPlaying=true; ui->fRecCursor=0; ui->fPlayHeld=false;
+        ui->editParameter(PluginMultiScaleBody::kParamStrikeX,true);
+        ui->editParameter(PluginMultiScaleBody::kParamStrikeY,true);
+        lv_obj_add_state(btn,LV_STATE_CHECKED);
+    }
+    static void recClearCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        if(!ui) return;
+        if(ui->fRecPlaying) ui->stopPlayback();
+        ui->fRecOn=false; ui->fRecN=0;
+        if(ui->fRecBtn) lv_obj_clear_state(ui->fRecBtn,LV_STATE_CHECKED);
+    }
+    void stopPlayback(){
+        if(fPlayHeld){ sendNote((uint8_t)fPlayChannel,(uint8_t)fStrikeNote,0); fPlayHeld=false; }
+        fRecPlaying=false;
+        editParameter(PluginMultiScaleBody::kParamStrikeX,false);
+        editParameter(PluginMultiScaleBody::kParamStrikeY,false);
+        if(fPlayBtn) lv_obj_clear_state(fPlayBtn,LV_STATE_CHECKED);
+    }
+    // one playback step per 33 ms tick: strike the next recorded point with
+    // velocity from the gesture speed between consecutive points.
+    void playbackTick(){
+        if(!fRecPlaying) return;
+        if(fRecCursor>=fRecN){ stopPlayback(); return; }
+        if(fPlayHeld){ sendNote((uint8_t)fPlayChannel,(uint8_t)fStrikeNote,0); fPlayHeld=false; }
+        float px=fRecX[fRecCursor], py=fRecY[fRecCursor];
+        float vel=100.f;
+        if(fRecCursor>0){
+            float dx=px-fRecX[fRecCursor-1], dy=py-fRecY[fRecCursor-1];
+            float dist=std::sqrt(dx*dx+dy*dy);
+            vel=std::clamp(30.f+dist*400.f,30.f,127.f);
+        }
+        setParamValue(PluginMultiScaleBody::kParamStrikeX,px);
+        setParamValue(PluginMultiScaleBody::kParamStrikeY,py);
+        fPlayChannel=fNextStrikeChannel;
+        fNextStrikeChannel=(fNextStrikeChannel%15)+1;
+        sendNote((uint8_t)fPlayChannel,(uint8_t)fStrikeNote,(uint8_t)vel);
+        fPlayHeld=true;
+        ++fRecCursor;
+    }
     // ---- small builder helpers (all sizes flow through scaled()) ----------
     static lv_obj_t* makeBox(lv_obj_t* parent,lv_coord_t w,lv_coord_t h){
         lv_obj_t* c=lv_obj_create(parent);
@@ -1600,6 +2029,10 @@ private:
         lv_obj_add_event_cb(presetDropdown,dropdownCb,LV_EVENT_VALUE_CHANGED,this);
         lv_obj_add_event_cb(presetPrevBtn,presetArrowCb,LV_EVENT_CLICKED,this);
         lv_obj_add_event_cb(presetNextBtn,presetArrowCb,LV_EVENT_CLICKED,this);
+        // wave-3: MODEL opens the physical-model panel (support/hold/resolution/
+        // morph/material/rayleigh/eco) as an on-demand overlay like the scale editor
+        lv_obj_t* modelBtn=addButton(ddRow,64,24,"MODEL",COL_HIGHLIGHT);
+        lv_obj_add_event_cb(modelBtn,modelBtnCb,LV_EVENT_CLICKED,this);
         // R5: vertical divider between the preset browser and the master
         // cluster - second of three separators in the top bar so each zone
         // (brand | preset | master+zoom) reads as a distinct module.
@@ -1753,6 +2186,16 @@ private:
         // ---- disc col head + disc ----
         lv_obj_t* cHead=makeRow(discCol,scaled(lay::DISC_D),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         addLabel(cHead,"STRIKE THE BODY",getScaledSmallFont(),COL_HIGHLIGHT,2);
+        // wave-3 (idea 10): disc motion recorder — REC captures the drag path,
+        // PLAY replays it as a strike sequence, X clears.
+        fRecBtn=addButton(cHead,40,lay::BTN_H,"REC",PLATE_TEXT_MID);
+        styles.applyToggleButton(fRecBtn,false);
+        lv_obj_add_event_cb(fRecBtn,recBtnCb,LV_EVENT_CLICKED,this);
+        fPlayBtn=addButton(cHead,40,lay::BTN_H,"PLAY",PLATE_TEXT_MID);
+        styles.applyToggleButton(fPlayBtn,false);
+        lv_obj_add_event_cb(fPlayBtn,playBtnCb,LV_EVENT_CLICKED,this);
+        lv_obj_t* recClearBtn=addButton(cHead,28,lay::BTN_H,"X",PLATE_TEXT_MID);
+        lv_obj_add_event_cb(recClearBtn,recClearCb,LV_EVENT_CLICKED,this);
         addLabel(cHead,"CLICK",getScaledMicroFont(),PLATE_TEXT_DIM,1);
         // The disc - top view of the resonant body (hero element)
         const lv_coord_t D=scaled(lay::DISC_D);
@@ -1869,60 +2312,9 @@ private:
         // MAP reads from) as a 10x10 grid of dim accent dots. This kills the
         // "vast empty dark void" reading (R2 critic) by giving the disc real
         // rendered content that reads as a topographic modal surface.
-        {
-            using namespace modal;
-            int preset=(int)std::round(paramCache[PluginMultiScaleBody::kParamPreset]*(float)(kNumPresets-1));
-            const auto& pr=kPresets[std::clamp(preset,0,kNumPresets-1)];
-            const int GS=10;
-            const int dotS=3;
-            const int margin=(int)(D*0.10f);
-            const int inner=D-margin*2;
-            const int cell=inner/GS;
-            int cellPeak[GS*GS]={0};
-            float gMax=1e-9f;
-            for(int gy=0;gy<GS;++gy){
-                for(int gx=0;gx<GS;++gx){
-                    float gxN=(gx+0.5f)/(float)GS;
-                    float gyN=(gy+0.5f)/(float)GS;
-                    float fx=gxN*14.f, fy=gyN*14.f;
-                    int x0=std::clamp((int)fx,0,14), y0=std::clamp((int)fy,0,14);
-                    int x1=x0+1, y1=y0+1; float dx=fx-x0, dy=fy-y0;
-                    float w00=(1-dx)*(1-dy), w10=dx*(1-dy), w01=(1-dx)*dy, w11=dx*dy;
-                    float pk=0.f;
-                    int n=std::clamp((int)(8+paramCache[PluginMultiScaleBody::kParamModeCount]*120.f),8,pr.n);
-                    for(int m=0;m<n;++m){
-                        float g=pr.gain[m][y0][x0]*w00+pr.gain[m][y0][x1]*w10
-                               +pr.gain[m][y1][x0]*w01+pr.gain[m][y1][x1]*w11;
-                        int band=(m*16)/n;
-                        float trim=paramCache[PluginMultiScaleBody::kParamBand0+std::clamp(band,0,15)]*2.f;
-                        float v=std::fabs(g)*trim;
-                        if(v>pk) pk=v;
-                    }
-                    cellPeak[gy*GS+gx]=(int)(pk*1000.f);
-                    if(pk>gMax) gMax=pk;
-                }
-            }
-            for(int gy=0;gy<GS;++gy){
-                for(int gx=0;gx<GS;++gx){
-                    float v=(float)cellPeak[gy*GS+gx]/1000.f / gMax;
-                    if(v<0.02f) continue;
-                    lv_obj_t* dot=lv_obj_create(strikeDisc);
-                    lv_obj_set_size(dot, scaled(dotS), scaled(dotS));
-                    lv_obj_set_pos(dot, margin + gx*cell + (cell-scaled(dotS))/2,
-                                       margin + gy*cell + (cell-scaled(dotS))/2);
-                    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-                    lv_obj_set_style_bg_color(dot, COL_HIGHLIGHT, 0);
-                    // R4: raised floor/ceiling (was LV_OPA_10..LV_OPA_70) -
-                    // the R3 critic read the faint 2px dots as an "empty
-                    // dotted canvas" at the 1600x1000 staging scale.
-                    lv_obj_set_style_bg_opa(dot, (lv_opa_t)(LV_OPA_20 + v*(LV_OPA_90-LV_OPA_20)), 0);
-                    lv_obj_set_style_border_width(dot, 0, 0);
-                    lv_obj_set_style_pad_all(dot, 0, 0);
-                    lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE);
-                    lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
-                }
-            }
-        }
+        // wave-3 (idea 5): painted by paintDiscHeatmap() so the node-focus
+        // overlay and gain-affecting params can repaint without a rebuild.
+        paintDiscHeatmap();
         // Round-5's MODE ACTIVITY panel re-plotted the SAME 16 env[] bands as
         // the MODE SPECTRUM - the user read it as a duplicated spectrum. It
         // is now a 128-slot per-MODE comb instead: bar height = that mode's
@@ -1955,7 +2347,11 @@ private:
             lv_obj_set_style_border_width(bar,0,0);
             lv_obj_set_style_pad_all(bar,0,0);
             lv_obj_clear_flag(bar,LV_OBJ_FLAG_SCROLLABLE);
-            lv_obj_clear_flag(bar,LV_OBJ_FLAG_CLICKABLE);
+            // wave-3 (idea 5): bars are clickable targets for node-focus
+            // selection (safe: the card has no other handlers underneath).
+            lv_obj_add_flag(bar,LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_user_data(bar,(void*)(intptr_t)m);
+            lv_obj_add_event_cb(bar,modeBarCb,LV_EVENT_CLICKED,this);
             fModeBars[m]=bar;
         }
         // shared peak cell: PEAK + "M<n> . <freq> HZ" readout
@@ -2255,6 +2651,18 @@ private:
         const float ref=dmn/6.f;
         float dk = paramCache[PluginMultiScaleBody::kParamDecay];
         float dScale = 0.1f*std::pow(100.f,1.f-dk);
+        // wave-3: morph target + live rate factors (engine mirrors)
+        float mAmt=paramCache[PluginMultiScaleBody::kParamMorphAmt];
+        float rm=paramCache[PluginMultiScaleBody::kParamResMorph];
+        const int mtx=std::clamp((int)std::lround(paramCache[PluginMultiScaleBody::kParamMorphTarget]*(float)mx),0,mx);
+        const auto& pt = kPresets[mtx];
+        const int tN=std::max(1,pt.n);
+        const float supMul = 1.f + 0.5f*paramCache[PluginMultiScaleBody::kParamSupport];
+        float edge=std::max(std::fabs(sx-0.5f),std::fabs(sy-0.5f))*2.f;
+        const float holdMul = 1.f + 2.f*paramCache[PluginMultiScaleBody::kParamHoldDamp]*std::max(0.f,1.f-edge);
+        const float rA=paramCache[PluginMultiScaleBody::kParamRayleighA];
+        const float rB=paramCache[PluginMultiScaleBody::kParamRayleighB];
+        const float rayA2 = 5.f*rA*rA, rayB2 = 1.2436e-4f*rB*rB;
         // 4.3 s window across 128 points; 3 ms attack ramp first
         const float dt = 4.3f/128.f;
         float peak=1e-12f;
@@ -2265,9 +2673,15 @@ private:
             for(int m=0;m<n;++m){
                 float g = pr.gain[m][y0][x0]*w00 + pr.gain[m][y0][x1]*w10
                         + pr.gain[m][y1][x0]*w01 + pr.gain[m][y1][x1]*w11;
-                float rate = std::pow(pr.decay[m],0.55f)*std::pow(ref,0.45f)*dScale;
+                float dm = pr.decay[m], fm = pr.freq[m];
+                if(rm>1e-4f){ dm = dm + (pr.fineDecay[m]-dm)*rm; fm = fm + (pr.fineFreq[m]-fm)*rm; }
+                if(mAmt>1e-4f){ const int ti=std::min(m,tN-1); dm = dm + (pt.decay[ti]-dm)*mAmt; fm = fm + (pt.freq[ti]-fm)*mAmt;
+                    float tg = pt.gain[ti][y0][x0]*w00 + pt.gain[ti][y0][x1]*w10
+                             + pt.gain[ti][y1][x0]*w01 + pt.gain[ti][y1][x1]*w11;
+                    g = g + (tg-g)*mAmt; }
+                float rate = std::pow(std::max(0.2f,dm),0.55f)*std::pow(ref,0.45f)*dScale*supMul*holdMul
+                             + rayA2 + rayB2*fm*fm;
                 if(rate<0.2f) rate=0.2f; if(rate>8000.f) rate=8000.f;
-                e += std::abs(g)*std::exp(-t*rate);
             }
             e *= attack;
             fScopePreview[i]=e;
@@ -2312,8 +2726,15 @@ private:
             float sy = paramCache[PluginMultiScaleBody::kParamStrikeY];
             float fx=sx*15.f, fy=sy*15.f; int x0=(int)fx, y0=(int)fy; x0=std::clamp(x0,0,14); y0=std::clamp(y0,0,14); int x1=x0+1,y1=y0+1; float dx=fx-x0, dy=fy-y0;
             float w00=(1-dx)*(1-dy), w10=dx*(1-dy), w01=(1-dx)*dy, w11=dx*dy;
+            // wave-3 (idea 4): blend the morph target's sound map
+            float mAmtS=paramCache[PluginMultiScaleBody::kParamMorphAmt];
+            const auto& ptS=(mAmtS>1e-4f)?kPresets[std::clamp((int)std::lround(paramCache[PluginMultiScaleBody::kParamMorphTarget]*(float)mx),0,mx)]:pr;
+            const int tNS=std::max(1,ptS.n);
             for(int m=0;m<n;++m){
                 float g = pr.gain[m][y0][x0]*w00 + pr.gain[m][y0][x1]*w10 + pr.gain[m][y1][x0]*w01 + pr.gain[m][y1][x1]*w11;
+                if(mAmtS>1e-4f){ const int ti=std::min(m,tNS-1);
+                    float tg = ptS.gain[ti][y0][x0]*w00 + ptS.gain[ti][y0][x1]*w10 + ptS.gain[ti][y1][x0]*w01 + ptS.gain[ti][y1][x1]*w11;
+                    g = g + (tg-g)*mAmtS; }
                 int b = (m*16)/n;
                 float trim = paramCache[PluginMultiScaleBody::kParamBand0+std::clamp(b,0,15)]*2.f;
                 bins[b] += std::abs(g) * trim;
@@ -2351,10 +2772,18 @@ private:
             int x0=std::clamp((int)fx,0,14), y0=std::clamp((int)fy,0,14);
             int x1=x0+1, y1=y0+1; float dx=fx-x0, dy=fy-y0;
             float w00=(1-dx)*(1-dy), w10=dx*(1-dy), w01=(1-dx)*dy, w11=dx*dy;
+            // wave-3 (idea 4): blend the morph target's sound map
+            float mAmtM=paramCache[PluginMultiScaleBody::kParamMorphAmt];
+            const auto& ptM=(mAmtM>1e-4f)?kPresets[std::clamp((int)std::lround(paramCache[PluginMultiScaleBody::kParamMorphTarget]*(float)mxp),0,mxp)]:pr;
+            const int tNM=std::max(1,ptM.n);
             float gmax=1e-9f;
             for(int m=0;m<n;++m){
                 float g=pr.gain[m][y0][x0]*w00+pr.gain[m][y0][x1]*w10
                        +pr.gain[m][y1][x0]*w01+pr.gain[m][y1][x1]*w11;
+                if(mAmtM>1e-4f){ const int ti=std::min(m,tNM-1);
+                    float tg=ptM.gain[ti][y0][x0]*w00+ptM.gain[ti][y0][x1]*w10
+                           +ptM.gain[ti][y1][x0]*w01+ptM.gain[ti][y1][x1]*w11;
+                    g=g+(tg-g)*mAmtM; }
                 g=std::fabs(g);
                 int band=(m*16)/n;
                 float trim=paramCache[PluginMultiScaleBody::kParamBand0+std::clamp(band,0,15)]*2.f;
@@ -2399,6 +2828,12 @@ private:
             }
         }   // end if(fModeBars[0] && fModeMapDirty)
         lv_chart_refresh(fSpectrumChart);
+        // wave-3 (idea 5): repaint the disc heatmap when gain-affecting
+        // params, the mode count, or the node focus changed (serviced here so
+        // repaints batch with the 33 ms mode-map cadence, never per gesture).
+        if(fHeatDirty){ fHeatDirty=false; paintDiscHeatmap(); }
+        // wave-3 (idea 10): advance the motion-recorder playback (33 ms steps)
+        playbackTick();
         if(fRippleCooldown>0) --fRippleCooldown;
         bool onset=(totalE>fPrevEnergy+std::max(0.02f,fPrevEnergy*1.1f)) && totalE>0.04f;
         fPrevEnergy=std::max(totalE,fPrevEnergy*0.90f);
@@ -2564,6 +2999,13 @@ private:
     lv_obj_t* fModePeakLbl=nullptr;
     int fModePeakIdx=-1;
     bool fModeMapDirty=true;
+    // wave-3 (idea 5): disc heatmap repaint gating + node-focus overlay.
+    // fHeatDots tracks painted dots for deletion; fModeFocus selects the
+    // mode whose |gain| map is shown (-1 = aggregate max over modes).
+    lv_obj_t* fHeatDots[100]={};
+    int fHeatCount=0;
+    bool fHeatDirty=true;
+    int fModeFocus=-1;
     // R5: DAMPING panel (per-band tail-time map, infoCol dead-band fill).
     // 16 bars, one per frequency band, each holding a normalized 0..1000
     // fill value; 16 value labels read "<T60> s" per band. fDampMax
@@ -2576,6 +3018,7 @@ private:
     int fDampPresetCache=-1;
     float fDampDecayCache=-1.f;
     float fDampBandSumCache=-1.f;
+    float fDampPhysSumCache=-1.f;   // wave-3 gate: support/hold/res/morph/rayleigh sum
     // idea 2: spectrum scrub target (0 = per-band GAIN, 1 = per-band DECAY)
     int fScrubMode=0;
     int fScrubParamIdx=-1;
@@ -2587,6 +3030,23 @@ private:
     lv_obj_t* fScaleMenu=nullptr;
     lv_obj_t* fEdoDropdown=nullptr;
     lv_obj_t* fScaleLbl=nullptr;
+    // wave-3 (idea 10): disc motion recorder (UI-local, not persisted)
+    lv_obj_t* fRecBtn=nullptr;
+    lv_obj_t* fPlayBtn=nullptr;
+    bool fRecOn=false;
+    bool fRecPlaying=false;
+    float fRecX[512]={};
+    float fRecY[512]={};
+    int fRecN=0;
+    int fRecCursor=0;
+    int fPlayChannel=0;
+    bool fPlayHeld=false;
+    // wave-3: MODEL panel (physical-model knobs/selects, built hidden)
+    lv_obj_t* fModelMenu=nullptr;
+    lv_obj_t* fMaterialDd=nullptr;
+    lv_obj_t* fMorphDd=nullptr;
+    lv_obj_t* fModelArcs[7]={};
+    lv_obj_t* fEcoBtn=nullptr;
     std::string scaleTxtCached_;
 };
 UI* createUI(){ return new MultiScaleBodyUI(); }

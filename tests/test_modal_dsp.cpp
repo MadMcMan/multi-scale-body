@@ -1001,6 +1001,164 @@ int main(){
         printf("slide modes PASS\n");
     }
 
+    // ================= wave-3 physical-model sections =======================
+    // --- idea 1: Rayleigh damping law (paper C = aM + bK) -------------------
+    {
+        MultiScaleBodyEngine a,b;
+        a.prepare(44100); a.reset(); b.prepare(44100); b.reset();
+        b.setRayleigh(0.f,0.f);
+        a.noteOn(60,1.f,0); b.noteOn(60,1.f,0);
+        require(a.voice(0).R[0]==b.voice(0).R[0],"rayleigh: (0,0) is exact identity (bit)");
+        MultiScaleBodyEngine c;
+        c.prepare(44100); c.reset();
+        c.setRayleigh(1.f,0.f);   // alpha only: uniform extra damping
+        c.noteOn(60,1.f,0);
+        require(c.voice(0).R[0] < a.voice(0).R[0],"rayleigh: alpha shortens the tail");
+        // beta is frequency-dependent: highs must gain MORE extra damping
+        MultiScaleBodyEngine d;
+        d.prepare(44100); d.reset();
+        d.setRayleigh(0.f,1.f);
+        d.noteOn(60,1.f,0);
+        const int hi=std::clamp((int)(a.voice(0).n*0.8f),1,modal::kMaxModes-1);
+        const double dLoA=-std::log((double)a.voice(0).R[0])*44100.0;
+        const double dLoD=-std::log((double)d.voice(0).R[0])*44100.0;
+        const double dHiA=-std::log((double)a.voice(0).R[hi])*44100.0;
+        const double dHiD=-std::log((double)d.voice(0).R[hi])*44100.0;
+        require((dHiD-dHiA)>(dLoD-dLoA)*3.0,"rayleigh: beta hits highs harder than lows");
+        printf("rayleigh PASS (lo +%.1f hi +%.1f 1/s)\n",dLoD-dLoA,dHiD-dHiA);
+    }
+    // --- idea 2: boundary support (clamped edge stiffens + damps) -----------
+    {
+        MultiScaleBodyEngine a,b;
+        a.prepare(44100); a.reset(); b.prepare(44100); b.reset();
+        b.setSupport(0.f);
+        a.noteOn(60,1.f,0); b.noteOn(60,1.f,0);
+        require(a.voice(0).cosTheta[10]==b.voice(0).cosTheta[10],"support: 0 is exact identity (bit)");
+        MultiScaleBodyEngine c;
+        c.prepare(44100); c.reset();
+        c.setSupport(1.f);
+        c.noteOn(60,1.f,0);
+        // pick a mode that stays below the 18 kHz clamp after the +25% lift
+        int m=10; while(m>1 && a.voice(0).freq[m]*1.3f>=17000.f) --m;
+        const double q=(double)m/(double)(a.voice(0).n-1);
+        const double expect=1.0+0.25*q*q;
+        const double fA=std::acos(std::clamp((double)a.voice(0).cosTheta[m],-1.0,1.0))*44100.0;
+        const double fC=std::acos(std::clamp((double)c.voice(0).cosTheta[m],-1.0,1.0))*44100.0;
+        require(std::fabs(fC/fA-expect)<0.02,"support: quadratic stiffening law 1+0.25*(i/(n-1))^2");
+        require(c.voice(0).R[m] < a.voice(0).R[m],"support: clamped tail damps faster");
+        printf("support PASS (mode %d ratio %.3f law %.3f)\n",m,fC/fA,expect);
+    }
+    // --- idea 6: hold-point damping (belly damps more than rim) -------------
+    {
+        MultiScaleBodyEngine a,b,c;
+        a.prepare(44100); a.reset(); b.prepare(44100); b.reset(); c.prepare(44100); c.reset();
+        b.setHoldDamp(0.f);
+        a.noteOn(60,1.f,0); b.noteOn(60,1.f,0);
+        require(a.voice(0).R[0]==b.voice(0).R[0],"holddamp: 0 is exact identity (bit)");
+        // fresh engines: the second strikes must land on voice 0 (no release sent)
+        MultiScaleBodyEngine bb,cc;
+        bb.prepare(44100); bb.reset(); cc.prepare(44100); cc.reset();
+        bb.setHoldDamp(1.f);
+        bb.setStrike(0.5f,0.5f); bb.noteOn(60,1.f,0);   // belly strike: max hold
+        cc.setHoldDamp(1.f);
+        cc.setStrike(0.95f,0.5f); cc.noteOn(60,1.f,0);  // rim strike: free
+        require(bb.voice(0).R[0] < cc.voice(0).R[0],"holddamp: belly strike damps more than rim");
+        printf("holddamp PASS\n");
+    }
+    // --- idea 3: FEM-resolution morph (4^3 -> 8^3 fine tables) ---------------
+    {
+        MultiScaleBodyEngine a,b;
+        a.prepare(44100); a.reset(); b.prepare(44100); b.reset();
+        b.setResMorph(0.f);
+        a.noteOn(60,1.f,0); b.noteOn(60,1.f,0);
+        require(a.voice(0).freq[5]==b.voice(0).freq[5],"resmorph: 0 is exact identity (bit)");
+        MultiScaleBodyEngine c;
+        c.prepare(44100); c.reset();
+        c.setResMorph(1.f);
+        c.noteOn(60,1.f,0);
+        const float fc=modal::kPresets[0].freq[5], ff=modal::kPresets[0].fineFreq[5];
+        require(std::fabs(c.voice(0).freq[5]-ff)<std::fabs(ff)*1e-4f+1e-3f,"resmorph: full morph reaches the fine table");
+        MultiScaleBodyEngine d;
+        d.prepare(44100); d.reset();
+        d.setResMorph(0.5f);
+        d.noteOn(60,1.f,0);
+        require(std::fabs(d.voice(0).freq[5]-(fc+ff)*0.5f)<std::fabs(fc+ff)*1e-4f+1e-3f,"resmorph: halfway is the midpoint");
+        printf("resmorph PASS (coarse %.1f fine %.1f)\n",fc,ff);
+    }
+    // --- idea 4: body morphing (modal parameter tracking) --------------------
+    {
+        MultiScaleBodyEngine a,b;
+        a.prepare(44100); a.reset(); b.prepare(44100); b.reset();
+        b.setMorphAmt(0.f);
+        a.noteOn(60,1.f,0); b.noteOn(60,1.f,0);
+        require(a.voice(0).freq[0]==b.voice(0).freq[0],"morph: 0 is exact identity (bit)");
+        MultiScaleBodyEngine c;
+        c.prepare(44100); c.reset();
+        c.setMorphTarget(1); c.setMorphAmt(1.f);   // full morph Bowl -> WoodBlock
+        c.noteOn(60,1.f,0);
+        const float ft=modal::kPresets[1].freq[0];
+        require(std::fabs(c.voice(0).freq[0]-ft)<std::fabs(ft)*1e-4f+1e-3f,"morph: full morph reaches the target table");
+        MultiScaleBodyEngine e;
+        e.prepare(44100); e.reset();
+        e.setModeCount(1.f);
+        e.setMorphTarget(6); e.setMorphAmt(1.f);   // Bar has n=88
+        e.noteOn(60,1.f,0);
+        const float fBar87=modal::kPresets[6].freq[87];
+        require(std::fabs(e.voice(0).freq[100]-fBar87)<std::fabs(fBar87)*1e-3f+1e-2f,"morph: high modes clamp to target top mode");
+        require(e.voice(0).freq[100]>1.f,"morph: no silence-collapse past target n");
+        printf("morph PASS (target f0 %.1f)\n",ft);
+    }
+    // --- idea 9: material physics editor (sqrt(E/rho) rescale) ---------------
+    {
+        MultiScaleBodyEngine a,b;
+        a.prepare(44100); a.reset(); b.prepare(44100); b.reset();
+        b.setMaterial(0);
+        a.noteOn(60,1.f,0); b.noteOn(60,1.f,0);
+        require(a.voice(0).freq[0]==b.voice(0).freq[0],"material: DEFAULT is exact identity (bit)");
+        MultiScaleBodyEngine c;
+        c.prepare(44100); c.reset();
+        c.setMaterial(2);   // STEEL on Bowl (body material aluminium)
+        c.noteOn(60,1.f,0);
+        const double expect=std::sqrt((200e9/7850.0)/(69e9/2700.0));
+        const double ratio=c.voice(0).freq[0]/a.voice(0).freq[0];
+        require(std::fabs(ratio-expect)<1e-4,"material: steel-on-bowl follows sqrt((E/rho)m/(E/rho)b)");
+        // preset change refreshes the multiplier (body-relative rescale)
+        c.setPreset(2);     // Plate IS steel: multiplier must return to ~1
+        c.noteOn(62,1.f,0);
+        MultiScaleBodyEngine d;
+        d.prepare(44100); d.reset();
+        d.setPreset(2); d.setMaterial(2);
+        d.noteOn(62,1.f,0);
+        require(c.voice(1).freq[0]==d.voice(0).freq[0],"material: multiplier follows preset changes");
+        printf("material PASS (steel/bowl ratio %.5f)\n",ratio);
+    }
+    // --- ideas 7+8: scene-adaptive resolution (mode budget per voice) --------
+    {
+        // shares are computed against the live voice count at each noteOn:
+        // budget 64 -> voice k gets min(80, max(8, 64/max(1,k)))
+        MultiScaleBodyEngine a;
+        a.prepare(44100); a.reset();
+        for(int k=0;k<8;++k) a.noteOn(40+k,1.f,0);   // fill all 8 voices
+        require(a.voice(7).n==80,"eco: off keeps the full mode count");
+        a.noteOn(50,1.f,0);   // 9th note steals the oldest (voice 0)
+        require(a.voice(0).n==80,"eco: off leaves stolen voices full");
+        MultiScaleBodyEngine b;
+        b.prepare(44100); b.reset();
+        b.setEco(true,0.f);   // budget 64: first voice takes min(80,64)=64
+        for(int k=0;k<8;++k) b.noteOn(40+k,1.f,0);
+        require(b.voice(0).n==64,"eco: tight budget clamps voices from the first note");
+        b.noteOn(50,1.f,0);   // 9th note: 8 live -> share max(8,64/8)=8
+        require(b.voice(0).n==8,"eco: full load shrinks the stolen voice to the share");
+        MultiScaleBodyEngine c;
+        c.prepare(44100); c.reset();
+        c.setEco(true,1.f);   // budget 960: 8 voices stay full
+        for(int k=0;k<8;++k) c.noteOn(40+k,1.f,0);
+        require(c.voice(7).n==80,"eco: generous budget leaves voices full");
+        c.noteOn(50,1.f,0);
+        require(c.voice(0).n==80,"eco: generous budget leaves stolen voices full");
+        printf("eco PASS\n");
+    }
+
     printf("=== ALL TESTS PASSED ===\n");
     return 0;
 }

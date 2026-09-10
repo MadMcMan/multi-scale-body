@@ -24,6 +24,11 @@ PluginMultiScaleBody::PluginMultiScaleBody() : Plugin(kNumParams, 0, 6) {
     // wave-2 defaults: every feature off (identity)
     paramBase_[kParamBow]=0.f; paramBase_[kParamDamper]=0.f; paramBase_[kParamInharm]=0.f; paramBase_[kParamSlideMode]=0.f;
     for(int i=0;i<16;++i) paramBase_[kParamBandDecay0+i]=0.5f; // curve -> trim 1.0 exact
+    // wave-3 defaults: physical model off (identity)
+    paramBase_[kParamSupport]=0.f; paramBase_[kParamHoldDamp]=0.f; paramBase_[kParamResMorph]=0.f;
+    paramBase_[kParamMorphTarget]=0.f; paramBase_[kParamMorphAmt]=0.f; paramBase_[kParamMaterial]=0.f;
+    paramBase_[kParamRayleighA]=0.f; paramBase_[kParamRayleighB]=0.f;
+    paramBase_[kParamEcoMode]=0.f; paramBase_[kParamEcoBudget]=0.5f;
     double sr=getSampleRate(); if(sr<1000) sr=44100;
     engine_.prepare(sr);
     engine_.setPitchScale(paramBase_[kParamPitch]); engine_.setDecayScale(paramBase_[kParamDecay]);
@@ -44,6 +49,14 @@ PluginMultiScaleBody::PluginMultiScaleBody() : Plugin(kNumParams, 0, 6) {
     engine_.setInharmSpread(paramBase_[kParamInharm]);
     engine_.setSlideMode((int)std::lround(paramBase_[kParamSlideMode]*2.f));
     for(int i=0;i<16;++i) engine_.setBandDecayTrim(i, bandDecayCurve(paramBase_[kParamBandDecay0+i]));
+    engine_.setSupport(paramBase_[kParamSupport]);
+    engine_.setHoldDamp(paramBase_[kParamHoldDamp]);
+    engine_.setResMorph(paramBase_[kParamResMorph]);
+    engine_.setMorphTarget((int)std::lround(paramBase_[kParamMorphTarget]*(float)(modal::kNumPresets-1)));
+    engine_.setMorphAmt(paramBase_[kParamMorphAmt]);
+    engine_.setMaterial((int)std::lround(paramBase_[kParamMaterial]*(float)(modal::MultiScaleBodyEngine::kNumMaterials-1)));
+    engine_.setRayleigh(paramBase_[kParamRayleighA], paramBase_[kParamRayleighB]);
+    engine_.setEco(paramBase_[kParamEcoMode]>0.5f, paramBase_[kParamEcoBudget]);
     // look-ahead limiter delay: hosts compensate when aligning PDC.
     // Reporting requires DISTRHO_PLUGIN_WANT_LATENCY=1 in DistrhoPluginInfo.h
     // (left off for now; guarded so enabling the flag just works).
@@ -83,6 +96,16 @@ void PluginMultiScaleBody::initParameter(uint32_t index, Parameter& p){
         case kParamDamper: p.name="Damper"; p.symbol="damper"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamInharm: p.name="Inharm"; p.symbol="inharm"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamSlideMode: p.name="Slide Mode"; p.symbol="slidemode"; p.hints|=kParameterIsInteger; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamSupport: p.name="Support"; p.symbol="support"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamHoldDamp: p.name="Hold Damp"; p.symbol="holddamp"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamResMorph: p.name="Resolution"; p.symbol="resmorph"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamMorphTarget: p.name="Morph Target"; p.symbol="morphtarget"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamMorphAmt: p.name="Morph"; p.symbol="morph"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamMaterial: p.name="Material"; p.symbol="material"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamRayleighA: p.name="Rayl A"; p.symbol="rayla"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamRayleighB: p.name="Rayl B"; p.symbol="raylb"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamEcoMode: p.name="Eco"; p.symbol="eco"; p.hints|=kParameterIsBoolean|kParameterIsInteger; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamEcoBudget: p.name="Eco Budget"; p.symbol="ecobudget"; p.ranges.def=0.5f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         default:
             if(index>=kParamBandDecay0 && index<=kParamBandDecay15){
                 int band=index-kParamBandDecay0;
@@ -145,6 +168,25 @@ void PluginMultiScaleBody::setParameterValue(uint32_t idx,float v){
             paramBase_[idx]=(float)m*0.5f;
             engine_.setSlideMode(m);
             break; }
+        case kParamSupport: engine_.setSupport(v); break;
+        case kParamHoldDamp: engine_.setHoldDamp(v); break;
+        case kParamResMorph: engine_.setResMorph(v); break;
+        case kParamMorphTarget: {
+            const int t=std::clamp((int)std::lround(v*(float)(modal::kNumPresets-1)),0,modal::kNumPresets-1);
+            paramBase_[idx]=(float)t/(float)(modal::kNumPresets-1);
+            engine_.setMorphTarget(t);
+            break; }
+        case kParamMorphAmt: engine_.setMorphAmt(v); break;
+        case kParamMaterial: {
+            const int nm=modal::MultiScaleBodyEngine::kNumMaterials;
+            const int m=std::clamp((int)std::lround(v*(float)(nm-1)),0,nm-1);
+            paramBase_[idx]=(float)m/(float)(nm-1);
+            engine_.setMaterial(m);
+            break; }
+        case kParamRayleighA: engine_.setRayleigh(v,paramBase_[kParamRayleighB]); break;
+        case kParamRayleighB: engine_.setRayleigh(paramBase_[kParamRayleighA],v); break;
+        case kParamEcoMode: engine_.setEco(v>0.5f,paramBase_[kParamEcoBudget]); break;
+        case kParamEcoBudget: engine_.setEco(paramBase_[kParamEcoMode]>0.5f,v); break;
         default:
             if(idx>=kParamBandDecay0 && idx<=kParamBandDecay15){
                 int band=idx-kParamBandDecay0;
@@ -185,6 +227,14 @@ void PluginMultiScaleBody::sampleRateChanged(double sr){
     engine_.setInharmSpread(paramBase_[kParamInharm]);
     engine_.setSlideMode((int)std::lround(paramBase_[kParamSlideMode]*2.f));
     for(int i=0;i<16;++i) engine_.setBandDecayTrim(i, bandDecayCurve(paramBase_[kParamBandDecay0+i]));
+    engine_.setSupport(paramBase_[kParamSupport]);
+    engine_.setHoldDamp(paramBase_[kParamHoldDamp]);
+    engine_.setResMorph(paramBase_[kParamResMorph]);
+    engine_.setMorphTarget((int)std::lround(paramBase_[kParamMorphTarget]*(float)(modal::kNumPresets-1)));
+    engine_.setMorphAmt(paramBase_[kParamMorphAmt]);
+    engine_.setMaterial((int)std::lround(paramBase_[kParamMaterial]*(float)(modal::MultiScaleBodyEngine::kNumMaterials-1)));
+    engine_.setRayleigh(paramBase_[kParamRayleighA], paramBase_[kParamRayleighB]);
+    engine_.setEco(paramBase_[kParamEcoMode]>0.5f, paramBase_[kParamEcoBudget]);
     if(!scaleTxt_.empty()) engine_.setTuning(scaleRatios_, scaleActive_); // survives SR change
 #if DISTRHO_PLUGIN_WANT_LATENCY
     setLatency(engine_.limiterLatency());

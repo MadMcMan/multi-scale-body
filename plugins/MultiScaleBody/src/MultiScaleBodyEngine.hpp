@@ -172,6 +172,10 @@ struct Voice {
     // per-mode output multiplier cached at coefficient recompute. 1.0 when
     // inactive — an exact unity multiply, bit-safe on every path.
     float  bendTilt[kMaxModes]{};
+    // wave-3 (idea 6): strike-position-dependent damping factor, computed at
+    // noteOn from the hold-damping depth and the strike edge distance; applied
+    // live in recomputeVoiceCoeffs (d *= 1 + holdFactor). 0 = no hold damping.
+    float  holdFactor=0.f;
 };
 class MultiScaleBodyEngine {
 public:
@@ -226,6 +230,49 @@ public:
     float getInharmSpread() const { return inharm_; }
     int   getSlideMode() const { return slideMode_; }
     float getBandDecayTrim(int b) const { return bandDecay_[std::clamp(b,0,15)]; }
+    // --- wave-3 physical-model params (all default to identity/no-op) ------
+    // Boundary support 0..1 (idea 2): clamping stiffens the body — higher
+    // modes shift up quadratically with mode index (top +25% at full) and the
+    // decay rate rises. Decay component applies live to ringing voices.
+    void setSupport(float v);
+    // Hold-point damping depth 0..1 (idea 6): strikes nearer the body centre
+    // damp more (you deaden the belly by holding it); rim strikes are freer.
+    // Per-voice factor baked at noteOn from the strike position.
+    void setHoldDamp(float v);
+    // FEM-resolution morph 0..1 (idea 3): interpolates each mode's frequency
+    // and decay between the committed 4^3 bake and the new 8^3 fine bake
+    // (ModalData::fineFreq/fineDecay). 0 = committed tables, bit-identical.
+    void setResMorph(float v);
+    // Body morphing (idea 4): crossfades frequencies, decays and strike
+    // gains toward another baked body (modal parameter tracking for
+    // shape-changing objects). Applies to newly struck notes.
+    void setMorphTarget(int presetIndex);
+    void setMorphAmt(float v);
+    // Material physics editor (idea 9): rescales the whole modal set by
+    // sqrt((E/rho)_mat / (E/rho)_body). Index 0 = the body's own material
+    // (frequency multiplier EXACTLY 1.0).
+    void setMaterial(int matIndex);
+    // Rayleigh damping law (idea 1, paper C = alpha*M + beta*K): per-mode
+    // decay += 0.5*(alpha + beta*omega^2). alpha = rayA^2*10, beta =
+    // rayB^2*6.3e-6. Applied live; (0,0) = identity.
+    void setRayleigh(float rayA, float rayB);
+    // Scene-adaptive resolution (ideas 7+8): eco mode caps each voice's mode
+    // count to (totalModeBudget / activeVoices) at noteOn — the paper's
+    // "resolution adapted to the number of sounding objects".
+    void setEco(bool on, float budget01);
+    float getSupport() const { return support_; }
+    float getResMorph() const { return resMorph_; }
+    float getMorphAmt() const { return morphAmt_; }
+    int   getMorphTarget() const { return morphTarget_; }
+    int   getMaterial() const { return material_; }
+    float getRayleighA() const { return rayA_; }
+    float getRayleighB() const { return rayB_; }
+    bool  getEcoMode() const { return ecoMode_; }
+    // wave-3 shared body-table helpers (used by noteOn and the IR bake so the
+    // reverb send tracks the current physical model)
+    float bodyFreq(const modal::PresetData& p, int i, int n) const;
+    float bodyDecay(const modal::PresetData& p, int i, int n) const;
+    float holdFactorAt(float sx, float sy) const;
     // pitch bend per MIDI channel (MPE)
     void setPitchBend(int channel, float semitones); // -12..+12
     // MPE per-note pressure: member channels (1..15) latch the latest
@@ -275,6 +322,7 @@ public:
     float contactTransientPeak() const { return transPeak_; }
     void recomputeVoiceCoeffs(Voice& v);
     void interpolateGainsFor(float* outGain,float sx,float sy) const;
+    void interpolateGainsFor(float* outGain,float sx,float sy,int preset) const;
     static float cubicInterp(float p0,float p1,float p2,float p3,float t);
     void beginIrBake();   // incremental RT-safe baking: a few modes per block
     bool stepIrBake(int budgetModes); // returns true when the IR is complete
@@ -356,6 +404,51 @@ public:
     bool  tuningActive_=false;
     float noteRatio_[128]={};
     void  applyFeltRemap();             // recompute felt_ + active voice coeffs
+    // --- wave-3 physical-model state (identity-safe defaults) --------------
+    float support_=0.f;                 // boundary clamp 0..1 (freq at noteOn, decay live)
+    float holdDamp_=0.f;                // hold-point damping depth (per-voice at noteOn)
+    float resMorph_=0.f;                // 4^3 -> 8^3 FEM resolution morph
+    int   morphTarget_=0;               // target body preset index
+    float morphAmt_=0.f;                // body crossfade amount
+    int   material_=0;                  // material preset (0 = body default)
+    float materialFreqMul_=1.f;         // sqrt((E/rho)_mat / (E/rho)_body)
+    float rayA_=0.f, rayB_=0.f;         // Rayleigh alpha/beta knob values (raw 0..1)
+    bool  ecoMode_=false;
+    float ecoBudgetNorm_=0.5f;          // 0..1 -> total ringing-mode budget
+    int   ecoTotal_=512;                // derived budget (mode units)
+    // wave-3 tuning constants (keep in sync with the bake script material law)
+    inline static constexpr float kSupFreqTop = 0.25f; // top-mode freq lift at full support
+    inline static constexpr float kSupDecay   = 0.5f;  // decay-rate multiplier at full support
+    inline static constexpr float kHoldDamp   = 2.0f;  // max hold damping rate multiplier
+    inline static constexpr double kRayAlphaMax = 10.0;   // alpha 1/s per 0.5*alpha
+    inline static constexpr double kRayBetaMax  = 6.3e-6; // beta s per 0.5*beta*w^2
+    // Material presets (idea 9): name, Young modulus (Pa), density (kg/m^3).
+    // freq_material/freq_body = sqrt((E/rho)_mat / (E/rho)_body), the paper's
+    // material-tuning relation (Sec 3.3 aluminium/pine parameterisations).
+    struct MaterialDef { const char* name; double E; double rho; };
+    inline static constexpr MaterialDef kMaterials[11] = {
+        {"DEFAULT",   0.0,     0.0},
+        {"ALUMINIUM", 69e9, 2700.0},
+        {"STEEL",   200e9, 7850.0},
+        {"BRONZE",  110e9, 8700.0},
+        {"PINE",     12e9,  750.0},
+        {"ROSEWOOD", 14e9,  850.0},
+        {"MAHOGANY", 9e9,   650.0},
+        {"GLASS",    72e9, 2500.0},
+        {"BRASS",   105e9, 8800.0},
+        {"TITANIUM",116e9, 4500.0},
+        {"CARBON",  150e9, 1600.0},
+    };
+    inline static constexpr int kNumMaterials = 11;
+    // Per-body base (E,rho) — mirrors tools/modal_bake.py PRESETS in order,
+    // so DEFAULT (material_==0) reproduces the body's own material exactly.
+    struct BodyMat { double E; double rho; };
+    inline static constexpr BodyMat kBodyMat[kNumPresets] = {
+        {69e9,2700},{9e9,600},{200e9,7850},{12e9,400},{69e9,2700},{110e9,8500},
+        {200e9,7850},{2e9,1100},{105e9,8800},{72e9,2500},{200e9,7850},{110e9,8600},
+        {200e9,7850},{9e9,650},{14e9,850},{105e9,8700},{200e9,7850},{200e9,7850}
+    };
+    void updateMaterialMul();           // material_ -> materialFreqMul_
     // ~20ms one-pole smoothing for params consumed raw in the sample loop (width/wet/exciter)
     float widthCur_=0.3f, wetCur_=0.f, exMixCur_=0.f;
     float rtSmCoef_=0.0075f;

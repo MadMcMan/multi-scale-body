@@ -147,3 +147,28 @@ Verified against `paper_47.md` (Eq. 1 + prose; several forms are RECONSTRUCTED p
 - Right-click catcher (`MultiScaleBodyLVGLWidget`) — knob hit starts MIDI learn (state `learn`), anywhere else cancels; learn overlay is a full-screen shield, closed by any click or by the first parameterChanged after the binding.
 - Keyboard header: `SCALE:` status + EDIT button opening the tuning editor — an EDO selector (5/7/10/12/15/17/19/22/24/31/41/53/72, applied on selection) plus a LOAD .SCL... Windows file dialog and a CLEAR button (state `scale`); the editor generates the .scl text for EDOs client-side.
 - `rebuildForScale` now snapshots/restores paramCache so knob positions survive zoom (DPF never re-sends params on resize).
+## 12. Wave-3 Physical-Model Wave (10 features)
+
+### New input parameters (all identity-safe defaults; golden md5 `f509d7f…` unchanged)
+
+| Param | Symbol | Norm range | Default | Meaning |
+|---|---|---|---|---|
+| Support | `support` | 0..1 | 0 | Boundary clamp: mode freq ×(1+0.25·(i/(n−1))²), decay ×1.5 at full; decay live, freq at noteOn |
+| Hold Damp | `holddamp` | 0..1 | 0 | Position-dependent damping: per-voice factor 2·k·(1−edge), belly strikes damp most |
+| Resolution | `resmorph` | 0..1 | 0 | FEM-resolution morph: lerp freq/decay between committed 4³ bake and new 8³ `fineFreq/fineDecay` |
+| Morph Target | `morphtarget` | 0..1 (snapped 0..17) | 0 | Target body for modal crossfade |
+| Morph | `morph` | 0..1 | 0 | Crossfade freq/decay/gains toward the target body (target index clamps to target n) |
+| Material | `material` | 0..1 (snapped 0..10) | 0 | 0 = body default (exact unity); else √((E/ρ)ₘₐₜ/(E/ρ)ᵦₒₔᵧ) across 10 presets, refreshed on preset change |
+| Rayl A | `rayla` | 0..1 | 0 | Rayleigh α = A²·10 (1/s), additive per-mode rate += ½(α+βω²) |
+| Rayl B | `raylb` | 0..1 | 0 | Rayleigh β = B²·6.3e-6 (s), frequency-dependent damping, live |
+| Eco | `eco` | 0..1 (bool) | 0 | Scene-adaptive resolution on/off |
+| Eco Budget | `ecobudget` | 0..1 | 0.5 | Total ringing-mode budget 64..960; each voice takes min(modes, max(8, budget/voices)) |
+
+### Engine contracts
+
+- **Identity gates**: support/hold/res/morph/material/rayleigh/eco branches all skip at defaults; `materialFreqMul_==1.f` skips the multiply; `bendTilt` unity convention kept.
+- **noteOn baking** (new notes only, both mono + poly paths + IR bake): `bodyFreq`/`bodyDecay` compose res-morph → body-morph (index-clamped) → support stretch → material rescale; morph blends strike gains via a preset-selectable `interpolateGainsFor` overload; hold factor from strike edge; eco share from live voice count.
+- **Live in `recomputeVoiceCoeffs`**: support decay ×(1+0.5·s), hold ×(1+factor), Rayleigh absolute term; `setSupport`/`setRayleigh` recompute active voices; `setPreset` refreshes `materialFreqMul_`.
+- **UI mirrors** (DAMPING card, scope preview, spectrum preview, MODE MAP, disc heatmap) apply the same morph/res/support/hold/rayleigh math so idle panels never lie; node-focus overlay shows a single mode's |gain| map with morph blend; MODE MAP bars are clickable focus targets.
+- **Recorder** is UI-local (512-point path, one strike per 33 ms tick, velocity from gesture speed); playback releases cleanly and stops on rebuild.
+

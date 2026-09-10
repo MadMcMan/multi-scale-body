@@ -29,7 +29,14 @@ VST3 · CLAP · LV2 · JACK standalone (DPF), with an LVGL-based UI.
 - **Inharmonicity**: one knob stretches partials from the baked pure ratios toward bell-like quadratic spacing
 - **MIDI learn**: right-click any knob → move a CC on channel 0 → the binding saves with the patch
 - **MPE slide routing**: Slide mode routes per-channel pitch bend to classic whole-voice bend (default), per-mode dispersion bend, or a per-voice brightness macro
+- **Physical model** (MODEL button in the preset row): Rayleigh damping law (αM/βK per the paper's C = αM + βK), boundary support (clamped edge stiffens highs + damps), FEM-resolution morph (4³→8³ baked tables), body morphing between baked bodies, material physics rescale (√(E/ρ) per material), and scene-adaptive ECO mode budget
+- **Node mapper**: click any MODE MAP bar to overlay that mode's |gain| map on the strike disc — its vibration nodes read as gaps, so striking the gaps mutes that partial
+- **Motion recorder**: REC captures the drag path on the strike disc, PLAY replays it as a timed strike sequence with velocity from gesture speed, X clears
 - **Live visuals**: 16-band spectrum, decay scope, mode spectrum chart, on-screen keyboard
+
+### Physical model (MODEL panel)
+
+The MODEL panel hosts the paper-grounded extensions. Rayleigh sliders add the paper's damping law on top of the baked decays: per-mode rate += ½(α + βω²) with α = A²·10, β = B²·6.3e-6. Support clamps the edge: modes stretch up quadratically (top +25% at full) and tails damp 1.5×; the same knob drives live tails. Hold Damp deadens strikes near the belly (position-dependent damping, the paper's named gap). Resolution morphs each body between its committed 4³ bake and the new 8³ fine bake (`ModalData::fineFreq/fineDecay`, merged by `tools/merge_fine.py` without touching coarse numbers). Body morph crossfades frequencies, decays and strike gains toward any other baked body (target index clamps to the target's mode count). Material rescales the whole modal set by √((E/ρ)ₘₐₜ/(E/ρ)ᵦₒₔᵧ) across 10 presets (DEFAULT = the body's own material, exact unity) and follows preset changes. ECO caps each voice's mode count to (budget ÷ live voices) at noteOn — the paper's "resolution adapted to the number of sounding objects". All ten default to identity; the golden blob is unchanged.
 
 ### Bow / friction excitation
 

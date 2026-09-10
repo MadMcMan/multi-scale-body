@@ -40,6 +40,17 @@ public:
         kParamBandDecay4,kParamBandDecay5,kParamBandDecay6,kParamBandDecay7,
         kParamBandDecay8,kParamBandDecay9,kParamBandDecay10,kParamBandDecay11,
         kParamBandDecay12,kParamBandDecay13,kParamBandDecay14,kParamBandDecay15,
+        // wave-3 physical model (ideas 1/2/4/6/7/8/9/10)
+        kParamSupport,        // boundary support 0..1 (clamped edge stiffens + damps)
+        kParamHoldDamp,       // hold-point damping depth 0..1 (centre strikes damp more)
+        kParamResMorph,       // FEM-resolution morph 0..1 (4^3 -> 8^3 fine tables)
+        kParamMorphTarget,    // 0..1 body-morph target preset (normalized, like body)
+        kParamMorphAmt,       // 0..1 crossfade toward the target body
+        kParamMaterial,       // 0..1 material preset (0 = body default)
+        kParamRayleighA,      // 0..1 alpha mass damping (Rayleigh C = aM + bK)
+        kParamRayleighB,      // 0..1 beta stiffness damping
+        kParamEcoMode,        // 0/1 scene-adaptive per-voice mode budget
+        kParamEcoBudget,      // 0..1 total ringing-mode budget (64..960)
         // outputs (DSP -> UI metering; never automated, never serialized)
         kParamOutLevel,kParamOutBand0,kParamOutBand1,kParamOutBand2,kParamOutBand3,
         kParamOutBand4,kParamOutBand5,kParamOutBand6,kParamOutBand7,kParamOutBand8,
