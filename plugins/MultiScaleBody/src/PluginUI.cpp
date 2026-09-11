@@ -127,7 +127,7 @@ protected:
 //      (header title cell, preset info column, analysis column width).
 //   3. Painters derive geometry from the same lay:: constants as builders.
 //   4. Scrolling is disabled on every container; the whole plate provably fits
-//      s = min(w/1440, h/860) because every region sums exactly to the base
+//      s = min(w/1440, h/990) because every region sums exactly to the base
 //      budget (see the arithmetic comments in UICommon.hpp / buildUI below).
 // Direction: MACHINED PLATE / INDUSTRIAL AMBER / TACTILE - warm true-black
 // chassis, one amber accent that only ever means value or signal, hero = the
@@ -304,11 +304,12 @@ public:
             fGotLiveViz=true; fLiveAge=0;
             return;
         }
-        // A real (non-metering) parameter just moved: if a MIDI-lean overlay is
-        // open, this is the learned CC binding it was waiting for (the target
-        // param was set by the plugin's run()). The shield blocks knob drags,
-        // so it cannot be a false positive.
-        if(fLearnOverlay) closeLearnOverlay();
+        // A real (non-metering) parameter just moved. The learn chip is
+        // non-blocking, so only the armed target counts as a landed binding.
+        if(fLearnParam>=0 && i==(uint32_t)fLearnParam){
+            fLearnParam=-1;
+            if(fLearnChip) lv_obj_add_flag(fLearnChip,LV_OBJ_FLAG_HIDDEN);
+        }
         if(i<PluginMultiScaleBody::kParameterCount){ paramCache[i]=v; syncParamWidget(i,v);
             if(i==PluginMultiScaleBody::kParamStrikeX || i==PluginMultiScaleBody::kParamStrikeY) updateStrikeMarker();
             if(i==PluginMultiScaleBody::kParamPreset){ syncPresetDropdown(v); if(bodySubLabel) updateBodyInfo(); updateBodyPreview(); }
@@ -533,11 +534,10 @@ private:
         fDampMax=1.f; fDampPresetCache=-1; fDampDecayCache=-1.f; fDampBandSumCache=-1.f; fDampPhysSumCache=-1.f;
         for(int i=0;i<100;++i) fHeatDots[i]=nullptr; fHeatCount=0; fHeatDirty=true; fModeFocus=-1;
         fScrubMode=0; fScrubParamIdx=-1; fScrubToggle=nullptr;
-        fLearnOverlay=nullptr; fLearnParam=-1;
-        fScaleMenu=nullptr; fEdoDropdown=nullptr; fScaleLbl=nullptr;
+        fLearnChip=fLearnLbl=nullptr; fLearnParam=-1;
+        fEdoDropdown=nullptr; fScaleLbl=nullptr;
         fRecBtn=fPlayBtn=nullptr; fRecOn=false; fRecPlaying=false; fRecN=0; fRecCursor=0; fPlayHeld=false;
-        fModelMenu=fMaterialDd=fMorphDd=fEcoBtn=nullptr;
-        for(int i=0;i<7;++i) fModelArcs[i]=nullptr;
+        fMaterialDd=fMorphDd=fEcoBtn=nullptr;
         fMasterValLbl=nullptr; fStrikeChannel=0; fNextStrikeChannel=1; fLiveAge=1000; fRebuildInFlight=false;
     }
     static void previewGeometry(int& cell,int& gap,int& off){
@@ -1264,7 +1264,7 @@ private:
         ui->setState("arpon",on?"1":"0");
     }
     // ---- header zoom control (replaces the old FULLSCREEN path) -----------
-    // Window size = base plate * zoom%, so the 1440:860 aspect holds EXACTLY
+    // Window size = base plate * zoom%, so the 1440:990 aspect holds EXACTLY
     // at every step. Content rescale is owned by rebuildForScale(), driven by
     // the real LVGL surface - no double scaling, and repeated toggles are
     // drift-free because sizes are recomputed from BASE_W/BASE_H, never from
@@ -1315,100 +1315,39 @@ private:
     void handleRightClick(int wx,int wy){
         lv_obj_t* scr=lv_screen_active();
         if(!scr) return;
-        closeLearnOverlay();
-        closeScaleMenu();
         lv_point_t pt={ (lv_coord_t)wx, (lv_coord_t)wy };
         lv_obj_t* o=lv_indev_search_obj(scr,&pt);
         lv_obj_t* arc=o;
         while(arc && !lv_obj_check_type(arc,&lv_arc_class)) arc=lv_obj_get_parent(arc);
-        if(!arc) return;
+        if(!arc){ cancelLearn(); return; }   // empty space (or 2nd click) cancels
         const intptr_t ud=(intptr_t)lv_obj_get_user_data(arc);
-        if(ud<0 || ud>=(intptr_t)PluginMultiScaleBody::kNumInputParams) return;
-        openLearnOverlay((int)ud);
+        if(ud<0 || ud>=(intptr_t)PluginMultiScaleBody::kNumInputParams){ cancelLearn(); return; }
+        armLearn((int)ud);
     }
-    void openLearnOverlay(int pi){
-        lv_obj_t* scr=lv_screen_active();
-        if(!scr) return;
+    // wave-4: MIDI learn arms a non-blocking keyboard-header chip instead of
+    // a full-screen shield — knobs stay playable while waiting for the CC.
+    void armLearn(int pi){
         fLearnParam=pi;
-        // full-screen shield: any left-click cancels (LVGL bubbles CLICKED
-        // from the card up to the shield, so the handler fires either way)
-        fLearnOverlay=lv_obj_create(scr);
-        lv_obj_set_size(fLearnOverlay,lv_pct(100),lv_pct(100));
-        lv_obj_set_style_bg_color(fLearnOverlay,PLATE_BG,0);
-        lv_obj_set_style_bg_opa(fLearnOverlay,LV_OPA_70,0);
-        lv_obj_set_style_border_width(fLearnOverlay,0,0);
-        lv_obj_set_style_pad_all(fLearnOverlay,0,0);
-        lv_obj_set_layout(fLearnOverlay,LV_LAYOUT_NONE);
-        lv_obj_clear_flag(fLearnOverlay,LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_event_cb(fLearnOverlay,learnShieldCb,LV_EVENT_CLICKED,this);
-        lv_obj_t* card=makeCard(fLearnOverlay,scaled(360),scaled(128),scaled(8),LV_FLEX_ALIGN_CENTER);
-        lv_obj_align(card,LV_ALIGN_CENTER,0,0);
-        addLabel(card,"MIDI LEARN",getScaledSmallFont(),COL_HIGHLIGHT,2);
-        char b[96];
-        snprintf(b,sizeof(b),"Move a CC (channel 0) -> %s",parameterName((uint32_t)pi).c_str());
-        addLabel(card,b,getScaledMicroFont(),PLATE_TEXT,0);
-        addLabel(card,"Right-click again or click away to cancel",getScaledMicroFont(),PLATE_TEXT_DIM,0);
+        if(fLearnLbl){
+            char b[64];
+            snprintf(b,sizeof(b),"LEARN %s - move CC",parameterName((uint32_t)pi).c_str());
+            lv_label_set_text(fLearnLbl,b);
+        }
+        if(fLearnChip) lv_obj_clear_flag(fLearnChip,LV_OBJ_FLAG_HIDDEN);
         setState("learn", std::to_string(pi).c_str());   // arm the plugin
     }
-    static void learnShieldCb(lv_event_t* e){
+    static void learnCancelCb(lv_event_t* e){
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
-        if(ui) ui->closeLearnOverlay();
+        if(ui) ui->cancelLearn();
     }
-    void closeLearnOverlay(){
-        if(fLearnOverlay){ lv_obj_del(fLearnOverlay); fLearnOverlay=nullptr; }
+    void cancelLearn(){
+        if(fLearnChip) lv_obj_add_flag(fLearnChip,LV_OBJ_FLAG_HIDDEN);
         if(fLearnParam>=0){
             setState("learn","");   // disarm the plugin's pending learn
             fLearnParam=-1;
         }
     }
     // ---- idea 13: microtonal scale editor (EDO selectors + .scl file load) ----
-    void openScaleMenu(){
-        lv_obj_t* scr=lv_screen_active();
-        if(!scr || fScaleMenu) return;
-        fScaleMenu=lv_obj_create(scr);
-        lv_obj_set_size(fScaleMenu,lv_pct(100),lv_pct(100));
-        lv_obj_set_style_bg_color(fScaleMenu,PLATE_BG,0);
-        lv_obj_set_style_bg_opa(fScaleMenu,LV_OPA_80,0);
-        lv_obj_set_style_border_width(fScaleMenu,0,0);
-        lv_obj_set_style_pad_all(fScaleMenu,0,0);
-        lv_obj_set_layout(fScaleMenu,LV_LAYOUT_NONE);
-        lv_obj_clear_flag(fScaleMenu,LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_event_cb(fScaleMenu,scaleShieldCb,LV_EVENT_CLICKED,this);
-        lv_obj_t* card=makeCard(fScaleMenu,scaled(480),scaled(232),scaled(10),LV_FLEX_ALIGN_START);
-        lv_obj_align(card,LV_ALIGN_CENTER,0,0);
-        lv_obj_t* head=makeRow(card,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
-        addLabel(head,"MICROTONAL TUNING",getScaledSmallFont(),COL_HIGHLIGHT,2);
-        addLabel(head,scaleName(scaleTxtCached_).c_str(),getScaledMicroFont(),PLATE_AMBER,1);
-        // standard EDO selector: pick one, it applies immediately
-        lv_obj_t* edoRow=makeRow(card,lv_pct(100),scaled(30),scaled(10),LV_FLEX_ALIGN_CENTER);
-        addLabel(edoRow,"EDO",getScaledMicroFont(),PLATE_TEXT_DIM,1);
-        fEdoDropdown=lv_dropdown_create(edoRow);
-        lv_obj_set_flex_grow(fEdoDropdown,1);
-        {
-            const char* opts="5\n7\n10\n12\n15\n17\n19\n22\n24\n31\n41\n53\n72";
-            lv_dropdown_set_options(fEdoDropdown,opts);
-        }
-        lv_dropdown_set_selected(fEdoDropdown,3); // 12-EDO default
-        lv_obj_add_style(fEdoDropdown,&styles.compactSelectMain,0);
-        lv_obj_set_style_bg_color(fEdoDropdown,PLATE_WELL,0);
-        lv_obj_set_style_border_color(fEdoDropdown,PLATE_EDGE,0);
-        lv_obj_set_style_radius(fEdoDropdown,scaled(lay::RADIUS_SM),0);
-        {   // cap the list to ~8 rows so wheel scrolling engages
-            lv_obj_t* list=lv_dropdown_get_list(fEdoDropdown);
-            if(list) lv_obj_set_style_max_height(list,scaled(lay::DROPDOWN_MAX_ROWS*lay::DROPDOWN_ROW_H),0);
-        }
-        lv_group_remove_obj(fEdoDropdown); // wheel must not defocus/close the list
-        lv_obj_add_event_cb(fEdoDropdown,edoDropdownCb,LV_EVENT_VALUE_CHANGED,this);
-        if(autoEdoOf(scaleTxtCached_)>=0) lv_dropdown_set_selected(fEdoDropdown,autoEdoOf(scaleTxtCached_));
-        // file load / clear row
-        lv_obj_t* fileRow=makeRow(card,lv_pct(100),scaled(lay::BTN_H),scaled(10),LV_FLEX_ALIGN_CENTER);
-        lv_obj_t* load=addButton(fileRow,150,lay::BTN_H,"LOAD .SCL...",COL_HIGHLIGHT);
-        lv_obj_add_event_cb(load,scaleLoadCb,LV_EVENT_CLICKED,this);
-        lv_obj_t* clear=addButton(fileRow,96,lay::BTN_H,"CLEAR",PLATE_TEXT_MID);
-        lv_obj_add_event_cb(clear,scaleClearCb,LV_EVENT_CLICKED,this);
-        addLabel(card,"Degree 0 sits on middle C; Tune stays a global offset",
-                 getScaledMicroFont(),PLATE_TEXT_DIM,0);
-    }
     // N-EDO menu index for a cached scale text ("<n>-edo" name line), -1 if not
     int autoEdoOf(const std::string& txt) const {
         static const int kEdos[13]={5,7,10,12,15,17,19,22,24,31,41,53,72};
@@ -1443,14 +1382,6 @@ private:
             if(idx>=0) lv_dropdown_set_selected(ui->fEdoDropdown,idx);
         }
     }
-    static void scaleBtnCb(lv_event_t* e){
-        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
-        if(ui) ui->openScaleMenu();
-    }
-    static void scaleShieldCb(lv_event_t* e){
-        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
-        if(ui) ui->closeScaleMenu();
-    }
     static void scaleClearCb(lv_event_t* e){
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
         if(!ui) return;
@@ -1458,104 +1389,6 @@ private:
         ui->setState("scale","");
         ui->updateScaleLabel();
         if(ui->fEdoDropdown) lv_dropdown_set_selected(ui->fEdoDropdown,3); // 12-EDO
-    }
-    void closeScaleMenu(){
-        if(fScaleMenu){ lv_obj_del(fScaleMenu); fScaleMenu=nullptr; }
-        fEdoDropdown=nullptr;
-    }
-    // ---- wave-3: MODEL panel (physical-model knobs/selects) ------------------
-    // On-demand overlay like the scale editor: built on open, deleted on
-    // close (panel knob arcs are tracked in fModelArcs and unregistered from
-    void addModelKnob(lv_obj_t* grid,uint32_t pi,int slot){
-        ArcVisualSpec spec=normalArcSpec();
-        spec.containerW=scaled(92); spec.containerH=scaled(74); spec.arcSize=scaled(44);
-        spec.capInset=7; spec.needleTopOffset=2; spec.needleBottomInset=3;
-        lv_obj_t* arc=UIWidgets::createArcKnob(grid,pi,this,styles,spec);
-        lv_obj_add_event_cb(arc,valueFormatCb,LV_EVENT_ALL,this);
-        widgets[pi]=arc;
-        fModelArcs[slot]=arc;
-        lv_obj_t* cont=lv_obj_get_parent(arc);
-        lv_obj_t* lbl=cont?lv_obj_get_child(cont,lv_obj_get_child_count(cont)-1):nullptr;
-        if(lbl&&lv_obj_check_type(lbl,&lv_label_class)){
-            char b[24];
-            formatParamValue(pi,paramCache[pi],b,sizeof(b));
-            lv_label_set_text(lbl,b);
-        }
-    }
-    void openModelPanel(){
-        lv_obj_t* scr=lv_screen_active();
-        if(!scr||fModelMenu) return;
-        using P=PluginMultiScaleBody;
-        fModelMenu=lv_obj_create(scr);
-        lv_obj_set_size(fModelMenu,lv_pct(100),lv_pct(100));
-        lv_obj_set_style_bg_color(fModelMenu,PLATE_BG,0);
-        lv_obj_set_style_bg_opa(fModelMenu,LV_OPA_80,0);
-        lv_obj_set_style_border_width(fModelMenu,0,0);
-        lv_obj_set_style_pad_all(fModelMenu,0,0);
-        lv_obj_set_layout(fModelMenu,LV_LAYOUT_NONE);
-        lv_obj_clear_flag(fModelMenu,LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_event_cb(fModelMenu,modelShieldCb,LV_EVENT_CLICKED,this);
-        lv_obj_t* card=makeCard(fModelMenu,scaled(560),scaled(340),scaled(8),LV_FLEX_ALIGN_START);
-        lv_obj_align(card,LV_ALIGN_CENTER,0,0);
-        lv_obj_t* head=makeRow(card,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
-        addLabel(head,"PHYSICAL MODEL",getScaledSmallFont(),COL_HIGHLIGHT,2);
-        addLabel(head,"paper-47 extensions",getScaledMicroFont(),PLATE_TEXT_DIM,1);
-        lv_obj_t* row1=makeRow(card,lv_pct(100),scaled(74),scaled(8),LV_FLEX_ALIGN_CENTER);
-        addModelKnob(row1,P::kParamSupport,0);
-        addModelKnob(row1,P::kParamHoldDamp,1);
-        addModelKnob(row1,P::kParamResMorph,2);
-        addModelKnob(row1,P::kParamMorphAmt,3);
-        lv_obj_t* row2=makeRow(card,lv_pct(100),scaled(74),scaled(8),LV_FLEX_ALIGN_CENTER);
-        addModelKnob(row2,P::kParamRayleighA,4);
-        addModelKnob(row2,P::kParamRayleighB,5);
-        addModelKnob(row2,P::kParamEcoBudget,6);
-        lv_obj_t* selRow=makeRow(card,lv_pct(100),scaled(30),scaled(8),LV_FLEX_ALIGN_CENTER);
-        fMaterialDd=lv_dropdown_create(selRow);
-        lv_dropdown_set_options(fMaterialDd,"DEFAULT\nALUMINIUM\nSTEEL\nBRONZE\nPINE\nROSEWOOD\nMAHOGANY\nGLASS\nBRASS\nTITANIUM\nCARBON");
-        lv_dropdown_set_selected(fMaterialDd,std::clamp((int)std::lround(paramCache[P::kParamMaterial]*10.f),0,10));
-        lv_obj_set_width(fMaterialDd,scaled(170));
-        lv_obj_add_style(fMaterialDd,&styles.compactSelectMain,0);
-        lv_obj_set_style_bg_color(fMaterialDd,PLATE_WELL,0);
-        lv_obj_set_style_border_color(fMaterialDd,PLATE_EDGE,0);
-        lv_obj_set_style_radius(fMaterialDd,scaled(lay::RADIUS_SM),0);
-        { lv_obj_t* list=lv_dropdown_get_list(fMaterialDd);
-          if(list){ lv_obj_add_style(list,&styles.compactSelectListMain,0);
-                    lv_obj_set_style_max_height(list,scaled(lay::DROPDOWN_MAX_ROWS*lay::DROPDOWN_ROW_H),0); } }
-        lv_group_remove_obj(fMaterialDd);
-        lv_obj_add_event_cb(fMaterialDd,materialDdCb,LV_EVENT_VALUE_CHANGED,this);
-        fMorphDd=lv_dropdown_create(selRow);
-        { std::string opts; for(int i=0;i<modal::kNumPresets;++i){ if(i) opts+="\n"; opts+=modal::kPresets[i].name; }
-          lv_dropdown_set_options(fMorphDd,opts.c_str()); }
-        lv_dropdown_set_selected(fMorphDd,std::clamp((int)std::lround(paramCache[P::kParamMorphTarget]*(float)(modal::kNumPresets-1)),0,modal::kNumPresets-1));
-        lv_obj_set_width(fMorphDd,scaled(170));
-        lv_obj_add_style(fMorphDd,&styles.compactSelectMain,0);
-        lv_obj_set_style_bg_color(fMorphDd,PLATE_WELL,0);
-        lv_obj_set_style_border_color(fMorphDd,PLATE_EDGE,0);
-        lv_obj_set_style_radius(fMorphDd,scaled(lay::RADIUS_SM),0);
-        { lv_obj_t* list=lv_dropdown_get_list(fMorphDd);
-          if(list){ lv_obj_add_style(list,&styles.compactSelectListMain,0);
-                    lv_obj_set_style_max_height(list,scaled(lay::DROPDOWN_MAX_ROWS*lay::DROPDOWN_ROW_H),0); } }
-        lv_group_remove_obj(fMorphDd);
-        lv_obj_add_event_cb(fMorphDd,morphDdCb,LV_EVENT_VALUE_CHANGED,this);
-        fEcoBtn=lv_btn_create(selRow);
-        lv_obj_set_size(fEcoBtn,scaled(76),scaled(lay::BTN_H));
-        styles.applyToggleButton(fEcoBtn,paramCache[P::kParamEcoMode]>0.5f);
-        lv_obj_set_style_radius(fEcoBtn,scaled(lay::RADIUS_SM),0);
-        lv_obj_set_style_pad_all(fEcoBtn,0,0);
-        lv_obj_add_event_cb(fEcoBtn,ecoBtnCb,LV_EVENT_VALUE_CHANGED,this);
-        lv_obj_t* elbl=lv_label_create(fEcoBtn); lv_label_set_text(elbl,"ECO"); lv_obj_center(elbl);
-        addLabel(card,"Support clamps the edge - Hold damps the belly - Resolution morphs 4^3 to 8^3 - Morph blends bodies",
-                 getScaledMicroFont(),PLATE_TEXT_DIM,0);
-    }
-    static void modelBtnCb(lv_event_t* e){
-        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
-        if(!ui) return;
-        if(ui->fModelMenu) ui->closeModelPanel();
-        else ui->openModelPanel();
-    }
-    static void modelShieldCb(lv_event_t* e){
-        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
-        if(ui) ui->closeModelPanel();
     }
     static void materialDdCb(lv_event_t* e){
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
@@ -1585,19 +1418,6 @@ private:
         ui->editParameter(PluginMultiScaleBody::kParamEcoMode,true);
         ui->setParamValue(PluginMultiScaleBody::kParamEcoMode,on?1.f:0.f);
         ui->editParameter(PluginMultiScaleBody::kParamEcoMode,false);
-    }
-    void closeModelPanel(){
-        if(!fModelMenu) return;
-        using P=PluginMultiScaleBody;
-        for(int s=0;s<7;++s){
-            if(fModelArcs[s]){
-                for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount;++i)
-                    if(widgets[i]==fModelArcs[s]) widgets[i]=nullptr;
-                fModelArcs[s]=nullptr;
-            }
-        }
-        lv_obj_del(fModelMenu); fModelMenu=nullptr;
-        fMaterialDd=fMorphDd=fEcoBtn=nullptr;
     }
     // ---- spectrum scrub target (idea 2): GAIN vs DECAY ---------------------
     static void scrubToggleCb(lv_event_t* e){
@@ -1802,16 +1622,41 @@ private:
         lv_obj_t* kbHead=makeRow(kbContainer,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         lv_obj_t* kbTitle=addLabel(kbHead,"KEYBOARD  -  3 OCTAVES  -  CLICK TO AUDITION",getScaledMicroFont(),COL_HIGHLIGHT,2);
         lv_obj_set_style_text_opa(kbTitle,LV_OPA_80,0);
-        // idea 13: microtonal scale status + editor (middle of the head row)
-        lv_obj_t* scaleCluster=makeRow(kbHead,scaled(230),scaled(lay::BTN_H),scaled(8),LV_FLEX_ALIGN_CENTER);
+        // wave-4: scale status only (the tuning controls live inline now — no modal)
+        lv_obj_t* scaleCluster=makeRow(kbHead,scaled(150),scaled(lay::BTN_H),scaled(8),LV_FLEX_ALIGN_CENTER);
         fScaleLbl=addLabel(scaleCluster,"SCALE: 12-EDO",getScaledMicroFont(),PLATE_TEXT_DIM,1);
         {
             const char* sn=scaleName(scaleTxtCached_).c_str();
             char bu[48]; snprintf(bu,sizeof(bu),"SCALE: %s",sn);
             lv_label_set_text(fScaleLbl,bu);
         }
-        lv_obj_t* scaleBtn=addButton(scaleCluster,lay::RND_W,lay::BTN_H,"EDIT",PLATE_TEXT_MID);
-        lv_obj_add_event_cb(scaleBtn,scaleBtnCb,LV_EVENT_CLICKED,this);
+        // wave-4: tuning selects inline — EDO applies immediately, LOAD reads
+        // a .scl file, CLEAR restores 12-EDO (same handlers as the old menu)
+        lv_obj_t* selCluster=makeRow(kbHead,scaled(lay::KB_SEL_W),scaled(lay::BTN_H),scaled(8),LV_FLEX_ALIGN_CENTER);
+        fEdoDropdown=lv_dropdown_create(selCluster);
+        lv_dropdown_set_options(fEdoDropdown,"5\n7\n10\n12\n15\n17\n19\n22\n24\n31\n41\n53\n72");
+        lv_dropdown_set_selected(fEdoDropdown,3); // 12-EDO default
+        lv_obj_set_width(fEdoDropdown,scaled(lay::MODEL_EDO_W));
+        lv_obj_add_style(fEdoDropdown,&styles.compactSelectMain,0);
+        lv_obj_set_style_bg_color(fEdoDropdown,PLATE_WELL,0);
+        lv_obj_set_style_border_color(fEdoDropdown,PLATE_EDGE,0);
+        lv_obj_set_style_radius(fEdoDropdown,scaled(lay::RADIUS_SM),0);
+        { lv_obj_t* list=lv_dropdown_get_list(fEdoDropdown);
+          if(list){ lv_obj_add_style(list,&styles.compactSelectListMain,0);
+                    lv_obj_set_style_max_height(list,scaled(lay::DROPDOWN_MAX_ROWS*lay::DROPDOWN_ROW_H),0); } }
+        lv_group_remove_obj(fEdoDropdown);
+        lv_obj_add_event_cb(fEdoDropdown,edoDropdownCb,LV_EVENT_VALUE_CHANGED,this);
+        if(autoEdoOf(scaleTxtCached_)>=0) lv_dropdown_set_selected(fEdoDropdown,autoEdoOf(scaleTxtCached_));
+        lv_obj_t* sclLoad=addButton(selCluster,lay::MODEL_LOAD_W,lay::BTN_H,"LOAD .SCL",COL_HIGHLIGHT);
+        lv_obj_add_event_cb(sclLoad,scaleLoadCb,LV_EVENT_CLICKED,this);
+        lv_obj_t* sclClear=addButton(selCluster,lay::MODEL_CLEAR_W,lay::BTN_H,"CLEAR",PLATE_TEXT_MID);
+        lv_obj_add_event_cb(sclClear,scaleClearCb,LV_EVENT_CLICKED,this);
+        // wave-4: MIDI-learn status chip (non-blocking; replaces the modal shield)
+        fLearnChip=makeRow(kbHead,scaled(lay::LEARN_CHIP_W),scaled(lay::BTN_H),scaled(8),LV_FLEX_ALIGN_CENTER);
+        fLearnLbl=addLabel(fLearnChip,"LEARN",getScaledMicroFont(),COL_HIGHLIGHT,1);
+        lv_obj_t* learnX=addButton(fLearnChip,28,lay::BTN_H,"X",PLATE_TEXT_MID);
+        lv_obj_add_event_cb(learnX,learnCancelCb,LV_EVENT_CLICKED,this);
+        lv_obj_add_flag(fLearnChip,LV_OBJ_FLAG_HIDDEN);
         // cluster width: ARP 46 + 6 + oct 28 + 6 + label 70 + 6 + oct 28 = 190
         lv_obj_t* octRow=makeRow(kbHead,scaled(190),scaled(lay::BTN_H),scaled(6));
         arpBtn=lv_btn_create(octRow);
@@ -1871,6 +1716,74 @@ private:
         updateKeyboardNotes();
     }
 
+    // ---- wave-4 PHYSICS strip (no modals) ----------------------------------
+    // Persistent full-width card between stage and keyboard: the 7 machined
+    // physics knobs + ECO toggle + material/morph dropdowns, all visible at
+    // once. Budget @s=1: 24 pad + 22 head + 6 + 72 knob row = 124 exact.
+    void stripKnob(lv_obj_t* row,uint32_t pi){
+        ArcVisualSpec spec=normalArcSpec();
+        spec.containerW=scaled(92); spec.containerH=scaled(lay::MODEL_KNOB_H); spec.arcSize=scaled(lay::MODEL_ARC);
+        spec.capInset=7; spec.needleTopOffset=2; spec.needleBottomInset=3;
+        lv_obj_t* arc=UIWidgets::createArcKnob(row,pi,this,styles,spec);
+        lv_obj_add_event_cb(arc,valueFormatCb,LV_EVENT_ALL,this);
+        widgets[pi]=arc;
+        lv_obj_t* cont=lv_obj_get_parent(arc);
+        lv_obj_t* lbl=cont?lv_obj_get_child(cont,lv_obj_get_child_count(cont)-1):nullptr;
+        if(lbl&&lv_obj_check_type(lbl,&lv_label_class)){
+            char b[24];
+            formatParamValue(pi,paramCache[pi],b,sizeof(b));
+            lv_label_set_text(lbl,b);
+        }
+    }
+    static void styleModelDropdown(MultiScaleBodyUI* ui,lv_obj_t* dd){
+        lv_obj_add_style(dd,&ui->styles.compactSelectMain,0);
+        lv_obj_set_style_bg_color(dd,PLATE_WELL,0);
+        lv_obj_set_style_border_color(dd,PLATE_EDGE,0);
+        lv_obj_set_style_radius(dd,scaled(lay::RADIUS_SM),0);
+        lv_obj_t* list=lv_dropdown_get_list(dd);
+        if(list){ lv_obj_add_style(list,&ui->styles.compactSelectListMain,0);
+                  lv_obj_set_style_max_height(list,scaled(lay::DROPDOWN_MAX_ROWS*lay::DROPDOWN_ROW_H),0); }
+        lv_group_remove_obj(dd);
+    }
+    void buildModelStrip(lv_obj_t* root){
+        using P=PluginMultiScaleBody;
+        lv_obj_t* strip=makeCard(root,lv_pct(100),scaled(lay::MODEL_STRIP_H),scaled(6),LV_FLEX_ALIGN_START);
+        lv_obj_t* head=makeRow(strip,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
+        addLabel(head,"PHYSICAL MODEL",getScaledSmallFont(),COL_HIGHLIGHT,2);
+        addLabel(head,"paper-47 extensions",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        lv_obj_t* row=makeRow(strip,lv_pct(100),scaled(lay::MODEL_KNOB_H),scaled(8),LV_FLEX_ALIGN_CENTER);
+        stripKnob(row,P::kParamSupport);
+        stripKnob(row,P::kParamHoldDamp);
+        stripKnob(row,P::kParamResMorph);
+        stripKnob(row,P::kParamMorphAmt);
+        stripKnob(row,P::kParamRayleighA);
+        stripKnob(row,P::kParamRayleighB);
+        stripKnob(row,P::kParamEcoBudget);
+        fEcoBtn=lv_btn_create(row);
+        lv_obj_set_size(fEcoBtn,scaled(lay::MODEL_ECO_W),scaled(lay::BTN_H));
+        styles.applyToggleButton(fEcoBtn,paramCache[P::kParamEcoMode]>0.5f);
+        lv_obj_set_style_radius(fEcoBtn,scaled(lay::RADIUS_SM),0);
+        lv_obj_set_style_pad_all(fEcoBtn,0,0);
+        lv_obj_add_event_cb(fEcoBtn,ecoBtnCb,LV_EVENT_VALUE_CHANGED,this);
+        lv_obj_t* elbl=lv_label_create(fEcoBtn); lv_label_set_text(elbl,"ECO"); lv_obj_center(elbl);
+        lv_obj_t* matCol=makeCol(row,scaled(lay::MODEL_SEL_W),scaled(lay::MODEL_KNOB_H),scaled(4),LV_FLEX_ALIGN_CENTER);
+        addLabel(matCol,"MATERIAL",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        fMaterialDd=lv_dropdown_create(matCol);
+        lv_dropdown_set_options(fMaterialDd,"DEFAULT\nALUMINIUM\nSTEEL\nBRONZE\nPINE\nROSEWOOD\nMAHOGANY\nGLASS\nBRASS\nTITANIUM\nCARBON");
+        lv_dropdown_set_selected(fMaterialDd,std::clamp((int)std::lround(paramCache[P::kParamMaterial]*10.f),0,10));
+        lv_obj_set_width(fMaterialDd,scaled(lay::MODEL_SEL_W));
+        styleModelDropdown(this,fMaterialDd);
+        lv_obj_add_event_cb(fMaterialDd,materialDdCb,LV_EVENT_VALUE_CHANGED,this);
+        lv_obj_t* morphCol=makeCol(row,scaled(lay::MODEL_SEL_W),scaled(lay::MODEL_KNOB_H),scaled(4),LV_FLEX_ALIGN_CENTER);
+        addLabel(morphCol,"MORPH TARGET",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        fMorphDd=lv_dropdown_create(morphCol);
+        { std::string opts; for(int i=0;i<modal::kNumPresets;++i){ if(i) opts+="\n"; opts+=modal::kPresets[i].name; }
+          lv_dropdown_set_options(fMorphDd,opts.c_str()); }
+        lv_dropdown_set_selected(fMorphDd,std::clamp((int)std::lround(paramCache[P::kParamMorphTarget]*(float)(modal::kNumPresets-1)),0,modal::kNumPresets-1));
+        lv_obj_set_width(fMorphDd,scaled(lay::MODEL_SEL_W));
+        styleModelDropdown(this,fMorphDd);
+        lv_obj_add_event_cb(fMorphDd,morphDdCb,LV_EVENT_VALUE_CHANGED,this);
+    }
     // ==== BUILD =============================================================
     // Layout hierarchy (matches Serum 2 main-view grammar, paper-faithful):
     //   ROOT  (PLATE_BG)
@@ -1879,8 +1792,9 @@ private:
     //   |   +-- LEFT  (4 dial groups: BODY/RESONATE/EXCITER/SPACE)
     //   |   +-- CENTER  (hero strike disc + preset row + spec strip)
     //   |   +-- RIGHT  (spectrum card + scope card)
-    //   +-- KEYBOARD  (octave + keys + ARP)
-    // vertical budget @s=1: 32 + 72 + 610 + 128 + 3*6 gaps = 860 (exact).
+    //   +-- PHYSICS  (wave-4: 7 machined knobs + ECO + material/morph selects)
+    //   +-- KEYBOARD  (octave + keys + ARP + tuning selects + learn chip)
+    // vertical budget @s=1: 32 + 72 + 24 + 610 + 124 + 128 = 990 (exact).
     void buildUI(lv_obj_t* parent=nullptr){
         lv_obj_t* surface=parent ? parent : lv_screen_active();
         if(!surface){ lv_display_t* d=lv_display_get_default(); if(d) surface=lv_display_get_screen_active(d); }
@@ -1891,7 +1805,7 @@ private:
         // User report (2026-09-06): "why when we zoom do we move the presets
         // and keyboard? dont do that". Root cause: the topbar/stage/keyboard
         // used to be DIRECT children of the flex SCREEN with lv_pct(100)
-        // width, so at any surface not exactly 1440:860 - a big zoom step
+        // width, so at any surface not exactly 1440:990 - a big zoom step
         // clamped to the monitor working area, or a free host resize - they
         // stretched to the FULL window width and re-centered / re-flowed
         // INDEPENDENT of the stage. The presets (top bar) and keyboard
@@ -2029,10 +1943,6 @@ private:
         lv_obj_add_event_cb(presetDropdown,dropdownCb,LV_EVENT_VALUE_CHANGED,this);
         lv_obj_add_event_cb(presetPrevBtn,presetArrowCb,LV_EVENT_CLICKED,this);
         lv_obj_add_event_cb(presetNextBtn,presetArrowCb,LV_EVENT_CLICKED,this);
-        // wave-3: MODEL opens the physical-model panel (support/hold/resolution/
-        // morph/material/rayleigh/eco) as an on-demand overlay like the scale editor
-        lv_obj_t* modelBtn=addButton(ddRow,64,24,"MODEL",COL_HIGHLIGHT);
-        lv_obj_add_event_cb(modelBtn,modelBtnCb,LV_EVENT_CLICKED,this);
         // R5: vertical divider between the preset browser and the master
         // cluster - second of three separators in the top bar so each zone
         // (brand | preset | master+zoom) reads as a distinct module.
@@ -2601,7 +2511,9 @@ private:
         for(int i=0;i<128;++i) lv_chart_set_next_value(scope,ss,0);
         fScopeChart=scope; fScopeSeries=(void*)ss; fScopeAreaSeries=(void*)ssArea;
 
-        // keyboard strip (full-width row under the stage)
+        // wave-4 PHYSICS strip (persistent, full-width, between stage + keyboard)
+        buildModelStrip(root);
+        // keyboard strip (full-width row under the physics strip)
         createKeyboard(root);
 
         // sync readouts now that all labels exist
@@ -3023,11 +2935,11 @@ private:
     int fScrubMode=0;
     int fScrubParamIdx=-1;
     lv_obj_t* fScrubToggle=nullptr;
-    // idea 15: MIDI-learn overlay (right-click knob -> bind next CC)
-    lv_obj_t* fLearnOverlay=nullptr;
+    // wave-4: MIDI-learn status chip (non-blocking; right-click knob -> bind next CC)
+    lv_obj_t* fLearnChip=nullptr;
+    lv_obj_t* fLearnLbl=nullptr;
     int fLearnParam=-1;
-    // idea 13: microtonal scale editor overlay + status label
-    lv_obj_t* fScaleMenu=nullptr;
+    // idea 13: microtonal scale status label (editor controls live inline now)
     lv_obj_t* fEdoDropdown=nullptr;
     lv_obj_t* fScaleLbl=nullptr;
     // wave-3 (idea 10): disc motion recorder (UI-local, not persisted)
@@ -3041,11 +2953,9 @@ private:
     int fRecCursor=0;
     int fPlayChannel=0;
     bool fPlayHeld=false;
-    // wave-3: MODEL panel (physical-model knobs/selects, built hidden)
-    lv_obj_t* fModelMenu=nullptr;
+    // wave-4: MODEL strip controls (persistent full-width card, no modal)
     lv_obj_t* fMaterialDd=nullptr;
     lv_obj_t* fMorphDd=nullptr;
-    lv_obj_t* fModelArcs[7]={};
     lv_obj_t* fEcoBtn=nullptr;
     std::string scaleTxtCached_;
 };

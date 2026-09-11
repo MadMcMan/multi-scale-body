@@ -86,10 +86,10 @@ public:
 #define SEC_EXCITER       lv_color_hex(0xF0A050)  // warm orange (excitation)
 #define SEC_SPACE         lv_color_hex(0x9F7AD3)  // cool purple (space)
 
-// === LAYOUT TOKENS — chassis arithmetic (base units @ 1440x860, pre-scale) ===
+// === LAYOUT TOKENS — chassis arithmetic (base units @ 1440x990, pre-scale) ===
 
 
-// === LAYOUT TOKENS — chassis arithmetic (base units @ 1440x860, pre-scale) ===
+// === LAYOUT TOKENS — chassis arithmetic (base units @ 1440x990, pre-scale) ===
 // Single source of truth for the deterministic grid. Every container in PluginUI.cpp
 // derives its size from these numbers via scaled(); painters read the same constants
 // the builders do, so nothing can assume a stale container size (the old body-preview
@@ -104,17 +104,31 @@ public:
 // Vertical budget, base scale (nav strip deleted - user call: status-only
 // M-row was pointless decoration; its 48px + one row gap flow into the
 // stage, and the root finally sums exact):
-//   2*PAD + HEADER_H + 3*ROW_GAP + STAGE_H + KB_STRIP_H
-//   = 32 + 72 + 18 + 610 + 128 = 860  (exact)
+// Vertical budget, base scale (wave-4: MODEL panel + scale editor un-modaled
+// into a persistent PHYSICS strip + keyboard select cluster, so the window
+// grows 860 -> 990; every region still sums exact):
+//   2*PAD + HEADER_H + 4*ROW_GAP + STAGE_H + MODEL_STRIP_H + KB_STRIP_H
+//   = 32 + 72 + 24 + 610 + 124 + 128 = 990  (exact)
 // Horizontal budget (stage inner = 1440-2*16 = 1408):
 //   LEFT_W + CENTER_W + RIGHT(grow) + 2*GUTTER = 392 + 480 + 516 + 20 = 1408  (exact)
 namespace lay {
-    constexpr int BASE_W = 1440, BASE_H = 860;
+    constexpr int BASE_W = 1440, BASE_H = 990;
     constexpr int PAD = 16;                      // chassis inset on all sides
     constexpr int ROW_GAP = 6;                   // vertical gap between regions
     constexpr int HEADER_H = 72;                 // identity bar: brand | preset | master | zoom
     constexpr int KB_STRIP_H = 128;              // 8 pad + 22 head + 6 gap + 80 keys + 8 pad (+4 slack)
-    constexpr int STAGE_H = BASE_H - 2 * PAD - HEADER_H - KB_STRIP_H - 3 * ROW_GAP;  // = 610
+    // wave-4 PHYSICS strip (no modals): 24 pad + 22 head + 6 + 72 knob row = 124.
+    // Knob row @s=1: 7 machined knobs x 92 + ECO 76 + 2 select mini-cols x 170
+    // + 4 x 8 gutters = 1132, centered in the 1384 inner width.
+    constexpr int MODEL_STRIP_H = 124;
+    constexpr int MODEL_KNOB_H = 72, MODEL_ARC = 46;   // compact machined knob
+    constexpr int MODEL_SEL_W = 170;             // material / morph dropdowns
+    constexpr int MODEL_ECO_W = 76;              // ECO toggle
+    // keyboard-header select cluster (EDO 110 + LOAD 130 + CLEAR 80 + 2 x 8)
+    constexpr int KB_SEL_W = 336;
+    constexpr int MODEL_EDO_W = 110, MODEL_LOAD_W = 130, MODEL_CLEAR_W = 80;
+    constexpr int LEARN_CHIP_W = 230;            // MIDI-learn status chip (hidden unless armed)
+    constexpr int STAGE_H = BASE_H - 2 * PAD - HEADER_H - KB_STRIP_H - MODEL_STRIP_H - 4 * ROW_GAP;  // = 610
     // Round-6: brand column widened 240 -> 300 so the fitted title never
     // truncates ("MULTI-SCALE B" clip at 240). Preset browser donates the 60.
     constexpr int KEY_GAP = 2;                   // keybed pitch gap (white keys)
@@ -172,7 +186,7 @@ namespace lay {
     constexpr int DOT = 8;                       // LFO pulse dot
     // header zoom stepper: [ - ] 100% [ + ]  (replaces the old FULLSCREEN button)
     constexpr int ZOOM_BTN = 24, ZOOM_LBL_W = 46, ZOOM_LBL_H = 30;
-    // zoom ladder in % of the 1440x860 base plate; +/- walks the ladder,
+    // zoom ladder in % of the 1440x990 base plate; +/- walks the ladder,
     // window keeps the base aspect EXACTLY at every step (w,h scale together)
     inline constexpr int ZOOM_STEPS[] = {50, 75, 100, 125, 150, 200};
     inline constexpr int ZOOM_STEP_COUNT = (int)(sizeof(ZOOM_STEPS) / sizeof(ZOOM_STEPS[0]));

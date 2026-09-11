@@ -171,4 +171,12 @@ Verified against `paper_47.md` (Eq. 1 + prose; several forms are RECONSTRUCTED p
 - **Live in `recomputeVoiceCoeffs`**: support decay ×(1+0.5·s), hold ×(1+factor), Rayleigh absolute term; `setSupport`/`setRayleigh` recompute active voices; `setPreset` refreshes `materialFreqMul_`.
 - **UI mirrors** (DAMPING card, scope preview, spectrum preview, MODE MAP, disc heatmap) apply the same morph/res/support/hold/rayleigh math so idle panels never lie; node-focus overlay shows a single mode's |gain| map with morph blend; MODE MAP bars are clickable focus targets.
 - **Recorder** is UI-local (512-point path, one strike per 33 ms tick, velocity from gesture speed); playback releases cleanly and stops on rebuild.
+## 13. Wave-4 No-Modal Redesign (one screen, 1440×990)
+
+- The 860px budget was provably full, so the window grows to 1440×990: a persistent PHYSICS strip (124px) sits between stage and keyboard; STAGE_H stays 610 and every column budget is untouched.
+- PHYSICS strip: 7 machined knobs (Support, Hold Damp, Resolution, Morph, Rayl A, Rayl B, Eco Budget) + ECO toggle + Material/Morph-Target dropdowns, all visible at once; the MODEL modal, its `fModelMenu`/`fModelArcs` members and the widgets[] unregister dance are deleted.
+- Scale editor un-modaled: EDO dropdown + LOAD .SCL + CLEAR live in the keyboard header next to the scale readout (same handlers, persistent dropdown member).
+- MIDI learn is non-blocking: no shield; a keyboard-header chip shows the armed target, knobs stay playable, and only the target param moving completes the bind (cancel via X or right-click elsewhere).
+- Harness follows the aspect: default capture 1440×990, zoom-step test uses the 150% step (2160×1485 exact — 125% would round .5px), arc-count comment updated (24 arcs).
+
 
