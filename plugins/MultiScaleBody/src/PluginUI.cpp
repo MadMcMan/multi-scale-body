@@ -247,6 +247,7 @@ public:
            || i==PluginMultiScaleBody::kParamResMorph || i==PluginMultiScaleBody::kParamMorphTarget
            || i==PluginMultiScaleBody::kParamMorphAmt || i==PluginMultiScaleBody::kParamRayleighA
            || i==PluginMultiScaleBody::kParamRayleighB
+           || i==PluginMultiScaleBody::kParamStrikeX || i==PluginMultiScaleBody::kParamStrikeY
            || (i>=PluginMultiScaleBody::kParamBandDecay0 && i<=PluginMultiScaleBody::kParamBandDecay15)) updateDampingDisplay();
         if(i==PluginMultiScaleBody::kParamVolume && fMasterValLbl){
             char b[24]; formatParamValue(PluginMultiScaleBody::kParamVolume,v,b,sizeof(b));
@@ -333,7 +334,8 @@ public:
                || i==PluginMultiScaleBody::kParamResMorph || i==PluginMultiScaleBody::kParamMorphTarget
                || i==PluginMultiScaleBody::kParamMorphAmt || i==PluginMultiScaleBody::kParamRayleighA
                || i==PluginMultiScaleBody::kParamRayleighB
-               || (i>=PluginMultiScaleBody::kParamBandDecay0 && i<=PluginMultiScaleBody::kParamBandDecay15)) updateDampingDisplay();
+               || i==PluginMultiScaleBody::kParamStrikeX || i==PluginMultiScaleBody::kParamStrikeY
+           || (i>=PluginMultiScaleBody::kParamBandDecay0 && i<=PluginMultiScaleBody::kParamBandDecay15)) updateDampingDisplay();
             if(i==PluginMultiScaleBody::kParamVolume && fMasterValLbl){
                 char b[24]; formatParamValue(PluginMultiScaleBody::kParamVolume,v,b,sizeof(b));
                 lv_label_set_text(fMasterValLbl,b);
@@ -580,7 +582,7 @@ private:
         if(hdrBodyVal){ char b[32]; snprintf(b,sizeof(b),"%s",pr.name); lv_label_set_text(hdrBodyVal,b); }
         if(hdrMatVal){ lv_label_set_text(hdrMatVal,mat); }
         if(hdrModeVal){ char b[16]; snprintf(b,sizeof(b),"%d",pr.n); lv_label_set_text(hdrModeVal,b); }
-        if(hdrF0Val){ char b[16]; snprintf(b,sizeof(b),"%.0f HZ",pr.freq[0]/(2*3.14159f)); lv_label_set_text(hdrF0Val,b); }
+        if(hdrF0Val){ char b[16]; snprintf(b,sizeof(b),"%.0f HZ",uiEffFreqHz(pr,0,idx,std::clamp((int)(8+paramCache[PluginMultiScaleBody::kParamModeCount]*120.f),8,pr.n))); lv_label_set_text(hdrF0Val,b); }
     }
     void updateBodyPreview(){
         if(!bodyPreview) return;
@@ -667,6 +669,38 @@ private:
     // (the lv_bar 0..1000 range). Gated by fDampPresetCache/fDampDecayCache
     // so a move of a non-decay param (e.g. a knob in the left bank) does
     // not re-walk the 128 modes. Bars with no modes (e.g. Bar preset at
+    // wave-4 (phys-visual mirror): the engine's effective per-mode resonant
+    // frequency in Hz — mirrors bodyFreq() + pitchScale so every readout
+    // (F0 cell, MODE MAP peak label) moves when a physical knob moves, not
+    // only on preset change. nPreset = preset index, nModes = current mode
+    // count semantics (8+v*120 like the engine); Tune/LFO/detune stay the
+    // global scalers the engine applies afterwards.
+    float uiEffFreqHz(const modal::PresetData& pr,int m,int nPreset,int nModes)const{
+        using P=PluginMultiScaleBody;
+        float f=pr.freq[m];
+        const float rm=paramCache[P::kParamResMorph];
+        if(rm>1e-4f) f=f+(pr.fineFreq[m]-f)*rm;
+        const float mAmt=paramCache[P::kParamMorphAmt];
+        if(mAmt>1e-4f){
+            const int mtx=std::clamp((int)std::lround(paramCache[P::kParamMorphTarget]*(float)(modal::kNumPresets-1)),0,modal::kNumPresets-1);
+            const auto& pt=modal::kPresets[mtx];
+            const int ti=std::min(m,std::max(1,pt.n)-1);
+            f=f+(pt.freq[ti]-f)*mAmt;
+        }
+        const float sup=paramCache[P::kParamSupport];
+        if(sup>1e-4f && nModes>1){
+            const float q=(float)m/(float)(nModes-1);
+            f*=1.f+sup*modal::MultiScaleBodyEngine::kSupFreqTop*q*q;
+        }
+        const int mat=std::clamp((int)std::lround(paramCache[P::kParamMaterial]*10.f),0,10);
+        if(mat>0){
+            const auto& bm=modal::MultiScaleBodyEngine::kBodyMat[std::clamp(nPreset,0,modal::kNumPresets-1)];
+            const auto& md=modal::MultiScaleBodyEngine::kMaterials[mat];
+            if(bm.E>0.0&&bm.rho>0.0) f*=std::sqrt((float)(md.E/md.rho)/(float)(bm.E/bm.rho));
+        }
+        f*=std::pow(2.f,(paramCache[P::kParamPitch]-0.5f)*4.f); // Tune knob mirror
+        return f/(2.f*3.141593f);
+    }
     // n=88, bands 8..15) render with 0 fill and "-" label.
     void updateDampingDisplay(){
         if(!fDampBars[0]) return;
@@ -2762,11 +2796,14 @@ private:
                     lv_obj_set_style_bg_opa(bar,LV_OPA_80,0);
                 }
             }   // end style pass (peak known)
-            if(fModePeakLbl && peakM!=fModePeakIdx){
+            if(fModePeakLbl){
+                // wave-4: always refresh (the peak label now tracks the
+                // physical model: morph/res/support/material/Tune move the
+                // effective frequency even when the peak mode is unchanged)
                 fModePeakIdx=peakM;
                 char nm[24];
-                // freq[] is angular (rad/s) - report true Hz like the F0 cell
-                snprintf(nm,sizeof(nm),"M%d  -  %.0f HZ",peakM+1,pr.freq[peakM]/(2.f*3.14159f));
+                snprintf(nm,sizeof(nm),"M%d  -  %.0f HZ",peakM+1,
+                         uiEffFreqHz(pr,peakM,preset,n));
                 lv_label_set_text(fModePeakLbl,nm);
             }
         }   // end if(fModeBars[0] && fModeMapDirty)

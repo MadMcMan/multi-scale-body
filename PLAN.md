@@ -173,6 +173,12 @@ Verified against `paper_47.md` (Eq. 1 + prose; several forms are RECONSTRUCTED p
 - **Recorder** is UI-local (512-point path, one strike per 33 ms tick, velocity from gesture speed); playback releases cleanly and stops on rebuild.
 ## 13. Wave-4 No-Modal Redesign (one screen, 1440×990)
 
+### Physical-model visuals (post-wave feedback)
+
+- Every PHYSICS knob moves at least one live display: DAMPING card and scope preview recompute on support/hold/resolution/morph/rayleigh; MODE MAP + disc heatmap follow morph target/amount; the header F0 cell + MODE MAP peak label read the EFFECTIVE motor frequency (wave-4 `uiEffFreqHz` mirror: res morph -> body morph -> support quadratic -> material sqrt(E/rho) -> Tune).
+- Hold-damp displays respond to strike position (the belly/rim axis) since the hold factor is position-derived.
+
+
 - The 860px budget was provably full, so the window grows to 1440×990: a persistent PHYSICS strip (124px) sits between stage and keyboard; STAGE_H stays 610 and every column budget is untouched.
 - PHYSICS strip: 7 machined knobs (Support, Hold Damp, Resolution, Morph, Rayl A, Rayl B, Eco Budget) + ECO toggle + Material/Morph-Target dropdowns, all visible at once; the MODEL modal, its `fModelMenu`/`fModelArcs` members and the widgets[] unregister dance are deleted.
 - Scale editor un-modaled: EDO dropdown + LOAD .SCL + CLEAR live in the keyboard header next to the scale readout (same handlers, persistent dropdown member).
