@@ -252,6 +252,17 @@ public:
             char b[24]; formatParamValue(PluginMultiScaleBody::kParamVolume,v,b,sizeof(b));
             lv_label_set_text(fMasterValLbl,b);
         }
+        // wave-3/4: programmatic writes (RANDOMIZE, MIDI learn) must refresh
+        // the toggle + dropdowns immediately, not just on host echo.
+        // (set_selected / add_state never re-fire VALUE_CHANGED: no loops)
+        if(i==PluginMultiScaleBody::kParamEcoMode && fEcoBtn){
+            if(v>0.5f) lv_obj_add_state(fEcoBtn,LV_STATE_CHECKED);
+            else lv_obj_clear_state(fEcoBtn,LV_STATE_CHECKED);
+        }
+        if(i==PluginMultiScaleBody::kParamMaterial && fMaterialDd)
+            lv_dropdown_set_selected(fMaterialDd,std::clamp((int)std::lround(v*10.f),0,10));
+        if(i==PluginMultiScaleBody::kParamMorphTarget && fMorphDd)
+            lv_dropdown_set_selected(fMorphDd,std::clamp((int)std::lround(v*(float)(modal::kNumPresets-1)),0,modal::kNumPresets-1));
     }
     void editParameter(uint32_t i,bool s) override { if(i<PluginMultiScaleBody::kParameterCount) UI::editParameter(i,s); }
     // duplicate parameter widgets - macros + master arc replicate the same
@@ -1304,6 +1315,26 @@ private:
             set(PluginMultiScaleBody::kParamBand0+b, std::clamp(rnd(0.3f,0.75f),0.f,1.f));
         int mx=modal::kNumPresets-1;
         set(PluginMultiScaleBody::kParamPreset,(float)(std::rand()%(mx+1))/(float)mx);
+        // wave-2: excitation character (bow/exciter-led presets stay rare so
+        // most rolls keep the classic mallet attack; dispatch snaps SlideMode)
+        set(PluginMultiScaleBody::kParamBow, (std::rand()%100)<30 ? rnd(0.3f,0.8f) : 0.f);
+        set(PluginMultiScaleBody::kParamDamper, rnd(0.f,0.5f));
+        set(PluginMultiScaleBody::kParamInharm, rnd(0.f,0.4f));
+        { static const float modes[3]={0.f,0.5f,1.f}; set(PluginMultiScaleBody::kParamSlideMode, modes[std::rand()%3]); }
+        for(int b=0;b<16;++b)
+            set(PluginMultiScaleBody::kParamBandDecay0+b, std::clamp(rnd(0.35f,0.65f),0.f,1.f));
+        // wave-3: physical model (morphs/materials biased to off/DEFAULT so
+        // rolls stay musical; dispatch snaps MorphTarget/Material to steps)
+        set(PluginMultiScaleBody::kParamSupport, rnd(0.f,0.5f));
+        set(PluginMultiScaleBody::kParamHoldDamp, rnd(0.f,0.5f));
+        set(PluginMultiScaleBody::kParamResMorph, rnd(0.f,1.f));
+        set(PluginMultiScaleBody::kParamMorphTarget, (float)(std::rand()%(mx+1))/(float)mx);
+        set(PluginMultiScaleBody::kParamMorphAmt, (std::rand()%100)<25 ? rnd(0.2f,0.6f) : 0.f);
+        set(PluginMultiScaleBody::kParamMaterial, (std::rand()%100)<25 ? (float)(1+std::rand()%10)/10.f : 0.f);
+        set(PluginMultiScaleBody::kParamRayleighA, rnd(0.f,0.3f));
+        set(PluginMultiScaleBody::kParamRayleighB, rnd(0.f,0.25f));
+        set(PluginMultiScaleBody::kParamEcoMode, (std::rand()%100)<20 ? 1.f : 0.f);
+        set(PluginMultiScaleBody::kParamEcoBudget, rnd(0.3f,0.7f));
     }
 
     // ---- idea 15: MIDI learn (right-click a knob -> next CC binds) ---------
