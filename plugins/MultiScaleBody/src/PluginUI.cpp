@@ -1086,8 +1086,8 @@ private:
                 break; }
             case P::kParamSupport:   snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
             case P::kParamHoldDamp:  snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
-            case P::kParamSupX:       snprintf(buf,cap,"%.2f",v); break;
-            case P::kParamSupY:       snprintf(buf,cap,"%.2f",v); break;
+            case P::kParamSupX:       snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
+            case P::kParamSupY:       snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
             case P::kParamStrikeW:    snprintf(buf,cap,"x%.2f",0.25f+1.5f*v); break;
             case P::kParamScrape:     snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
             case P::kParamResMorph:  snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
@@ -1101,10 +1101,10 @@ private:
                 const int m=std::clamp((int)std::lround(v*10.f),0,10);
                 snprintf(buf,cap,"%s",kMatNames[m]);
                 break; }
-            case P::kParamRayleighA: snprintf(buf,cap,"%.2f",v); break;
-            case P::kParamRayleighB: snprintf(buf,cap,"%.2f",v); break;
+            case P::kParamRayleighA: snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
+            case P::kParamRayleighB: snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
             case P::kParamEcoMode:   snprintf(buf,cap,"%s",v>0.5f?"ECO":"OFF"); break;
-            case P::kParamEcoBudget: snprintf(buf,cap,"%d",(int)std::lround(64.f+v*896.f)); break;
+            case P::kParamEcoBudget: snprintf(buf,cap,"%d modes",(int)std::lround(64.f+v*896.f)); break;
             default:                 snprintf(buf,cap,"%.2f",v); break;
         }
     }
@@ -1830,29 +1830,41 @@ private:
     }
 
     // ---- wave-4 PHYSICS strip (no modals) ----------------------------------
-    // Persistent full-width card between stage and keyboard: the 7 machined
-    // physics knobs + ECO toggle + material/morph dropdowns, all visible at
-    // once. Budget @s=1: 24 pad + 22 head + 6 + 72 knob row = 124 exact.
+    // Round-2 critic fix: ONE continuous 14-cell grid owns the full band
+    // width (11 full-anatomy machined knobs + ECO + Material + Morph Tgt),
+    // so no horizontal empty-panel run exceeds one gutter. Budget @s=1:
+    // 2 border + 24 pad + 22 head + 6 gap + 148 row = 202 exact.
     void stripKnob(lv_obj_t* row,uint32_t pi){
+        // Round-2: normalArcSpec() = the upper-bank BODY dial anatomy (arc
+        // 76, cap 64, 12 ticks x 5px, needle 3/4, montserrat_12 title and
+        // value) - the same machined knob as the bank, no third idiom. Only
+        // the invisible container box narrows 92 -> 88 (KNOB_W_C) so 11
+        // knobs + ECO + 2 selects fill the 1382px band edge-to-edge.
         ArcVisualSpec spec=normalArcSpec();
-        spec.containerW=scaled(92); spec.containerH=scaled(lay::MODEL_KNOB_H); spec.arcSize=scaled(lay::MODEL_ARC);
-        spec.capInset=7; spec.needleTopOffset=2; spec.needleBottomInset=3;
+        spec.containerW=scaled(lay::KNOB_W_C);
         lv_obj_t* arc=UIWidgets::createArcKnob(row,pi,this,styles,spec);
         lv_obj_add_event_cb(arc,valueFormatCb,LV_EVENT_ALL,this);
         widgets[pi]=arc;
         lv_obj_t* cont=lv_obj_get_parent(arc);
-        lv_obj_t* lbl=cont?lv_obj_get_child(cont,lv_obj_get_child_count(cont)-1):nullptr;
-        if(lbl&&lv_obj_check_type(lbl,&lv_label_class)){
-            char b[24];
-            formatParamValue(pi,paramCache[pi],b,sizeof(b));
-            lv_label_set_text(lbl,b);
+        if(cont && lv_obj_get_child_count(cont)>=3){
+            lv_obj_t* titleLbl=lv_obj_get_child(cont,0);
+            if(titleLbl && lv_obj_check_type(titleLbl,&lv_label_class))
+                lv_obj_set_style_text_color(titleLbl,PLATE_LABEL_ACCENT,0);
+            // initial paint: the value label is born with raw %.2f and no
+            // event has fired yet - apply the contextual unit format once
+            // now (mirrors the bank's initial-paint pattern below).
+            lv_obj_t* valueLbl=lv_obj_get_child(cont,(int32_t)lv_obj_get_child_count(cont)-1);
+            if(valueLbl && lv_obj_check_type(valueLbl,&lv_label_class)){
+                char b[24];
+                formatParamValue(pi,paramCache[pi],b,sizeof(b));
+                lv_label_set_text(valueLbl,b);
+            }
         }
     }
     static void styleModelDropdown(MultiScaleBodyUI* ui,lv_obj_t* dd){
         lv_obj_add_style(dd,&ui->styles.compactSelectMain,0);
         lv_obj_set_style_bg_color(dd,PLATE_WELL,0);
-        lv_obj_set_style_border_color(dd,PLATE_EDGE,0);
-        lv_obj_set_style_radius(dd,scaled(lay::RADIUS_SM),0);
+
         lv_obj_t* list=lv_dropdown_get_list(dd);
         if(list){ lv_obj_add_style(list,&ui->styles.compactSelectListMain,0);
                   lv_obj_set_style_max_height(list,scaled(lay::DROPDOWN_MAX_ROWS*lay::DROPDOWN_ROW_H),0); }
@@ -1861,53 +1873,62 @@ private:
     void buildModelStrip(lv_obj_t* root){
         using P=PluginMultiScaleBody;
         lv_obj_t* strip=makeCard(root,lv_pct(100),scaled(lay::MODEL_STRIP_H),scaled(6),LV_FLEX_ALIGN_START);
-        lv_obj_t* head=makeRow(strip,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
+        lv_obj_t* head=makeRow(strip,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_START);
         addLabel(head,"PHYSICAL MODEL",getScaledSmallFont(),COL_HIGHLIGHT,2);
-        addLabel(head,"paper-47 extensions",getScaledMicroFont(),PLATE_TEXT_DIM,1);
-        // wave-5: two knob rows. Row1 = CLAMP + CONTACT (the hand: support
-        // depth, clamp touch X/Y, mallet head, scrape) beside ECO + selects;
-        // row2 = BODY CHARACTER (resolution/morph/Rayleigh/budget), centered.
-        lv_obj_t* row=makeRow(strip,lv_pct(100),scaled(lay::MODEL_KNOB_H),scaled(8),LV_FLEX_ALIGN_CENTER);
+        // Round-2 (critic c/e): one continuous grid, 14 cells, full anatomy:
+        // 11 machined knob cells x 88 + ECO cell 76 + 2 selects x 143,
+        // gutters 4px -> 1382 = the full inner width. Order = signal chain: clamp,
+        // strike, damping, resolution, morph(+target), Rayleigh, ECO
+        // (+budget), material. Captions ride the knob-title baseline; the
+        // controls center on the arc band (arc center = row_y + 74).
+        lv_obj_t* row=makeRow(strip,lv_pct(100),scaled(lay::MODEL_ROW_H),scaled(4),LV_FLEX_ALIGN_START);
         stripKnob(row,P::kParamSupport);
         stripKnob(row,P::kParamSupX);
         stripKnob(row,P::kParamSupY);
         stripKnob(row,P::kParamStrikeW);
         stripKnob(row,P::kParamScrape);
-        fEcoBtn=lv_btn_create(row);
-        lv_obj_set_size(fEcoBtn,scaled(lay::MODEL_ECO_W),scaled(lay::BTN_H));
+        stripKnob(row,P::kParamHoldDamp);
+        stripKnob(row,P::kParamResMorph);
+        stripKnob(row,P::kParamMorphAmt);
+        stripKnob(row,P::kParamRayleighA);
+        stripKnob(row,P::kParamRayleighB);
+        // ECO cell: caption on the knob-title baseline (cell nudged down 2
+        // so its top-aligned caption matches the centered knob containers),
+        // toggle centered on the arc band (22px button -> translate +28).
+        lv_obj_t* ecoCell=makeCol(row,scaled(lay::MODEL_ECO_W),scaled(lay::KNOB_H_N),scaled(2),LV_FLEX_ALIGN_START);
+        addLabel(ecoCell,"Eco",getScaledSmallFont(),PLATE_LABEL_ACCENT,0);
+        lv_obj_set_style_translate_y(ecoCell,scaled(2),0);
+        fEcoBtn=lv_btn_create(ecoCell);
+        lv_obj_set_size(fEcoBtn,lv_pct(100),scaled(lay::BTN_H));
         styles.applyToggleButton(fEcoBtn,paramCache[P::kParamEcoMode]>0.5f);
         lv_obj_set_style_radius(fEcoBtn,scaled(lay::RADIUS_SM),0);
         lv_obj_set_style_pad_all(fEcoBtn,0,0);
-        lv_obj_add_event_cb(fEcoBtn,ecoBtnCb,LV_EVENT_VALUE_CHANGED,this);
+        lv_obj_set_style_translate_y(fEcoBtn,scaled(28),0);
         lv_obj_t* elbl=lv_label_create(fEcoBtn); lv_label_set_text(elbl,"ECO"); lv_obj_center(elbl);
-        lv_obj_t* matCol=makeCol(row,scaled(lay::MODEL_SEL_W),scaled(lay::MODEL_KNOB_H),scaled(4),LV_FLEX_ALIGN_CENTER);
-        addLabel(matCol,"MATERIAL",getScaledMicroFont(),PLATE_TEXT_DIM,1);
-        fMaterialDd=lv_dropdown_create(matCol);
+        // Eco Budget knob pairs with the ECO toggle it feeds.
+        stripKnob(row,P::kParamEcoBudget);
+        // Material select cell (same grammar as a knob cell: title over control).
+        lv_obj_t* matCell=makeCol(row,scaled(lay::MODEL_SEL_W),scaled(lay::KNOB_H_N),scaled(2),LV_FLEX_ALIGN_START);
+        addLabel(matCell,"Material",getScaledSmallFont(),PLATE_LABEL_ACCENT,0);
+        lv_obj_set_style_translate_y(matCell,scaled(2),0);
+        fMaterialDd=lv_dropdown_create(matCell);
         lv_dropdown_set_options(fMaterialDd,"DEFAULT\nALUMINIUM\nSTEEL\nBRONZE\nPINE\nROSEWOOD\nMAHOGANY\nGLASS\nBRASS\nTITANIUM\nCARBON");
-        lv_dropdown_set_selected(fMaterialDd,std::clamp((int)std::lround(paramCache[P::kParamMaterial]*10.f),0,10));
         lv_obj_set_width(fMaterialDd,scaled(lay::MODEL_SEL_W));
-        styleModelDropdown(this,fMaterialDd);
+        lv_obj_set_height(fMaterialDd,scaled(25));   // EDO-dropdown height: 15 text + 8 pad_ver + 2 border
+        lv_obj_set_style_translate_y(fMaterialDd,scaled(26),0);
         lv_obj_add_event_cb(fMaterialDd,materialDdCb,LV_EVENT_VALUE_CHANGED,this);
-        lv_obj_t* morphCol=makeCol(row,scaled(lay::MODEL_SEL_W),scaled(lay::MODEL_KNOB_H),scaled(4),LV_FLEX_ALIGN_CENTER);
-        addLabel(morphCol,"MORPH TARGET",getScaledMicroFont(),PLATE_TEXT_DIM,1);
-        fMorphDd=lv_dropdown_create(morphCol);
+        // Morph-target select cell (adjacent to its Morph knob).
+        lv_obj_t* morphCell=makeCol(row,scaled(lay::MODEL_SEL_W),scaled(lay::KNOB_H_N),scaled(2),LV_FLEX_ALIGN_START);
+        addLabel(morphCell,"Morph Tgt",getScaledSmallFont(),PLATE_LABEL_ACCENT,0);
+        lv_obj_set_style_translate_y(morphCell,scaled(2),0);
+        fMorphDd=lv_dropdown_create(morphCell);
         { std::string opts; for(int i=0;i<modal::kNumPresets;++i){ if(i) opts+="\n"; opts+=modal::kPresets[i].name; }
           lv_dropdown_set_options(fMorphDd,opts.c_str()); }
-        lv_dropdown_set_selected(fMorphDd,std::clamp((int)std::lround(paramCache[P::kParamMorphTarget]*(float)(modal::kNumPresets-1)),0,modal::kNumPresets-1));
         lv_obj_set_width(fMorphDd,scaled(lay::MODEL_SEL_W));
-        styleModelDropdown(this,fMorphDd);
+        lv_obj_set_height(fMorphDd,scaled(25));     // (LV_SIZE_CONTENT self-size measures 2 lines here; EDO's natural 25 is the convention)
+        lv_obj_set_style_translate_y(fMorphDd,scaled(26),0);
         lv_obj_add_event_cb(fMorphDd,morphDdCb,LV_EVENT_VALUE_CHANGED,this);
-        lv_obj_t* row2=makeRow(strip,lv_pct(100),scaled(lay::MODEL_KNOB_H),scaled(8),LV_FLEX_ALIGN_CENTER);
-        stripKnob(row2,P::kParamHoldDamp);
-        stripKnob(row2,P::kParamResMorph);
-        stripKnob(row2,P::kParamMorphAmt);
-        stripKnob(row2,P::kParamRayleighA);
-        stripKnob(row2,P::kParamRayleighB);
-        stripKnob(row2,P::kParamEcoBudget);
     }
-    // ==== BUILD =============================================================
-    // Layout hierarchy (matches Serum 2 main-view grammar, paper-faithful):
-    //   ROOT  (PLATE_BG)
     //   +-- TOP-BAR  (identity: brand mark | preset browser | master knob | zoom)
     //   +-- STAGE
     //   |   +-- LEFT  (4 dial groups: BODY/RESONATE/EXCITER/SPACE)

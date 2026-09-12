@@ -120,14 +120,19 @@ namespace lay {
     constexpr int ROW_GAP = 6;                   // vertical gap between regions
     constexpr int HEADER_H = 72;                 // identity bar: brand | preset | master | zoom
     constexpr int KB_STRIP_H = 128;              // 8 pad + 22 head + 6 gap + 80 keys + 8 pad (+4 slack)
-    // wave-5 PHYSICS strip (two knob rows): 24 pad + 22 head + 6 + 72 row1
-    // + 6 + 72 row2 = 202. Row1 @s=1: 5 machined knobs x 92 + ECO 76
-    // + 2 select mini-cols x 170 + 7 x 8 gutters = 932, centered in 1384.
-    // Row2: 5 machined knobs x 92 + 4 x 8 gutters = 492, centered.
+    // wave-5 PHYSICS strip, round-2: ONE continuous 14-cell control row owns
+    // the full band width. Card content: 22 head + 6 gap + 148 row = 176
+    // (= 202 - 2 border - 2*12 pad, exact). Row @s=1: 11 machined knob cells
+    // x 88 (KNOB_W_C; the arc/cap/tick anatomy inside stays the full
+    // BODY-bank spec - the cell box is only the grid pitch) + ECO cell 76
+    // + 2 select cells x 143 + 13 x 4 gutters = 1382 = the full 1382px
+    // inner width, edge-to-edge: no side void, and the knob-grid vs
+    // dropdown-grid seam is gone (one grid, uniform pitch). 143 keeps
+    // "DEFAULT" inside the closed dropdown at every zoom >= 65%.
     constexpr int MODEL_STRIP_H = 202;
-    constexpr int MODEL_KNOB_H = 72, MODEL_ARC = 46;   // compact machined knob
-    constexpr int MODEL_SEL_W = 170;             // material / morph dropdowns
-    constexpr int MODEL_ECO_W = 76;              // ECO toggle
+    constexpr int MODEL_ROW_H = 148;             // = 202 - 2 - 2*CARD_PAD - HEAD_H - ROW_GAP
+    constexpr int MODEL_SEL_W = 143;             // material / morph select cells
+    constexpr int MODEL_ECO_W = 76;              // ECO toggle (and its cell)
     // keyboard-header select cluster (EDO 110 + LOAD 130 + CLEAR 80 + 2 x 8)
     constexpr int KB_SEL_W = 336;
     constexpr int MODEL_EDO_W = 110, MODEL_LOAD_W = 130, MODEL_CLEAR_W = 80;
