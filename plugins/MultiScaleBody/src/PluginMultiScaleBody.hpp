@@ -51,6 +51,11 @@ public:
         kParamRayleighB,      // 0..1 beta stiffness damping
         kParamEcoMode,        // 0/1 scene-adaptive per-voice mode budget
         kParamEcoBudget,      // 0..1 total ringing-mode budget (64..960)
+        // wave-5 second physics strip (support x band / head / scrape)
+        kParamSupX,           // clamp touch X 0..1 (per-mode proximity damping)
+        kParamSupY,           // clamp touch Y 0..1
+        kParamStrikeW,        // mallet head size 0..1 (0.5 = nominal pulse)
+        kParamScrape,         // strike friction blend 0..1 (transient stretch)
         // outputs (DSP -> UI metering; never automated, never serialized)
         kParamOutLevel,kParamOutBand0,kParamOutBand1,kParamOutBand2,kParamOutBand3,
         kParamOutBand4,kParamOutBand5,kParamOutBand6,kParamOutBand7,kParamOutBand8,

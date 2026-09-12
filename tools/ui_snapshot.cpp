@@ -2,7 +2,7 @@
  * ui_snapshot.cpp — UI-only visual verification harness (no host, no audio).
  * Drives the real PluginUI through DPF's UIExporter, shows the native window,
  * idles the DGL/LVGL loop, and captures the surface to BMP at three sizes
- * (default 1440x990 / small 1100x700 / large 2048x1104).
+ * (default 1440x1068 / small 1100x700 / large 2048x1104).
  * Capture uses a screen BitBlt (PrintWindow returns stale frames for GL windows).
  *
  * Ground truth for clipping/overlap is the LVGL tree itself:
@@ -334,7 +334,7 @@ static lv_obj_t* findRegion(const lv_obj_t* plate,lv_coord_t h)
 // preset prev/next arrows also carry user_data +/-1 (addPresetArrowBtn) and
 // are created earlier in the tree, so a user_data scan resolves the PRESET
 // arrow instead (the R4 zoom-test regression: the "zoom click" changed the
-// preset and the display stayed 1440x990).
+// preset and the display stayed 1440x1068).
 static lv_obj_t* findZoomButton(lv_obj_t* root,intptr_t ud)
 {
     if(root->class_p && 0==std::strcmp(root->class_p->name,"lv_button")){
@@ -466,7 +466,7 @@ int main(int argc,char** argv)
             }
         }
     }
-    const Sz sizes[]={{1440,990,"ui_zoom_1440.bmp","default"},
+    const Sz sizes[]={{1440,1068,"ui_zoom_1440.bmp","default"},
                       {1100,700,"ui_zoom_1100.bmp","small"},
                       {2028,1104,"ui_zoom_2048.bmp","large"}}; // screen 2048x1152: largest client that fits incl. frame
     bool first=true;
@@ -480,11 +480,11 @@ int main(int argc,char** argv)
     }
 
     // ---- T1b: exercise zoom steps (50%) and prove aspect-locked rescale ---
-    // 50% of the 1440x990 base = exactly 720x495 (steps above 100% exceed
+    // 50% of the 1440x1068 base = exactly 720x534 (steps above 100% exceed
     // this 1152px-tall screen and get OS-clamped, which is a T4 scenario).
     LOGF("=== zoom-step test ===\n");
     first=false;
-    EXPECT(resizeWindow(hwnd,exp,1440,990,first),"back-to-base-1440x990");
+    EXPECT(resizeWindow(hwnd,exp,1440,1068,first),"back-to-base-1440x1068");
     lv_obj_t* zPlus=findZoomButton(lv_screen_active(),1);
     lv_obj_t* zMinus=findZoomButton(lv_screen_active(),-1);
     EXPECT(zPlus!=nullptr,"zoom-plus-found"); EXPECT(zMinus!=nullptr,"zoom-minus-found");
@@ -495,8 +495,8 @@ int main(int argc,char** argv)
         lv_display_t* d=lv_display_get_default();
         const long dw=lv_display_get_horizontal_resolution(d), dh=lv_display_get_vertical_resolution(d);
         LOGF("[zoom50] display=%ldx%ld gUIScale=%.3f\n",dw,dh,(double)DISTRHO::gUIScale);
-        EXPECT(dw==720&&dh==495,"display-exactly-720x495");
-        EXPECT(dw*990==dh*1440,"aspect-ratio-exact");
+        EXPECT(dw==720&&dh==534,"display-exactly-720x534");
+        EXPECT(dw*1068==dh*1440,"aspect-ratio-exact");
         {   // at an exact zoom step the plate must FILL the window (no letterbox)
             lv_obj_t* plate=findPlate(lv_screen_active());
             EXPECT(plate!=nullptr,"zoom50-plate-exists");
@@ -505,7 +505,7 @@ int main(int argc,char** argv)
                 LOGF("[zoom50] plate=@%ld,%ld %ldx%ld\n",(long)pc.x1,(long)pc.y1,
                     (long)lv_obj_get_width(plate),(long)lv_obj_get_height(plate));
                 EXPECT(pc.x1==0 && pc.y1==0 && lv_obj_get_width(plate)==720
-                       && lv_obj_get_height(plate)==495,"zoom50-plate-fills-window");
+                       && lv_obj_get_height(plate)==534,"zoom50-plate-fills-window");
             }
         }
         checkLayout("zoom50");
@@ -542,8 +542,8 @@ int main(int argc,char** argv)
             // the disc must still be findable and at the new scale
             lv_obj_t* d=findDisc(lv_screen_active());
             // the knob bank must still be present (left column has 5 groups,
-            // each with 4 lv_arc widgets, plus 7 physics-strip arcs + 1 master
-            // in the header = 28)
+            // each with 4 lv_arc widgets, plus 11 physics-strip arcs + 1 master
+            // in the header = 32)
             int arcs=0;
             std::function<void(lv_obj_t*)> count=[&](lv_obj_t* p){
                 if(!p) return;
@@ -552,11 +552,11 @@ int main(int argc,char** argv)
             };
             count(lv_screen_active());
             LOGF("[freeresize-1200x900] arcs-found=%d\n",arcs);
-            EXPECT(arcs>=16,"arcs-survive-resize");   // 5*4 dial bank + 7 strip + 1 master
+            EXPECT(arcs>=16,"arcs-survive-resize");   // 5*4 dial bank + 11 strip + 1 master
         }
     }
     // back to base for the remaining tests
-    EXPECT(resizeWindow(hwnd,exp,1440,990,first),"back-to-base-2");
+    EXPECT(resizeWindow(hwnd,exp,1440,1068,first),"back-to-base-2");
 
     // ---- T2: dropdown open + mouse-wheel scrolling of the list --------------
     LOGF("=== dropdown-wheel test ===\n");
@@ -608,7 +608,7 @@ int main(int argc,char** argv)
     // to strikeDisc at an off-center well point and at dead center.
     LOGF("=== strike-disc click test ===\n");
     first=false;
-    EXPECT(resizeWindow(hwnd,exp,1440,990,first),"base-size-for-click-test");
+    EXPECT(resizeWindow(hwnd,exp,1440,1068,first),"base-size-for-click-test");
     lv_obj_t* disc=findDisc(lv_screen_active());
     if(disc){
         int w=0,h=0; std::vector<unsigned char> pxBuf;
@@ -679,7 +679,7 @@ int main(int argc,char** argv)
     // User report: "why when we zoom do we move the presets and keyboard? dont
     // do that". Root cause: the topbar/stage/keyboard were DIRECT children of
     // the flex SCREEN with lv_pct(100) width, so at any surface not exactly
-    // 1440:990 (a big zoom step clamped to the monitor working area, or a free
+    // 1440:1068 (a big zoom step clamped to the monitor working area, or a free
     // host resize) they stretched to the FULL window width and re-centered /
     // re-flowed independent of the stage. Fix: build the whole chassis into a
     // fixed-aspect PLATE of scaled(BASE_W x BASE_H) centered on the screen; the

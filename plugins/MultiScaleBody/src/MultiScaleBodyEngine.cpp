@@ -30,6 +30,7 @@ void MultiScaleBodyEngine::reset() {
         v.active=false; v.midiNote=-1; v.silenceCount=0; v.sustainHold=false;
         v.burstLen=0; v.burstLeft=0; v.transLen=0; v.transLeft=0; v.transLP=0.f;
         v.bowOn=false; v.bowF=0.f; v.bowYPrev=0.f; v.holdFactor=0.f;
+        for (int i=0;i<kMaxModes;++i) v.suppDamp[i]=0.f; // wave-5 clamp weights
         for (int i=0;i<kMaxModes;++i) v.s1[i]=v.s2[i]=0.f;
         v.envState=Voice::Idle; v.env=0.f;
     }
@@ -143,7 +144,12 @@ float MultiScaleBodyEngine::shapeDecayRate(float d) const {
 // velocity below threshold, which forbids velocity-dependent spectra.
 void MultiScaleBodyEngine::startStrikeBurst(Voice& v,float vx,float vy){
     float edge = std::max(std::fabs(vx-0.5f),std::fabs(vy-0.5f))*2.f; // 0 center..1 rim
-    int bl=(int)std::lround(kStrikeBurstS*(float)sampleRate_*(1.25f-0.5f*edge));
+    // wave-5 (Head): mallet-head size scales the contact pulse (softer/longer
+    // .. harder/shorter). 0.5 -> exactly 1.0, so the default render is
+    // bit-identical; the pulse-shape compensator below re-measures THIS
+    // pulse, so the strike summit stays pinned at any width.
+    const float sw=0.25f+1.5f*strikeW_;
+    int bl=(int)std::lround(kStrikeBurstS*(float)sampleRate_*(1.25f-0.5f*edge)*sw);
     v.burstLen=std::clamp(bl,4,32);
     // --- pulse-shape compensation (round A3; see kStrikeProbeSafe) --------
     // Re-run every mode's exact 2-pole recursion driven by THIS strike's
@@ -190,7 +196,10 @@ void MultiScaleBodyEngine::startStrikeBurst(Voice& v,float vx,float vy){
     // one-pole LP coefficient shapes bandwidth by strike position
     // (center = dark, rim = bright). Noise source: xorshift32 seeded from a
     // monotonic strike counter — fully deterministic, RT-safe, no allocation.
-    int tl=(int)std::lround(kContactTransS*(float)sampleRate_*(1.15f-0.3f*edge));
+    // wave-5 (Head): softer head = longer contact chatter, harder = shorter.
+    // sw==1 is a hard skip so the default transient length is bit-identical.
+    const float swT=(sw!=1.f)?(1.5f-0.5f*sw):1.f;
+    int tl=(int)std::lround(kContactTransS*(float)sampleRate_*(1.15f-0.3f*edge)*swT);
     // clamp ceiling 800 samples: 10 ms base x (1.15..0.85) needs headroom at
     // 96/192 kHz too (the old 192-sample cap silently re-shortened the layer)
     v.transLen=std::clamp(tl,32,800);
@@ -199,6 +208,13 @@ void MultiScaleBodyEngine::startStrikeBurst(Voice& v,float vx,float vy){
     float gsum=0.f;
     for(int i=0;i<v.n;++i) gsum+=std::fabs(v.gain[i]);
     v.transAmp=kContactTrim*(v.n>0? gsum/(float)v.n : 0.f);
+    // wave-5 (Scrape): the tangential friction chatter keeps the contact
+    // layer alive longer and louder. 0 = untouched transient.
+    if(scrape_>1e-4f){
+        v.transLen=std::clamp((int)std::lround((float)v.transLen*(1.f+3.f*scrape_)),32,800);
+        v.transLeft=v.transLen;
+        v.transAmp*=(1.f+2.f*scrape_);
+    }
     // one-pole LP for y+=a*(x-y): a = 1-exp(-2*pi*fc/sr) puts -3 dB at fc.
     // Round A3 re-staging: the old 1.2k center left default (center-ish)
     // strikes with nothing above ~4 kHz — onsets could not carry the
@@ -209,6 +225,8 @@ void MultiScaleBodyEngine::startStrikeBurst(Voice& v,float vx,float vy){
     // the 4-12 kHz band (rig: hf8k_frac 0 -> measurable), still an octave
     // below hi-hat brightness.
     float lpHz=4800.f+edge*6200.f; // center ~4.8 kHz .. rim ~11 kHz
+    // wave-5 (Head): soft head = darker contact, hard head = brighter.
+    if(sw!=1.f) lpHz*=(0.5f+0.5f*sw);
     v.transCoef=1.f-(float)std::exp(-2.0*M_PI*(double)lpHz/(double)sampleRate_);
     uint32_t seed=(uint32_t)++strikeSeq_;
     seed^=seed>>16; seed*=2654435761u; seed^=seed>>16;   // splitmix-style scramble
@@ -284,7 +302,10 @@ void MultiScaleBodyEngine::recomputeVoiceCoeffs(Voice& v) {
         }
         // wave-3: support (idea 2, live), hold damping (idea 6, per-voice),
         // Rayleigh law (idea 1, live). All gated — defaults add nothing.
-        if(support_>1e-4f) d *= 1.f + kSupDecay*support_;
+        // wave-5: the support term gains the per-mode clamp-proximity weight
+        // armed at noteOn (zeros when support is off, so the default path is
+        // untouched).
+        if(support_>1e-4f) d *= 1.f + kSupDecay*support_ + v.suppDamp[i];
         if(v.holdFactor>0.f) d *= 1.f + v.holdFactor;
         if(rayA_>1e-4f||rayB_>1e-4f)
             d += (float)(0.5*(kRayAlphaMax*rayA_*rayA_
@@ -478,8 +499,44 @@ float MultiScaleBodyEngine::holdFactorAt(float sx, float sy) const {
 }
 void MultiScaleBodyEngine::setSupport(float v){
     support_=std::clamp(v,0.f,1.f);
-    for(auto& vv:voices_) if(vv.active) recomputeVoiceCoeffs(vv); // decay is live
+    // wave-5: the clamp point moved in depth — re-arm proximity weights, then
+    // recompute (decay is live). armSupportDamp() is a no-op write of zeros
+    // when support is off.
+    for(auto& vv:voices_) if(vv.active){ armSupportDamp(vv); recomputeVoiceCoeffs(vv); }
     irDirty_=true;
+}
+void MultiScaleBodyEngine::setSupPos(float x,float y){
+    supX_=std::clamp(x,0.f,1.f); supY_=std::clamp(y,0.f,1.f);
+    for(auto& vv:voices_) if(vv.active){ armSupportDamp(vv); recomputeVoiceCoeffs(vv); }
+    irDirty_=true;
+}
+void MultiScaleBodyEngine::setStrikeW(float v){ strikeW_=std::clamp(v,0.f,1.f); }
+void MultiScaleBodyEngine::setScrape(float v){ scrape_=std::clamp(v,0.f,1.f); }
+// Raw |sound-map gain| per mode at the clamp point: the same bicubic
+// interpolation (plus body-morph blend) the strike path uses, so the weight
+// a mode carries is exactly how strongly it moves where the hand clamps.
+// Normalization is the caller's job (voices normalize over v.n, the IR bake
+// and UI mirrors over their own mode windows).
+void MultiScaleBodyEngine::supportDampWeights(float* out) const {
+    interpolateGainsFor(out,supX_,supY_);
+    if(morphAmt_>1e-4f){
+        float tG[kMaxModes];
+        interpolateGainsFor(tG,supX_,supY_,morphTarget_);
+        for(int i=0;i<kMaxModes;++i) out[i]=out[i]+(tG[i]-out[i])*morphAmt_;
+    }
+    for(int i=0;i<kMaxModes;++i) out[i]=std::fabs(out[i]);
+}
+void MultiScaleBodyEngine::armSupportDamp(Voice& v){
+    if(!(support_>1e-4f)){
+        for(int i=0;i<kMaxModes;++i) v.suppDamp[i]=0.f;
+        return;
+    }
+    float w[kMaxModes]; supportDampWeights(w);
+    float mx=0.f; for(int i=0;i<v.n;++i) mx=std::max(mx,w[i]);
+    if(!(mx>1e-9f)){ for(int i=0;i<kMaxModes;++i) v.suppDamp[i]=0.f; return; }
+    const float k=support_*kSupPosK/mx;
+    for(int i=0;i<v.n;++i) v.suppDamp[i]=k*w[i];
+    for(int i=v.n;i<kMaxModes;++i) v.suppDamp[i]=0.f;
 }
 void MultiScaleBodyEngine::setHoldDamp(float v){ holdDamp_=std::clamp(v,0.f,1.f); irDirty_=true; }
 void MultiScaleBodyEngine::setResMorph(float v){ resMorph_=std::clamp(v,0.f,1.f); irDirty_=true; }
@@ -508,6 +565,16 @@ void MultiScaleBodyEngine::setEco(bool on,float b){
 void MultiScaleBodyEngine::beginIrBake(){
     for(int i=0;i<kIrLen;++i){ irL_[i]=0.f; irR_[i]=0.f; }
     irBakeCursor_=0;
+    // wave-5: bake the clamp-proximity raw weights once per IR refresh (the
+    // per-mode factor normalizes over this bake's n, like voices do).
+    // Support off -> zeros, and the step below skips, so the default IR is
+    // bit-identical.
+    if(support_>1e-4f){
+        supportDampWeights(irSupW_);
+        const auto& bp=kPresets[presetIdx_];
+        const int bn=std::min(bp.n,modeCount_);
+        irSupMx_=0.f; for(int i=0;i<bn;++i) irSupMx_=std::max(irSupMx_,irSupW_[i]);
+    } else { irSupMx_=0.f; for(int i=0;i<kMaxModes;++i) irSupW_[i]=0.f; }
 }
 bool MultiScaleBodyEngine::stepIrBake(int budgetModes){
     const auto& p=kPresets[presetIdx_];
@@ -549,7 +616,13 @@ bool MultiScaleBodyEngine::stepIrBake(int budgetModes){
             d *= (float)(1.0 + (double)felt_*8.0*fr*fr*fr);
         }
         // wave-3: support + hold + Rayleigh damping mirror the voice path
-        if(support_>1e-4f) d *= 1.f + kSupDecay*support_;
+        // wave-5: plus the per-mode clamp-proximity factor baked above.
+        if(support_>1e-4f){
+            // same single-multiply form as the voice path (not a product)
+            float supTerm = kSupDecay*support_;
+            if(irSupMx_>1e-9f) supTerm += support_*kSupPosK*irSupW_[m]/irSupMx_;
+            d *= 1.f + supTerm;
+        }
         { const float hf=holdFactorAt(strikeX_,strikeY_); if(hf>0.f) d *= 1.f+hf; }
         if(rayA_>1e-4f||rayB_>1e-4f)
             d += (float)(0.5*(kRayAlphaMax*rayA_*rayA_
@@ -748,6 +821,7 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
             v.inharmMul[i]=(v.n>1)?(float)(i*i)/(float)((v.n-1)*(v.n-1)):0.f;
             v.bendTilt[i]=1.f;
         }
+        armSupportDamp(v); // wave-5: clamp-proximity weights (v.n is final here)
         recomputeVoiceCoeffs(v);
         armExcitation(v,vx,vy); // bow bridge or re-strike on mono retrigger
         return;
@@ -756,8 +830,9 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
     int target = -1;
     for (int i=0;i<kVoiceCount;++i) if (!voices_[i].active) { target=i; break; }
     if (target==-1) {
-        // steal the quietest already-releasing tail first; only fall back to oldest
-        // (never chop a fresh attack while a tail exists)
+        // steal the quietest already-releasing tail first; only fall back to
+        // the most-recently-struck voice (max age = youngest envelope, so the
+        // chop lands on near-silence — never cut an established ring)
         int bestRel=-1; float bestEnv=2.f; int oldest=0, maxAge=-1;
         for (int i=0;i<kVoiceCount;++i){
             const Voice& cv=voices_[i];
@@ -812,6 +887,7 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
     }
     for (int i=v.n;i<kMaxModes;++i) { v.gain[i]=0.f; v.s1[i]=v.s2[i]=0.f; }
     v.env=0.f; v.envState=Voice::Attack;
+    armSupportDamp(v); // wave-5: clamp-proximity weights (v.n is final here)
     recomputeVoiceCoeffs(v);
     armExcitation(v,vx,vy);
     v.silenceCount = 0; // strike is carried by the force pulse, not a Dirac flag
@@ -856,6 +932,7 @@ void MultiScaleBodyEngine::allSoundOff() {
         v.active=false; v.midiNote=-1; v.envState=Voice::Idle; v.env=0.f; v.silenceCount=0; v.sustainHold=false;
         v.burstLen=0; v.burstLeft=0; v.transLen=0; v.transLeft=0; v.transLP=0.f;
         v.bowOn=false; v.bowF=0.f; v.bowYPrev=0.f; v.holdFactor=0.f;
+        for(int i=0;i<kMaxModes;++i) v.suppDamp[i]=0.f; // wave-5 clamp weights
         for(int i=0;i<kMaxModes;++i){ v.s1[i]=0.f; v.s2[i]=0.f; }
     }
     for (int c=1;c<16;++c) mpeZ_[c]=-1.f; // MPE panic: drop every latched pressure

@@ -186,3 +186,26 @@ Verified against `paper_47.md` (Eq. 1 + prose; several forms are RECONSTRUCTED p
 - Harness follows the aspect: default capture 1440×990, zoom-step test uses the 150% step (2160×1485 exact — 125% would round .5px), arc-count comment updated (24 arcs).
 
 
+## 14. Wave-5 Second Physics Strip (SupX/SupY, Head, Scrape, material Rayleigh defaults)
+
+### New input parameters (all identity-safe defaults; golden md5 `f509d7f…` unchanged)
+
+| Param | Symbol | Norm range | Default | Meaning |
+|---|---|---|---|---|
+| Sup X | `supx` | 0..1 | 0.5 | Clamp touch X on the disc (per-mode proximity damping) |
+| Sup Y | `supy` | 0..1 | 0.5 | Clamp touch Y |
+| Head | `strikew` | 0..1 | 0.5 | Mallet head size: contact-pulse length ×(0.25+1.5·v), 0.5 = nominal; summit within 2 dB |
+| Scrape | `scrape` | 0..1 | 0 | Strike friction blend: transient length ×(1+3·s), level ×(1+2·s) |
+
+### Engine contracts
+
+- **Clamp proximity**: `supportDampWeights()` reads raw |sound-map gain| per mode at (supX_,supY_) with the strike path's bicubic interpolation + body-morph blend (normalization is the caller's job); `armSupportDamp()` scales by support·1.5/max over v.n at noteOn (both paths) into `Voice::suppDamp[128]`; `recomputeVoiceCoeffs` folds it into the support term (`d *= 1+0.5·s+suppDamp[i]`, single multiply like the IR bake); `setSupport`/`setSupPos` re-arm actives; support off writes zeros and every consumer skips.
+- **Head**: `sw=0.25+1.5·strikeW_` (0.5 = exactly 1.0) scales burst length inside the existing lround (×1.0 is exact), transient length ×(1.5−0.5·sw, hard skip at 1), transient LP ×(0.5+0.5·sw, hard skip at 1); the pulse-shape compensator re-measures the real pulse so the summit holds (low modes exact, top octave ~2 dB down at the extreme — long-pulse self-cancellation, documented in the test).
+- **Scrape**: single gated block in `startStrikeBurst` stretches + boosts the transient; 0 = untouched.
+- **Material Rayleigh defaults**: `kMatRay[11][2]` (knob-space A=√(α/10), B=√(β/6.3e-6) from each material's closest baked body); the PLUGIN snaps Rayl A/B on material select (DEFAULT skips) via one-level recursive `setParameterValue` — no engine change.
+- **IR bake + UI mirrors** carry the clamp weights (bake normalizes over its n; DAMPING card per-band max, scope preview per-mode, both gated on support>0); RANDOMIZE covers the four; formats Sup X/Y `%.2f`, Head `x%.2f`, Scrape `%`.
+- **Pre-existing finds fixed on the way**: the scope preview never accumulated its envelope (`e` stayed 0 — one-line `e += |g|·e^(−rt)` restore, harness scope-probe now nonzero); the committed eco steal test expected the wrong voice (steal takes maxAge/newest by long-standing design — assertion corrected, engine comment now says so).
+
+### UI chassis (1440×1068)
+
+- PHYSICS strip grows to two knob rows (202px = 24 pad + 22 head + 6 + 72 + 6 + 72): row1 CLAMP+CONTACT (Support, Sup X, Sup Y, Head, Scrape + ECO + Material/Morph selects, 932px centered), row2 BODY CHARACTER (Hold Damp, Resolution, Morph, Rayl A, Rayl B, Eco Budget, 492px centered). STAGE/keyboard untouched; BASE_H 990→1068; default window + harness sizes + zoom50 (720×534) + arc comment (32) follow.

@@ -176,6 +176,13 @@ struct Voice {
     // noteOn from the hold-damping depth and the strike edge distance; applied
     // live in recomputeVoiceCoeffs (d *= 1 + holdFactor). 0 = no hold damping.
     float  holdFactor=0.f;
+    // wave-5 (support position x band-widening): per-mode clamp-proximity
+    // weight, armed at noteOn from the sound map at the CLAMP point
+    // (supX_/supY_): a mode that moves strongly where the hand clamps loses
+    // energy into the hand faster (up to 1+kSupPosK x local rate). Consumed
+    // live in recomputeVoiceCoeffs (d *= 1 + kSupDecay*s + suppDamp[i]).
+    // Zeros whenever support is off, so the default path never branches in.
+    float  suppDamp[kMaxModes]{};
 };
 class MultiScaleBodyEngine {
 public:
@@ -239,6 +246,17 @@ public:
     // damp more (you deaden the belly by holding it); rim strikes are freer.
     // Per-voice factor baked at noteOn from the strike position.
     void setHoldDamp(float v);
+    // Support clamp position (wave-5): where the hand touches the rim, 0..1
+    // on each disc axis. Mid-ring moves re-arm per-mode proximity weights on
+    // active voices. Defaults (0.5,0.5) never move the default render.
+    void setSupPos(float x, float y);
+    // Mallet head size (wave-5): scales the contact pulse length around the
+    // nominal 0.5 (0.25x..1.75x). The pulse-shape normalizer compensates, so
+    // the summit stays pinned — only the contact spectrum moves.
+    void setStrikeW(float v);
+    // Strike friction blend (wave-5): stretches the contact-transient layer
+    // in time and level (tangential scrape). 0 = untouched transient.
+    void setScrape(float v);
     // FEM-resolution morph 0..1 (idea 3): interpolates each mode's frequency
     // and decay between the committed 4^3 bake and the new 8^3 fine bake
     // (ModalData::fineFreq/fineDecay). 0 = committed tables, bit-identical.
@@ -268,11 +286,21 @@ public:
     float getRayleighA() const { return rayA_; }
     float getRayleighB() const { return rayB_; }
     bool  getEcoMode() const { return ecoMode_; }
+    float getSupX() const { return supX_; }
+    float getSupY() const { return supY_; }
+    float getStrikeW() const { return strikeW_; }
+    float getScrape() const { return scrape_; }
     // wave-3 shared body-table helpers (used by noteOn and the IR bake so the
     // reverb send tracks the current physical model)
     float bodyFreq(const modal::PresetData& p, int i, int n) const;
     float bodyDecay(const modal::PresetData& p, int i, int n) const;
     float holdFactorAt(float sx, float sy) const;
+    // Raw |sound-map gain| per mode at the clamp point (wave-5, mirrors the
+    // strike-gain interpolation incl. body morph): the UI damping/scope
+    // mirrors and the reverb IR bake normalize these the same way
+    // armSupportDamp() does for voices.
+    void supportDampWeights(float* out) const;
+    void armSupportDamp(Voice& v);
     // pitch bend per MIDI channel (MPE)
     void setPitchBend(int channel, float semitones); // -12..+12
     // MPE per-note pressure: member channels (1..15) latch the latest
@@ -410,6 +438,9 @@ public:
     float resMorph_=0.f;                // 4^3 -> 8^3 FEM resolution morph
     int   morphTarget_=0;               // target body preset index
     float morphAmt_=0.f;                // body crossfade amount
+    float supX_=0.5f, supY_=0.5f;       // clamp touch position on the disc (wave-5)
+    float strikeW_=0.5f;                // mallet head size (wave-5): 0.5 = nominal pulse
+    float scrape_=0.f;                  // strike friction blend (wave-5): transient stretch
     int   material_=0;                  // material preset (0 = body default)
     float materialFreqMul_=1.f;         // sqrt((E/rho)_mat / (E/rho)_body)
     float rayA_=0.f, rayB_=0.f;         // Rayleigh alpha/beta knob values (raw 0..1)
@@ -418,6 +449,7 @@ public:
     int   ecoTotal_=512;                // derived budget (mode units)
     // wave-3 tuning constants (keep in sync with the bake script material law)
     inline static constexpr float kSupFreqTop = 0.25f; // top-mode freq lift at full support
+    inline static constexpr float kSupPosK    = 1.5f;  // max per-mode clamp-proximity weight (wave-5)
     inline static constexpr float kSupDecay   = 0.5f;  // decay-rate multiplier at full support
     inline static constexpr float kHoldDamp   = 2.0f;  // max hold damping rate multiplier
     inline static constexpr double kRayAlphaMax = 10.0;   // alpha 1/s per 0.5*alpha
@@ -440,6 +472,23 @@ public:
         {"CARBON",  150e9, 1600.0},
     };
     inline static constexpr int kNumMaterials = 11;
+    // Material Rayleigh defaults (wave-5): Rayleigh knob positions each
+    // material snaps to when selected (the closest baked body's alpha/beta,
+    // expressed in knob space: A=sqrt(alpha/10), B=sqrt(beta/6.3e-6)).
+    // Row 0 (DEFAULT) never snaps — only the frequency law resets to 1.0.
+    inline static constexpr float kMatRay[kNumMaterials][2] = {
+        {0.f,0.f},       // DEFAULT: no snap
+        {0.89f,0.22f},   // ALUMINIUM (Bowl 8, 3e-7)
+        {0.55f,0.13f},   // STEEL (Bar 3, 1e-7)
+        {0.67f,0.18f},   // BRONZE (Bell 4.5, 2e-7)
+        {1.00f,0.56f},   // PINE (Squirrel alpha-clamped, 2e-6)
+        {0.95f,0.38f},   // ROSEWOOD (Marimba 9, 9e-7)
+        {0.95f,0.47f},   // MAHOGANY (LogDrum 9, 1.4e-6)
+        {0.53f,0.11f},   // GLASS (Glass 2.8, 7e-8)
+        {0.67f,0.18f},   // BRASS (Bell 4.5, 2e-7)
+        {0.77f,0.20f},   // TITANIUM (Blade 6, 2.5e-7)
+        {0.55f,0.13f},   // CARBON (Bar 3, 1e-7)
+    };
     // Per-body base (E,rho) — mirrors tools/modal_bake.py PRESETS in order,
     // so DEFAULT (material_==0) reproduces the body's own material exactly.
     struct BodyMat { double E; double rho; };
@@ -458,6 +507,11 @@ public:
     // analyser state
     float anaEnv_[16]={};
     float nextGain_[kMaxModes]{};
+    // Reverb-IR mirror of the clamp-proximity weights (wave-5): raw |gain|
+    // per mode at the clamp point, baked in beginIrBake() with the same
+    // normalization the voice path uses. Fixed-size, RT-safe.
+    float irSupW_[kMaxModes]{};
+    float irSupMx_=0.f;
     Voice voices_[kVoiceCount]{};
     int nextAge_=0;
     unsigned strikeSeq_=0; // monotonic per-strike counter: deterministic transient seeds

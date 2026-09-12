@@ -136,6 +136,42 @@ int main(){
                 "12-TET scl == classic path (bit-identical mode-0 coeff)");
         printf("12-TET scl identity PASS\n");
     }
+    // --- wave-5: new param defaults are identity -------------------------
+    {
+        PluginMultiScaleBody p;
+        require(std::fabs(p.testGetParameterValue(PluginMultiScaleBody::kParamSupX)-0.5f)<1e-6f,"supx default 0.5");
+        require(std::fabs(p.testGetParameterValue(PluginMultiScaleBody::kParamSupY)-0.5f)<1e-6f,"supy default 0.5");
+        require(std::fabs(p.testGetParameterValue(PluginMultiScaleBody::kParamStrikeW)-0.5f)<1e-6f,"strikew default 0.5");
+        require(std::fabs(p.testGetParameterValue(PluginMultiScaleBody::kParamScrape))<1e-6f,"scrape default 0");
+        require(std::fabs(p.testEngine().getSupX()-0.5f)<1e-6f,"engine supx default");
+        require(std::fabs(p.testEngine().getStrikeW()-0.5f)<1e-6f,"engine strikew default");
+        require(std::fabs(p.testEngine().getScrape())<1e-6f,"engine scrape default");
+        printf("wave-5 defaults PASS\n");
+    }
+    // --- wave-5: material select snaps the Rayleigh knobs ----------------
+    // DEFAULT leaves knobs alone; STEEL (index 2) snaps to (0.55, 0.13) and
+    // the engine follows on the same dispatch.
+    {
+        PluginMultiScaleBody p;
+        p.testSampleRate2(44100); p.testActivate();
+        p.testSetParameterValue(PluginMultiScaleBody::kParamRayleighA, 0.7f);
+        p.testSetParameterValue(PluginMultiScaleBody::kParamRayleighB, 0.6f);
+        p.testSetParameterValue(PluginMultiScaleBody::kParamMaterial, 0.f); // DEFAULT
+        require(std::fabs(p.testGetParameterValue(PluginMultiScaleBody::kParamRayleighA)-0.7f)<1e-6f,
+                "material DEFAULT leaves Rayl A alone");
+        require(std::fabs(p.testGetParameterValue(PluginMultiScaleBody::kParamRayleighB)-0.6f)<1e-6f,
+                "material DEFAULT leaves Rayl B alone");
+        p.testSetParameterValue(PluginMultiScaleBody::kParamMaterial, 0.2f); // STEEL
+        const float eA=modal::MultiScaleBodyEngine::kMatRay[2][0];
+        const float eB=modal::MultiScaleBodyEngine::kMatRay[2][1];
+        require(std::fabs(p.testGetParameterValue(PluginMultiScaleBody::kParamRayleighA)-eA)<1e-6f,
+                "material STEEL snaps Rayl A");
+        require(std::fabs(p.testGetParameterValue(PluginMultiScaleBody::kParamRayleighB)-eB)<1e-6f,
+                "material STEEL snaps Rayl B");
+        require(std::fabs(p.testEngine().getRayleighA()-eA)<1e-6f,"engine follows Rayl A snap");
+        require(std::fabs(p.testEngine().getRayleighB()-eB)<1e-6f,"engine follows Rayl B snap");
+        printf("material rayleigh snap PASS (A=%.2f B=%.2f)\n",eA,eB);
+    }
     printf("=== ALL TESTS PASSED ===\n");
     return 0;
 }

@@ -107,20 +107,24 @@ public:
 // Vertical budget, base scale (wave-4: MODEL panel + scale editor un-modaled
 // into a persistent PHYSICS strip + keyboard select cluster, so the window
 // grows 860 -> 990; every region still sums exact):
+// Vertical budget, base scale (wave-5: PHYSICS strip grows to two knob rows
+// — CLAMP+CONTACT up top, BODY CHARACTER below — so the window grows
+// 990 -> 1068; every region still sums exact):
 //   2*PAD + HEADER_H + 4*ROW_GAP + STAGE_H + MODEL_STRIP_H + KB_STRIP_H
-//   = 32 + 72 + 24 + 610 + 124 + 128 = 990  (exact)
+//   = 32 + 72 + 24 + 610 + 202 + 128 = 1068  (exact)
 // Horizontal budget (stage inner = 1440-2*16 = 1408):
 //   LEFT_W + CENTER_W + RIGHT(grow) + 2*GUTTER = 392 + 480 + 516 + 20 = 1408  (exact)
 namespace lay {
-    constexpr int BASE_W = 1440, BASE_H = 990;
+    constexpr int BASE_W = 1440, BASE_H = 1068;
     constexpr int PAD = 16;                      // chassis inset on all sides
     constexpr int ROW_GAP = 6;                   // vertical gap between regions
     constexpr int HEADER_H = 72;                 // identity bar: brand | preset | master | zoom
     constexpr int KB_STRIP_H = 128;              // 8 pad + 22 head + 6 gap + 80 keys + 8 pad (+4 slack)
-    // wave-4 PHYSICS strip (no modals): 24 pad + 22 head + 6 + 72 knob row = 124.
-    // Knob row @s=1: 7 machined knobs x 92 + ECO 76 + 2 select mini-cols x 170
-    // + 4 x 8 gutters = 1132, centered in the 1384 inner width.
-    constexpr int MODEL_STRIP_H = 124;
+    // wave-5 PHYSICS strip (two knob rows): 24 pad + 22 head + 6 + 72 row1
+    // + 6 + 72 row2 = 202. Row1 @s=1: 5 machined knobs x 92 + ECO 76
+    // + 2 select mini-cols x 170 + 7 x 8 gutters = 932, centered in 1384.
+    // Row2: 5 machined knobs x 92 + 4 x 8 gutters = 492, centered.
+    constexpr int MODEL_STRIP_H = 202;
     constexpr int MODEL_KNOB_H = 72, MODEL_ARC = 46;   // compact machined knob
     constexpr int MODEL_SEL_W = 170;             // material / morph dropdowns
     constexpr int MODEL_ECO_W = 76;              // ECO toggle

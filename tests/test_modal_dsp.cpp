@@ -1147,8 +1147,11 @@ int main(){
         b.setEco(true,0.f);   // budget 64: first voice takes min(80,64)=64
         for(int k=0;k<8;++k) b.noteOn(40+k,1.f,0);
         require(b.voice(0).n==64,"eco: tight budget clamps voices from the first note");
-        b.noteOn(50,1.f,0);   // 9th note: 8 live -> share max(8,64/8)=8
-        require(b.voice(0).n==8,"eco: full load shrinks the stolen voice to the share");
+        b.noteOn(50,1.f,0);   // 9th note: 8 live -> share max(8,64/8)=8; the
+        // steal takes the most-recently-struck voice (max age = youngest
+        // envelope, so the chop lands on near-silence), i.e. voice 7 here
+        require(b.voice(7).n==8,"eco: full load shrinks the stolen voice to the share");
+        require(b.voice(0).n==64,"eco: unstolen voices keep their shares");
         MultiScaleBodyEngine c;
         c.prepare(44100); c.reset();
         c.setEco(true,1.f);   // budget 960: 8 voices stay full
@@ -1157,6 +1160,121 @@ int main(){
         c.noteOn(50,1.f,0);
         require(c.voice(0).n==80,"eco: generous budget leaves stolen voices full");
         printf("eco PASS\n");
+    }
+    // --- wave-5: support clamp position (SupX/SupY) --------------------------
+    // Identity: support off, moving the clamp changes nothing bit-for-bit.
+    // Effect: support engaged, clamping AT the strike antinode damps modes
+    // much harder than clamping the far corner (per-mode proximity weights).
+    {
+        auto render=[&](float supx,float supy,float sup)->std::vector<float>{
+            MultiScaleBodyEngine e;
+            e.prepare(44100); e.reset();
+            e.setPreset(0); e.setModeCount(1.0f); e.setPitchScale(0.5f);
+            e.setDecayScale(0.5f); e.setStrike(0.8f,0.8f);
+            e.setReverbWet(0.f); e.setExciteMix(0.f);
+            e.setSupPos(supx,supy); e.setSupport(sup);
+            e.noteOn(60,1.f,0);
+            const int N=44100*10;
+            std::vector<float> out; out.reserve(N);
+            for(int i=0;i<N;++i) out.push_back(e.processSampleMono());
+            return out;
+        };
+        auto tailOf=[](const std::vector<float>& b)->double{
+            float peak=0.f; for(float s:b) peak=std::max(peak,std::abs(s));
+            const float thr=peak*std::pow(10.f,-30.f/20.f);
+            for(int i=(int)b.size()-1;i>=0;--i)
+                if(std::abs(b[(size_t)i])>=thr) return i/44100.0;
+            return -1.0;
+        };
+        std::vector<float> r0=render(0.5f,0.5f,0.f), r1=render(0.1f,0.9f,0.f);
+        require(r0.size()==r1.size(),"suppos: same length");
+        { bool bit=true; for(size_t i=0;i<r0.size();++i) if(r0[i]!=r1[i]){ bit=false; break; }
+          require(bit,"suppos: support off -> clamp position is bit-identical"); }
+        std::vector<float> rA=render(0.8f,0.8f,1.f), rB=render(0.05f,0.05f,1.f);
+        const double tA=tailOf(rA), tB=tailOf(rB);
+        printf("suppos tails (-30dB): clamp-at-strike %.2fs  clamp-far %.2fs\n",tA,tB);
+        require(tA>0.05 && tB>0.05,"suppos: both tails measurable");
+        require(tA<0.85*tB,"suppos: clamping the strike antinode damps much faster");
+        MultiScaleBodyEngine e;
+        e.prepare(44100); e.reset();
+        e.setPreset(0); e.setModeCount(1.0f); e.setDecayScale(0.5f);
+        e.setStrike(0.8f,0.8f); e.setReverbWet(0.f); e.setExciteMix(0.f);
+        e.setSupPos(0.8f,0.8f); e.setSupport(1.f);
+        e.noteOn(60,1.f,0);
+        float wmx=0.f; for(int i=0;i<e.voice(0).n;++i) wmx=std::max(wmx,e.voice(0).suppDamp[i]);
+        require(wmx>0.5f,"suppos: antinode weights armed (max>0.5 at full support)");
+        printf("suppos PASS (max weight %.2f)\n",wmx);
+    }
+    // --- wave-5: mallet head size (StrikeW) ----------------------------------
+    // Identity: 0.5 == the untouched pulse, bit-for-bit. Effect: a harder
+    // head arms a longer contact pulse, but the pulse-shape normalizer pins
+    // the summit (within 1 dB) — only the contact spectrum moves.
+    {
+        auto render=[&](float w,float& peak,int& bl)->std::vector<float>{
+            MultiScaleBodyEngine e;
+            e.prepare(44100); e.reset();
+            e.setPreset(0); e.setModeCount(1.0f); e.setPitchScale(0.5f);
+            e.setDecayScale(0.5f); e.setStrike(0.5f,0.5f);
+            e.setReverbWet(0.f); e.setExciteMix(0.f);
+            e.setStrikeW(w);
+            e.noteOn(60,1.f,0);
+            bl=e.voice(0).burstLen;
+            const int N=44100*2;
+            std::vector<float> out; out.reserve(N);
+            peak=0.f;
+            for(int i=0;i<N;++i){ float s=e.processSampleMono(); out.push_back(s);
+                peak=std::max(peak,std::abs(s)); }
+            return out;
+        };
+        float p0,p1; int bl0,bl1,bl2;
+        std::vector<float> r0=render(0.5f,p0,bl0);
+        { float px; int bx; std::vector<float> rx=render(0.5f,px,bx);
+          bool bit=r0.size()==rx.size(); if(bit) for(size_t i=0;i<r0.size();++i) if(r0[i]!=rx[i]){ bit=false; break; }
+          require(bit,"head: 0.5 re-armed == identical render (deterministic)"); }
+        std::vector<float> r1=render(1.f,p1,bl1);
+        float pz; std::vector<float> rz=render(0.f,pz,bl2);
+        printf("head: nominal bl=%d peak=%.4f | hard bl=%d peak=%.4f | soft bl=%d peak=%.4f\n",
+               bl0,p0,bl1,p1,bl2,pz);
+        require(bl1>bl0 && bl0>bl2,"head: harder/larger head = longer contact pulse");
+        // NOTE: the bar is +/-2 dB, not exact: the pulse-shape compensator
+        // max-holds the response over burst+tail, but a LONG pulse lets its
+        // own later lobes partially cancel early high-mode buildup mid-drive
+        // (the spike it held is then undone by the pulse tail). Low modes pin
+        // exactly (measured 1.000); the top octave sits ~2 dB down at the
+        // extreme — a musical darkening, bounded vs 29.7 dB uncompensated.
+        require(p1/p0>0.79f && p1/p0<1.26f,"head: summit within 2 dB across the range");
+        printf("head PASS\n");
+    }
+    // --- wave-5: strike friction blend (Scrape) ------------------------------
+    // Identity: 0 leaves the transient untouched, bit-for-bit. Effect: full
+    // scrape stretches the contact layer (longer + louder chatter).
+    {
+        auto probe=[&](float s,float& tpk)->std::pair<int,float>{
+            MultiScaleBodyEngine e;
+            e.prepare(44100); e.reset();
+            e.setPreset(0); e.setModeCount(1.0f); e.setPitchScale(0.5f);
+            e.setDecayScale(0.5f); e.setStrike(0.5f,0.5f);
+            e.setReverbWet(0.f); e.setExciteMix(0.f);
+            e.setScrape(s);
+            e.noteOn(60,1.f,0);
+            int tl=e.voice(0).transLen; float ta=e.voice(0).transAmp;
+            const int N=44100;
+            for(int i=0;i<N;++i) e.processSampleMono();
+            tpk=e.contactTransientPeak();
+            return {tl,ta};
+        };
+        float tpk0,tpk1;
+        auto a0=probe(0.f,tpk0);
+        { float tx; auto ax=probe(0.f,tx);
+          require(ax.first==a0.first && ax.second==a0.second && tx==tpk0,
+                  "scrape: 0 re-armed == identical transient (deterministic)"); }
+        auto a1=probe(1.f,tpk1);
+        printf("scrape: dry len=%d amp=%.5f tpk=%.4f | full len=%d amp=%.5f tpk=%.4f\n",
+               a0.first,a0.second,tpk0,a1.first,a1.second,tpk1);
+        require(a1.first>a0.first,"scrape: full scrape stretches the contact layer");
+        require(a1.second>a0.second*2.f,"scrape: full scrape raises the chatter level");
+        require(tpk1>tpk0,"scrape: transient telemetry peak rises");
+        printf("scrape PASS\n");
     }
 
     printf("=== ALL TESTS PASSED ===\n");

@@ -176,6 +176,9 @@ public:
         paramCache[PluginMultiScaleBody::kParamRayleighA]=0.f;
         paramCache[PluginMultiScaleBody::kParamRayleighB]=0.f;
         paramCache[PluginMultiScaleBody::kParamEcoMode]=0.f;
+        // wave-5 defaults: clamp centre, nominal head (SupX/SupY/StrikeW ride
+        // the blanket 0.5 wipe; Scrape needs an explicit zero)
+        paramCache[PluginMultiScaleBody::kParamScrape]=0.f;
         setSize(DISTRHO_UI_DEFAULT_WIDTH, DISTRHO_UI_DEFAULT_HEIGHT);
         fLVGL = new MultiScaleBodyLVGLWidget(getWindow());
         // Right-click routing (DPF's LVGL indev only feeds the left button):
@@ -204,6 +207,8 @@ public:
             case P::kParamBow: return "Bow";           case P::kParamDamper: return "Damper";
             case P::kParamInharm: return "Inharm";     case P::kParamSlideMode: return "Slide";
             case P::kParamSupport: return "Support";   case P::kParamHoldDamp: return "Hold Damp";
+            case P::kParamSupX: return "Sup X";        case P::kParamSupY: return "Sup Y";
+            case P::kParamStrikeW: return "Head";      case P::kParamScrape: return "Scrape";
             case P::kParamResMorph: return "Resolution"; case P::kParamMorphAmt: return "Morph";
             case P::kParamMorphTarget: return "Morph Tgt"; case P::kParamMaterial: return "Material";
             case P::kParamRayleighA: return "Rayl A";   case P::kParamRayleighB: return "Rayl B";
@@ -222,6 +227,7 @@ public:
         if(i==PluginMultiScaleBody::kParamPreset || i==PluginMultiScaleBody::kParamDecay
            || i==PluginMultiScaleBody::kParamModeCount || i==PluginMultiScaleBody::kParamStrikeX
            || i==PluginMultiScaleBody::kParamStrikeY || i==PluginMultiScaleBody::kParamSupport
+           || i==PluginMultiScaleBody::kParamSupX || i==PluginMultiScaleBody::kParamSupY
            || i==PluginMultiScaleBody::kParamHoldDamp || i==PluginMultiScaleBody::kParamResMorph
            || i==PluginMultiScaleBody::kParamMorphTarget || i==PluginMultiScaleBody::kParamMorphAmt
            || i==PluginMultiScaleBody::kParamMaterial || i==PluginMultiScaleBody::kParamRayleighA
@@ -244,6 +250,7 @@ public:
         // wave-3: support/hold/res/morph/rayleigh reshape the ring like Decay does
         if(i==PluginMultiScaleBody::kParamDecay || i==PluginMultiScaleBody::kParamPreset
            || i==PluginMultiScaleBody::kParamSupport || i==PluginMultiScaleBody::kParamHoldDamp
+           || i==PluginMultiScaleBody::kParamSupX || i==PluginMultiScaleBody::kParamSupY
            || i==PluginMultiScaleBody::kParamResMorph || i==PluginMultiScaleBody::kParamMorphTarget
            || i==PluginMultiScaleBody::kParamMorphAmt || i==PluginMultiScaleBody::kParamRayleighA
            || i==PluginMultiScaleBody::kParamRayleighB
@@ -288,6 +295,7 @@ public:
         if(i==PluginMultiScaleBody::kParamPreset || i==PluginMultiScaleBody::kParamDecay
            || i==PluginMultiScaleBody::kParamModeCount || i==PluginMultiScaleBody::kParamStrikeX
            || i==PluginMultiScaleBody::kParamStrikeY || i==PluginMultiScaleBody::kParamSupport
+           || i==PluginMultiScaleBody::kParamSupX || i==PluginMultiScaleBody::kParamSupY
            || i==PluginMultiScaleBody::kParamHoldDamp || i==PluginMultiScaleBody::kParamResMorph
            || i==PluginMultiScaleBody::kParamMorphTarget || i==PluginMultiScaleBody::kParamMorphAmt
            || i==PluginMultiScaleBody::kParamMaterial || i==PluginMultiScaleBody::kParamRayleighA
@@ -331,6 +339,7 @@ public:
             // cost nothing here.
             if(i==PluginMultiScaleBody::kParamDecay || i==PluginMultiScaleBody::kParamPreset
                || i==PluginMultiScaleBody::kParamSupport || i==PluginMultiScaleBody::kParamHoldDamp
+               || i==PluginMultiScaleBody::kParamSupX || i==PluginMultiScaleBody::kParamSupY
                || i==PluginMultiScaleBody::kParamResMorph || i==PluginMultiScaleBody::kParamMorphTarget
                || i==PluginMultiScaleBody::kParamMorphAmt || i==PluginMultiScaleBody::kParamRayleighA
                || i==PluginMultiScaleBody::kParamRayleighB
@@ -724,7 +733,8 @@ private:
         float mTgt=paramCache[PluginMultiScaleBody::kParamMorphTarget];
         float rA=paramCache[PluginMultiScaleBody::kParamRayleighA];
         float rB=paramCache[PluginMultiScaleBody::kParamRayleighB];
-        float physSum=sup+hd+rm+mAmt+mTgt+rA+rB;
+        float physSum=sup+hd+rm+mAmt+mTgt+rA+rB
+            +paramCache[PluginMultiScaleBody::kParamSupX]+paramCache[PluginMultiScaleBody::kParamSupY];
         if(idx==fDampPresetCache && std::abs(decayV-fDampDecayCache)<1e-4f
            && std::abs(bdSum-fDampBandSumCache)<1e-4f
            && std::abs(physSum-fDampPhysSumCache)<1e-4f) return;
@@ -742,6 +752,35 @@ private:
         float edge=std::max(std::fabs(paramCache[PluginMultiScaleBody::kParamStrikeX]-0.5f),
                             std::fabs(paramCache[PluginMultiScaleBody::kParamStrikeY]-0.5f))*2.f;
         const float holdMul = 1.f + 2.f*hd*std::max(0.f,1.f-edge);
+        // wave-5: clamp-proximity weights mirror the engine's armSupportDamp:
+        // bilinear sound-map gains at the clamp point (+body morph), preset-
+        // wide max normalization, scaled by support*1.5. Per-band max joins
+        // the rate multiplier below. Skipped entirely when support is off.
+        float bandSupW[16]={};
+        if(sup>1e-4f){
+            float cfx=paramCache[PluginMultiScaleBody::kParamSupX]*15.f;
+            float cfy=paramCache[PluginMultiScaleBody::kParamSupY]*15.f;
+            int cx0=std::clamp((int)cfx,0,14), cy0=std::clamp((int)cfy,0,14);
+            int cx1=cx0+1, cy1=cy0+1; float cdx=cfx-(float)cx0, cdy=cfy-(float)cy0;
+            float cw00=(1.f-cdx)*(1.f-cdy), cw10=cdx*(1.f-cdy);
+            float cw01=(1.f-cdx)*cdy, cw11=cdx*cdy;
+            float cgRaw[128]; float cgMx=1e-9f;
+            for(int m=0;m<pr.n && m<128;++m){
+                float cg=pr.gain[m][cy0][cx0]*cw00+pr.gain[m][cy0][cx1]*cw10
+                        +pr.gain[m][cy1][cx0]*cw01+pr.gain[m][cy1][cx1]*cw11;
+                if(mAmt>1e-4f){ const int ti=std::min(m,tN-1);
+                    float tg=pt.gain[ti][cy0][cx0]*cw00+pt.gain[ti][cy0][cx1]*cw10
+                            +pt.gain[ti][cy1][cx0]*cw01+pt.gain[ti][cy1][cx1]*cw11;
+                    cg=cg+(tg-cg)*mAmt; }
+                cgRaw[m]=std::fabs(cg); if(cgRaw[m]>cgMx) cgMx=cgRaw[m];
+            }
+            const float ck=sup*1.5f/cgMx;
+            for(int b=0;b<16;++b){
+                int m0=(b*pr.n)/16, m1=((b+1)*pr.n)/16; float bw=0.f;
+                for(int m=m0;m<m1 && m<128;++m) bw=std::max(bw,ck*cgRaw[m]);
+                bandSupW[b]=bw;
+            }
+        }
         const float rayA2 = 5.f*rA*rA, rayB2 = 1.2436e-4f*rB*rB;
         // per-band mean decay, per-band T60
         float bandT60[16]={};
@@ -766,7 +805,7 @@ private:
             float meanF = (float)(fsum/(double)cnt);
             // effective rate: DECAY knob x band trim x support x hold, plus
             // the Rayleigh absolute term at the band-mid frequency
-            float rate = meanRate * scale * supMul * holdMul + rayA2 + rayB2*meanF*meanF;
+            float rate = meanRate * scale * (supMul + bandSupW[b]) * holdMul + rayA2 + rayB2*meanF*meanF;
             float t60 = 6.9078f / (rate * bandTrim[b]);
             bandT60[b]=t60;
             if(t60>maxT60) maxT60=t60;
@@ -1047,6 +1086,10 @@ private:
                 break; }
             case P::kParamSupport:   snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
             case P::kParamHoldDamp:  snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
+            case P::kParamSupX:       snprintf(buf,cap,"%.2f",v); break;
+            case P::kParamSupY:       snprintf(buf,cap,"%.2f",v); break;
+            case P::kParamStrikeW:    snprintf(buf,cap,"x%.2f",0.25f+1.5f*v); break;
+            case P::kParamScrape:     snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
             case P::kParamResMorph:  snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
             case P::kParamMorphAmt:   snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
             case P::kParamMorphTarget: {
@@ -1361,6 +1404,11 @@ private:
         // rolls stay musical; dispatch snaps MorphTarget/Material to steps)
         set(PluginMultiScaleBody::kParamSupport, rnd(0.f,0.5f));
         set(PluginMultiScaleBody::kParamHoldDamp, rnd(0.f,0.5f));
+        // wave-5: clamp wanders near centre, heads vary, scrape stays rare
+        set(PluginMultiScaleBody::kParamSupX, rnd(0.25f,0.75f));
+        set(PluginMultiScaleBody::kParamSupY, rnd(0.25f,0.75f));
+        set(PluginMultiScaleBody::kParamStrikeW, rnd(0.3f,0.7f));
+        set(PluginMultiScaleBody::kParamScrape, (std::rand()%100)<20 ? rnd(0.1f,0.4f) : 0.f);
         set(PluginMultiScaleBody::kParamResMorph, rnd(0.f,1.f));
         set(PluginMultiScaleBody::kParamMorphTarget, (float)(std::rand()%(mx+1))/(float)mx);
         set(PluginMultiScaleBody::kParamMorphAmt, (std::rand()%100)<25 ? rnd(0.2f,0.6f) : 0.f);
@@ -1816,14 +1864,15 @@ private:
         lv_obj_t* head=makeRow(strip,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         addLabel(head,"PHYSICAL MODEL",getScaledSmallFont(),COL_HIGHLIGHT,2);
         addLabel(head,"paper-47 extensions",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        // wave-5: two knob rows. Row1 = CLAMP + CONTACT (the hand: support
+        // depth, clamp touch X/Y, mallet head, scrape) beside ECO + selects;
+        // row2 = BODY CHARACTER (resolution/morph/Rayleigh/budget), centered.
         lv_obj_t* row=makeRow(strip,lv_pct(100),scaled(lay::MODEL_KNOB_H),scaled(8),LV_FLEX_ALIGN_CENTER);
         stripKnob(row,P::kParamSupport);
-        stripKnob(row,P::kParamHoldDamp);
-        stripKnob(row,P::kParamResMorph);
-        stripKnob(row,P::kParamMorphAmt);
-        stripKnob(row,P::kParamRayleighA);
-        stripKnob(row,P::kParamRayleighB);
-        stripKnob(row,P::kParamEcoBudget);
+        stripKnob(row,P::kParamSupX);
+        stripKnob(row,P::kParamSupY);
+        stripKnob(row,P::kParamStrikeW);
+        stripKnob(row,P::kParamScrape);
         fEcoBtn=lv_btn_create(row);
         lv_obj_set_size(fEcoBtn,scaled(lay::MODEL_ECO_W),scaled(lay::BTN_H));
         styles.applyToggleButton(fEcoBtn,paramCache[P::kParamEcoMode]>0.5f);
@@ -1848,6 +1897,13 @@ private:
         lv_obj_set_width(fMorphDd,scaled(lay::MODEL_SEL_W));
         styleModelDropdown(this,fMorphDd);
         lv_obj_add_event_cb(fMorphDd,morphDdCb,LV_EVENT_VALUE_CHANGED,this);
+        lv_obj_t* row2=makeRow(strip,lv_pct(100),scaled(lay::MODEL_KNOB_H),scaled(8),LV_FLEX_ALIGN_CENTER);
+        stripKnob(row2,P::kParamHoldDamp);
+        stripKnob(row2,P::kParamResMorph);
+        stripKnob(row2,P::kParamMorphAmt);
+        stripKnob(row2,P::kParamRayleighA);
+        stripKnob(row2,P::kParamRayleighB);
+        stripKnob(row2,P::kParamEcoBudget);
     }
     // ==== BUILD =============================================================
     // Layout hierarchy (matches Serum 2 main-view grammar, paper-faithful):
@@ -1857,9 +1913,9 @@ private:
     //   |   +-- LEFT  (4 dial groups: BODY/RESONATE/EXCITER/SPACE)
     //   |   +-- CENTER  (hero strike disc + preset row + spec strip)
     //   |   +-- RIGHT  (spectrum card + scope card)
-    //   +-- PHYSICS  (wave-4: 7 machined knobs + ECO + material/morph selects)
+    //   +-- PHYSICS  (wave-5: 11 machined knobs in 2 rows + ECO + material/morph selects)
     //   +-- KEYBOARD  (octave + keys + ARP + tuning selects + learn chip)
-    // vertical budget @s=1: 32 + 72 + 24 + 610 + 124 + 128 = 990 (exact).
+    // vertical budget @s=1: 32 + 72 + 24 + 610 + 202 + 128 = 1068 (exact).
     void buildUI(lv_obj_t* parent=nullptr){
         lv_obj_t* surface=parent ? parent : lv_screen_active();
         if(!surface){ lv_display_t* d=lv_display_get_default(); if(d) surface=lv_display_get_screen_active(d); }
@@ -2640,6 +2696,31 @@ private:
         const float rA=paramCache[PluginMultiScaleBody::kParamRayleighA];
         const float rB=paramCache[PluginMultiScaleBody::kParamRayleighB];
         const float rayA2 = 5.f*rA*rA, rayB2 = 1.2436e-4f*rB*rB;
+        // wave-5: per-mode clamp-proximity weights (engine armSupportDamp
+        // mirror): bilinear gains at the clamp point + morph, normalized
+        // over this preview's n, scaled by support*1.5. Zeros when off.
+        float supWm[128]={};
+        { const float sup=paramCache[PluginMultiScaleBody::kParamSupport];
+          if(sup>1e-4f && n>0){
+            float cfx=paramCache[PluginMultiScaleBody::kParamSupX]*15.f;
+            float cfy=paramCache[PluginMultiScaleBody::kParamSupY]*15.f;
+            int cx0=std::clamp((int)cfx,0,14), cy0=std::clamp((int)cfy,0,14);
+            int cx1=cx0+1, cy1=cy0+1; float cdx=cfx-(float)cx0, cdy=cfy-(float)cy0;
+            float cw00=(1.f-cdx)*(1.f-cdy), cw10=cdx*(1.f-cdy);
+            float cw01=(1.f-cdx)*cdy, cw11=cdx*cdy;
+            float mxw=1e-9f;
+            for(int m=0;m<n;++m){
+                float cg=pr.gain[m][cy0][cx0]*cw00+pr.gain[m][cy0][cx1]*cw10
+                        +pr.gain[m][cy1][cx0]*cw01+pr.gain[m][cy1][cx1]*cw11;
+                if(mAmt>1e-4f){ const int ti=std::min(m,tN-1);
+                    float tg=pt.gain[ti][cy0][cx0]*cw00+pt.gain[ti][cy0][cx1]*cw10
+                            +pt.gain[ti][cy1][cx0]*cw01+pt.gain[ti][cy1][cx1]*cw11;
+                    cg=cg+(tg-cg)*mAmt; }
+                supWm[m]=std::fabs(cg); if(supWm[m]>mxw) mxw=supWm[m];
+            }
+            const float ck=sup*1.5f/mxw;
+            for(int m=0;m<n;++m) supWm[m]*=ck;
+          } }
         // 4.3 s window across 128 points; 3 ms attack ramp first
         const float dt = 4.3f/128.f;
         float peak=1e-12f;
@@ -2656,9 +2737,12 @@ private:
                     float tg = pt.gain[ti][y0][x0]*w00 + pt.gain[ti][y0][x1]*w10
                              + pt.gain[ti][y1][x0]*w01 + pt.gain[ti][y1][x1]*w11;
                     g = g + (tg-g)*mAmt; }
-                float rate = std::pow(std::max(0.2f,dm),0.55f)*std::pow(ref,0.45f)*dScale*supMul*holdMul
+                float rate = std::pow(std::max(0.2f,dm),0.55f)*std::pow(ref,0.45f)*dScale*(supMul+supWm[m])*holdMul
                              + rayA2 + rayB2*fm*fm;
                 if(rate<0.2f) rate=0.2f; if(rate>8000.f) rate=8000.f;
+                // the ring envelope: every mode contributes its strike gain
+                // decaying at its own (fully mirrored) rate
+                e += std::fabs(g)*(float)std::exp(-(double)rate*(double)t);
             }
             e *= attack;
             fScopePreview[i]=e;

@@ -29,6 +29,8 @@ PluginMultiScaleBody::PluginMultiScaleBody() : Plugin(kNumParams, 0, 6) {
     paramBase_[kParamMorphTarget]=0.f; paramBase_[kParamMorphAmt]=0.f; paramBase_[kParamMaterial]=0.f;
     paramBase_[kParamRayleighA]=0.f; paramBase_[kParamRayleighB]=0.f;
     paramBase_[kParamEcoMode]=0.f; paramBase_[kParamEcoBudget]=0.5f;
+    paramBase_[kParamSupX]=0.5f; paramBase_[kParamSupY]=0.5f;
+    paramBase_[kParamStrikeW]=0.5f; paramBase_[kParamScrape]=0.f;
     double sr=getSampleRate(); if(sr<1000) sr=44100;
     engine_.prepare(sr);
     engine_.setPitchScale(paramBase_[kParamPitch]); engine_.setDecayScale(paramBase_[kParamDecay]);
@@ -57,6 +59,9 @@ PluginMultiScaleBody::PluginMultiScaleBody() : Plugin(kNumParams, 0, 6) {
     engine_.setMaterial((int)std::lround(paramBase_[kParamMaterial]*(float)(modal::MultiScaleBodyEngine::kNumMaterials-1)));
     engine_.setRayleigh(paramBase_[kParamRayleighA], paramBase_[kParamRayleighB]);
     engine_.setEco(paramBase_[kParamEcoMode]>0.5f, paramBase_[kParamEcoBudget]);
+    engine_.setSupPos(paramBase_[kParamSupX], paramBase_[kParamSupY]);
+    engine_.setStrikeW(paramBase_[kParamStrikeW]);
+    engine_.setScrape(paramBase_[kParamScrape]);
     // look-ahead limiter delay: hosts compensate when aligning PDC.
     // Reporting requires DISTRHO_PLUGIN_WANT_LATENCY=1 in DistrhoPluginInfo.h
     // (left off for now; guarded so enabling the flag just works).
@@ -101,6 +106,10 @@ void PluginMultiScaleBody::initParameter(uint32_t index, Parameter& p){
         case kParamResMorph: p.name="Resolution"; p.symbol="resmorph"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamMorphTarget: p.name="Morph Target"; p.symbol="morphtarget"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamMorphAmt: p.name="Morph"; p.symbol="morph"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamSupX: p.name="Sup X"; p.symbol="supx"; p.ranges.def=0.5f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamSupY: p.name="Sup Y"; p.symbol="supy"; p.ranges.def=0.5f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamStrikeW: p.name="Head"; p.symbol="strikew"; p.ranges.def=0.5f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamScrape: p.name="Scrape"; p.symbol="scrape"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamMaterial: p.name="Material"; p.symbol="material"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamRayleighA: p.name="Rayl A"; p.symbol="rayla"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamRayleighB: p.name="Rayl B"; p.symbol="raylb"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
@@ -182,7 +191,19 @@ void PluginMultiScaleBody::setParameterValue(uint32_t idx,float v){
             const int m=std::clamp((int)std::lround(v*(float)(nm-1)),0,nm-1);
             paramBase_[idx]=(float)m/(float)(nm-1);
             engine_.setMaterial(m);
+            // wave-5: selecting a real material snaps the Rayleigh knobs to
+            // that material's baked defaults (DEFAULT leaves knobs alone).
+            // Recursion is one level and terminates (Rayleigh cases below
+            // never touch Material).
+            if(m>0){
+                setParameterValue(kParamRayleighA, modal::MultiScaleBodyEngine::kMatRay[m][0]);
+                setParameterValue(kParamRayleighB, modal::MultiScaleBodyEngine::kMatRay[m][1]);
+            }
             break; }
+        case kParamSupX: case kParamSupY:
+            engine_.setSupPos(paramBase_[kParamSupX],paramBase_[kParamSupY]); break;
+        case kParamStrikeW: engine_.setStrikeW(v); break;
+        case kParamScrape: engine_.setScrape(v); break;
         case kParamRayleighA: engine_.setRayleigh(v,paramBase_[kParamRayleighB]); break;
         case kParamRayleighB: engine_.setRayleigh(paramBase_[kParamRayleighA],v); break;
         case kParamEcoMode: engine_.setEco(v>0.5f,paramBase_[kParamEcoBudget]); break;
@@ -235,6 +256,9 @@ void PluginMultiScaleBody::sampleRateChanged(double sr){
     engine_.setMaterial((int)std::lround(paramBase_[kParamMaterial]*(float)(modal::MultiScaleBodyEngine::kNumMaterials-1)));
     engine_.setRayleigh(paramBase_[kParamRayleighA], paramBase_[kParamRayleighB]);
     engine_.setEco(paramBase_[kParamEcoMode]>0.5f, paramBase_[kParamEcoBudget]);
+    engine_.setSupPos(paramBase_[kParamSupX], paramBase_[kParamSupY]);
+    engine_.setStrikeW(paramBase_[kParamStrikeW]);
+    engine_.setScrape(paramBase_[kParamScrape]);
     if(!scaleTxt_.empty()) engine_.setTuning(scaleRatios_, scaleActive_); // survives SR change
 #if DISTRHO_PLUGIN_WANT_LATENCY
     setLatency(engine_.limiterLatency());
