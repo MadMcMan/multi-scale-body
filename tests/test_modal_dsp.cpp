@@ -1276,6 +1276,74 @@ int main(){
         require(tpk1>tpk0,"scrape: transient telemetry peak rises");
         printf("scrape PASS\n");
     }
+    // --- wave-5 fix: held notes FOLLOW preset switches ----------------------
+    // Regression for "after pressing RANDOM the presets no longer work":
+    // tables were baked once at noteOn, so a held (bowed) note droned the
+    // old body forever after a body switch. setPreset now re-bakes active
+    // voices at their stored strike point; states keep ringing.
+    {
+        MultiScaleBodyEngine e;
+        e.prepare(44100); e.reset();
+        e.setBow(0.7f);
+        e.setPreset(0);   // Bowl
+        e.noteOn(60,1.f,0);
+        for(int i=0;i<22050;++i) e.processSampleMono(); // hold 0.5 s
+        e.setPreset(9);   // Glass, mid-hold
+        const float fAfter=(float)(std::acos(std::clamp((double)e.voice(0).cosTheta[0],-1.0,1.0))*44100.0/(2*M_PI));
+        const float fGlass=(float)(modal::kPresets[9].freq[0]/(2*M_PI));
+        printf("preset-follow: held-note f0 %.0f Hz (Glass baked %.0f Hz)\n",fAfter,fGlass);
+        require(e.voice(0).active,"preset-follow: voice survives the switch");
+        require(std::fabs(fAfter-fGlass)<std::fabs(fGlass)*1e-3f+0.5f,
+                "preset-follow: held note tracks the new body");
+        // and the timbre actually moves: ring after switch differs from a
+        // Bowl hold that never switched
+        MultiScaleBodyEngine c;
+        c.prepare(44100); c.reset();
+        c.setBow(0.7f);
+        c.setPreset(0);
+        c.noteOn(60,1.f,0);
+        for(int i=0;i<22050;++i) c.processSampleMono();
+        std::vector<float> a,b;
+        for(int i=0;i<4096;++i) a.push_back(e.processSampleMono());
+        for(int i=0;i<4096;++i) b.push_back(c.processSampleMono());
+        double d=0,na=0; for(size_t i=0;i<a.size();++i){ double di=a[i]-b[i]; d+=di*di; na+=(double)b[i]*b[i]; }
+        require(std::sqrt(d/(na+1e-12))>0.3,"preset-follow: switched hold sounds different");
+        printf("preset-follow PASS\n");
+    }
+    // --- wave-5 fix: bowed bodies must speak --------------------------------
+    // The bridge never enters stick-slip (stick fraction 0.000), so
+    // constant-force loudness follows modal Q: Glass/Chime/Celesta
+    // whispered or stalled at C4 while Bowl roared (measured 150x spread).
+    // bowScale levels each voice to the Bowl reference (boost-only, <=6x).
+    {
+        auto lateLevel=[&](int preset,int note)->double{
+            MultiScaleBodyEngine e; e.prepare(44100); e.reset();
+            e.setPreset(preset);
+            e.setBow(0.7f);
+            e.noteOn(note,1.f,0);
+            double late=0.0; int n=0;
+            for(int i=0;i<122880;++i){ float s=e.processSampleMono();
+                if(i>=90000){ late+=std::fabs((double)s); ++n; } }
+            return late/(double)n;
+        };
+        // the calibrated reference is untouched, exactly
+        MultiScaleBodyEngine e; e.prepare(44100); e.reset();
+        e.setBow(0.9f);
+        e.noteOn(60,1.f,0);
+        require(e.voice(0).bowScale==1.0f,"bow leveling: Bowl reference bowScale exactly 1.0");
+        // every factory body pumps audibly at C4 under bow (the reported
+        // "presets don't work" was Chime/Celesta/Glass stalling here)
+        const double bowl=lateLevel(0,60);
+        for(int p : {9, 10, 17, 13}){
+            const double lv=lateLevel(p,60);
+            printf("bow level %-8s %.4f (Bowl %.4f)\n",modal::kPresets[p].name,lv,bowl);
+            require(lv>0.002,"bow leveling: body speaks under bow");
+        }
+        // spread is bounded now (was 150x Bowl:Glass at C4)
+        const double glass=lateLevel(9,60);
+        require(bowl/glass<8.0 && glass/bowl<8.0,"bow leveling: body spread bounded");
+        printf("bow leveling PASS (Bowl:Glass %.1fx)\n",bowl/glass);
+    }
 
     printf("=== ALL TESTS PASSED ===\n");
     return 0;

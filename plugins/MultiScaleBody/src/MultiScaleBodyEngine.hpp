@@ -176,6 +176,21 @@ struct Voice {
     // noteOn from the hold-damping depth and the strike edge distance; applied
     // live in recomputeVoiceCoeffs (d *= 1 + holdFactor). 0 = no hold damping.
     float  holdFactor=0.f;
+    // wave-5 fix (presets must work after RANDOM): velocity-morphed strike
+    // point, stored at noteOn so a mid-hold preset switch re-bakes gains at
+    // the ORIGINAL strike position, not the live knob position.
+    float  hitX=0.5f, hitY=0.5f;
+    // wave-5 fix (bowed bodies must speak): per-voice bow-drive leveling.
+    // The stick-slip bridge never engages on sparse/high bodies (measured
+    // stick fraction 0.000), so constant-force loudness follows modal Q and
+    // Glass/Chime/Celesta whisper or stall at C4 (Bowl:Glass 15x). bowScale
+    // normalizes each voice's drive coupling to the Bowl reference, so every
+    // body speaks; bow pressure/velocity response is untouched (the drive
+    // divides out). 1.0 when bow is off — unread on the default path.
+    float  bowScale=1.f;
+    // drive (velocity/MPE blend) at noteOn; refreshBowScale divides the
+    // coupling by it so leveling never compresses velocity dynamics.
+    float  bowDrive=1.f;
     // wave-5 (support position x band-widening): per-mode clamp-proximity
     // weight, armed at noteOn from the sound map at the CLAMP point
     // (supX_/supY_): a mode that moves strongly where the hand clamps loses
@@ -301,6 +316,21 @@ public:
     // armSupportDamp() does for voices.
     void supportDampWeights(float* out) const;
     void armSupportDamp(Voice& v);
+    // Live preset-follow (wave-5 fix): re-derive an ACTIVE voice's freq /
+    // decay / gain / inharm tables from the current body at its stored
+    // strike point. States (s1/s2), envelope and bow bridge are untouched —
+    // a held (bowed) note morphs to the new body instead of droning the old
+    // one. Same float ops as noteOn's table loop, so default renders are
+    // bit-identical.
+    void rebakeVoiceTables(Voice& v);
+    void refreshBowScale(Voice& v);
+    // Bow-drive leveling (wave-5 fix): normalize the voice's SIGNED static
+    // mix to the Bowl reference so every body speaks under bow. The bow
+    // force is quasi-static, so sustain loudness follows the signed mix
+    // (measured: predicts the 150x Bowl:Glass spread); the unsigned sum
+    inline static constexpr float kBowRefMix = 0x1.5f6607990942cp-13f; // |signed static mix| of Bowl C4 vel1
+    inline static constexpr float kBowScaleLo = 1.f;      // boost-only: never attenuate a speaking voice
+    inline static constexpr float kBowScaleHi = 6.f;      // ...nor push one into stick-feedback suppression
     // pitch bend per MIDI channel (MPE)
     void setPitchBend(int channel, float semitones); // -12..+12
     // MPE per-note pressure: member channels (1..15) latch the latest

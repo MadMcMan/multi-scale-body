@@ -538,6 +538,56 @@ void MultiScaleBodyEngine::armSupportDamp(Voice& v){
     for(int i=0;i<v.n;++i) v.suppDamp[i]=k*w[i];
     for(int i=v.n;i<kMaxModes;++i) v.suppDamp[i]=0.f;
 }
+// Live preset-follow: the exact table-baking ops noteOn performs (same
+// order, same formulas), factored so a mid-hold setPreset() re-derives an
+// active voice from the NEW body. States (s1/s2), envelope and bow bridge
+// are the caller's business: noteOn zeroes states after this; setPreset
+// keeps them ringing.
+void MultiScaleBodyEngine::rebakeVoiceTables(Voice& v){
+    const auto& p = kPresets[presetIdx_];
+    float gains[kMaxModes];
+    interpolateGainsFor(gains,v.hitX,v.hitY);
+    // idea 4: blend the target body's sound map at the same strike point
+    if(morphAmt_>1e-4f){
+        float tG[kMaxModes];
+        interpolateGainsFor(tG,v.hitX,v.hitY,morphTarget_);
+        for(int i=0;i<modal::kMaxModes;++i) gains[i]=gains[i]+(tG[i]-gains[i])*morphAmt_;
+    }
+    float noteShift = tuningActive_ ? noteRatio_[std::clamp(v.midiNote,0,127)]
+                                    : std::pow(2.f, (v.midiNote - 60) / 12.f);
+    for (int i=0;i<v.n;++i) {
+        v.freq[i] = bodyFreq(p,i,v.n)*noteShift;   // wave-3: res/body/support/material
+        v.decay[i] = shapeDecayRate(bodyDecay(p,i,v.n));
+        v.gain[i] = gains[i] * v.bowDrive;
+        v.inharmMul[i]=(v.n>1)?(float)(i*i)/(float)((v.n-1)*(v.n-1)):0.f;
+        v.bendTilt[i]=1.f;
+    }
+}
+// Bow-drive leveling: S = SIGNED static mix of this voice's modes
+// (gain*excNorm*rad/denom summed with signs). The bow force is
+// quasi-static (stick fraction measured 0.000), so sustain loudness
+// follows S — it predicts the observed 150x Bowl:Glass spread, where the
+// unsigned sum over-predicts canceling bodies. bowScale = |Sref|/|S|.
+// Drive divides out (pressure/velocity untouched); denom uses the
+// UNSHIFTED body frequency so the metric is note-independent (the natural
+// pitch curve is preserved; only the per-body bias is removed).
+void MultiScaleBodyEngine::refreshBowScale(Voice& v){
+    if(!(bowPressure_>1e-4f)){ v.bowScale=1.f; return; }
+    const auto& p = kPresets[presetIdx_];
+    double s=0.0;
+    for(int i=0;i<v.n;++i){
+        const double R=v.R[i];
+        const double th0=(double)bodyFreq(p,i,v.n)/sampleRate_;
+        const double co=std::cos(th0);
+        const double denom=1.0-2.0*R*co+R*R;
+        if(denom>1e-9)
+            s += (double)v.gain[i]*(double)v.excNorm[i]*(double)v.radGain[i]/denom;
+    }
+    s /= std::max((double)v.bowDrive,1e-3);
+    const double mag=std::fabs(s);
+    if(!(mag>1e-15)){ v.bowScale=kBowScaleHi; return; }
+    v.bowScale=std::clamp((float)((double)kBowRefMix/mag),kBowScaleLo,kBowScaleHi);
+}
 void MultiScaleBodyEngine::setHoldDamp(float v){ holdDamp_=std::clamp(v,0.f,1.f); irDirty_=true; }
 void MultiScaleBodyEngine::setResMorph(float v){ resMorph_=std::clamp(v,0.f,1.f); irDirty_=true; }
 void MultiScaleBodyEngine::setMorphTarget(int t){ morphTarget_=std::clamp(t,0,kNumPresets-1); irDirty_=true; }
@@ -667,6 +717,16 @@ void MultiScaleBodyEngine::setPreset(int idx) {
     computeDecayRef(); // ring anchor is per-body — must follow the preset
     updateMaterialMul(); // material rescale is per-body too (uses presetIdx_)
     interpolateGainsFor(nextGain_, strikeX_, strikeY_);
+    // wave-5 fix (presets must work after RANDOM): held notes — bow drones
+    // especially — re-derive tables from the NEW body at their stored strike
+    // point. States, envelope and bow bridge keep ringing uninterrupted;
+    // coefficients + clamp weights + bow leveling refresh for the new body.
+    for(auto& vv: voices_) if(vv.active){
+        rebakeVoiceTables(vv);
+        armSupportDamp(vv);
+        recomputeVoiceCoeffs(vv);
+        refreshBowScale(vv);
+    }
     irDirty_=true;
 }
 void MultiScaleBodyEngine::setPitchScale(float v) {
@@ -795,6 +855,7 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
         float vy=strikeY_+(0.9f-strikeY_)*velStrike_*drive;
         float tmp[kMaxModes];
         interpolateGainsFor(tmp,vx,vy);
+        v.hitX=vx; v.hitY=vy; v.bowDrive=drive; // stored for preset-follow rebake
         v.holdFactor=holdFactorAt(vx,vy);   // idea 6 (per-voice, live in coeffs)
         // ideas 7+8: scene-adaptive resolution (see the normal-path block)
     if(ecoMode_){
@@ -823,6 +884,7 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
         }
         armSupportDamp(v); // wave-5: clamp-proximity weights (v.n is final here)
         recomputeVoiceCoeffs(v);
+        refreshBowScale(v); // wave-5 fix: level the bow drive for this body
         armExcitation(v,vx,vy); // bow bridge or re-strike on mono retrigger
         return;
     }
@@ -863,32 +925,18 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
     float vx = strikeX_ + (drive-0.5f)*velStrike_*0.6f;      // X spreads with velocity
     float vy = strikeY_ + (drive-0.5f)*velStrike_*0.5f;      // Y drifts up (brighter rim)
     vx=std::clamp(vx,0.f,1.f); vy=std::clamp(vy,0.f,1.f);
-    float gains[kMaxModes];
-    interpolateGainsFor(gains,vx,vy);
-    // idea 4: blend the target body's sound map at the same strike point
-    if(morphAmt_>1e-4f){
-        float tG[kMaxModes];
-        interpolateGainsFor(tG,vx,vy,morphTarget_);
-        for(int i=0;i<modal::kMaxModes;++i) gains[i]=gains[i]+(tG[i]-gains[i])*morphAmt_;
-    }
+    // table baking lives in rebakeVoiceTables() (shared with live
+    // preset-follow); store the strike point + drive first so the helper
+    // reproduces these exact values.
+    v.hitX=vx; v.hitY=vy; v.bowDrive=drive;
     v.holdFactor=holdFactorAt(vx,vy);   // idea 6 (per-voice, live in coeffs)
-    // Microtonal tuning (idea 13): the plugin parses .scl/.kbm into a
-    // note-relative ratio table; inactive keeps the classic pow path
-    // bit-identical. Tune (pitchScale_) stays a global offset applied after.
-    float noteShift = tuningActive_ ? noteRatio_[std::clamp(midiNote,0,127)]
-                                    : std::pow(2.f, (midiNote - 60) / 12.f);
-    for (int i=0;i<v.n;++i) {
-        v.freq[i] = bodyFreq(p,i,v.n)*noteShift;   // wave-3: res/body/support/material
-        v.decay[i] = shapeDecayRate(bodyDecay(p,i,v.n));
-        v.gain[i] = gains[i] * drive;
-        v.inharmMul[i]=(v.n>1)?(float)(i*i)/(float)((v.n-1)*(v.n-1)):0.f;
-        v.bendTilt[i]=1.f;
-        v.s1[i]=v.s2[i]=0.f;
-    }
+    rebakeVoiceTables(v);
+    for (int i=0;i<v.n;++i) { v.s1[i]=v.s2[i]=0.f; }
     for (int i=v.n;i<kMaxModes;++i) { v.gain[i]=0.f; v.s1[i]=v.s2[i]=0.f; }
     v.env=0.f; v.envState=Voice::Attack;
     armSupportDamp(v); // wave-5: clamp-proximity weights (v.n is final here)
     recomputeVoiceCoeffs(v);
+    refreshBowScale(v); // wave-5 fix: level the bow drive for this body
     armExcitation(v,vx,vy);
     v.silenceCount = 0; // strike is carried by the force pulse, not a Dirac flag
     monoTopVoice_=target;
@@ -1068,7 +1116,7 @@ void MultiScaleBodyEngine::processSampleStereo(float &outL, float &outR) {
             } else {
                 exc = strikeExc;
             }
-            if(bowF!=0.f) exc += bowF*v.gain[i]*v.excNorm[i]*kBowTrim; // bowed swell
+            if(bowF!=0.f) exc += bowF*v.gain[i]*v.excNorm[i]*kBowTrim*v.bowScale; // bowed swell (leveled per body)
             float y = a1 * v.s1[i] + a2 * v.s2[i] + exc;
             v.s2[i] = v.s1[i];
             v.s1[i] = y;
@@ -1084,7 +1132,6 @@ void MultiScaleBodyEngine::processSampleStereo(float &outL, float &outR) {
         }
         // Contact-transient layer: xorshift32 white noise -> one-pole LP
         // (bandwidth set by strike position at arm time) -> linear fade,
-        // added to the voice sum co-incident with the force pulse. Gated by
         // the same env as the modes so release/steal also mutes it. Bounded
         // by construction (|tr| <= transAmp = kContactTrim*mean|gain|);
         // telemetry peak feeds contactTransientPeak() for tests.
