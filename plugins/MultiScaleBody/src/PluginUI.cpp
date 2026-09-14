@@ -556,6 +556,8 @@ private:
         fDampMax=1.f; fDampPresetCache=-1; fDampDecayCache=-1.f; fDampBandSumCache=-1.f; fDampPhysSumCache=-1.f;
         for(int i=0;i<100;++i) fHeatDots[i]=nullptr; fHeatCount=0; fHeatDirty=true; fModeFocus=-1;
         fScrubMode=0; fScrubParamIdx=-1; fScrubToggle=nullptr;
+        fScrubLbl=nullptr; fScrubLblAge=0; fScrubBand=-1; fScrubLevel=-1.f;
+        for(int i=0;i<16;++i) fBandTicks[i]=nullptr; fBandTicksDirty=true;
         fLearnChip=fLearnLbl=nullptr; fLearnParam=-1;
         fEdoDropdown=nullptr; fScaleLbl=nullptr;
         fRecBtn=fPlayBtn=nullptr; fRecOn=false; fRecPlaying=false; fRecN=0; fRecCursor=0; fPlayHeld=false;
@@ -1161,6 +1163,62 @@ private:
             a.y2=a.y1+hh-1;
             lv_draw_rect(layer,&dsc,&a);
         }
+        // wave-6 (scrub visibility): band-column highlight + persistent trim
+        // strip. The chart itself only shows the (live) spectrum — the
+        // trims you EDIT in a scrub had no on-chart trace, so drags felt
+        // visually dead. DRAW_POST_END runs on every chart refresh (33 ms
+        // cadence), so the highlight follows the drag with no extra timers.
+        // Band geometry = the LVGL BAR painter's own block layout
+        // (lv_chart.c draw_series_bar): block i spans
+        //   [xOfs + (w-blockW)*i/15, +blockW),
+        // blockW = (w - 15*colGapMain)/16, colGapMain = pad_column
+        // (LV_PART_MAIN), xOfs = the chart's left content edge. Probed on
+        // the real capture at 1440x1068 (origin x=941 px window, 30 px
+        // slot pitch, 21 px bars): colGapMain=9 px.
+        const lv_coord_t mar=lv_obj_get_style_pad_column(chart,LV_PART_MAIN);
+        const lv_coord_t scx=(lv_coord_t)(cc.x1+pl);
+        const int scw=(int)(cc.x2-bl-lv_obj_get_style_pad_right(chart,LV_PART_MAIN)-scx+1);
+        const int sbw=(scw-15*(int)mar)/16;
+        // 1) active (or just-released) band: translucent full-height column
+        //    over the edited block. Fill-only by design: slot-edge rules were
+        //    tried and removed — a rule on a block boundary lands on the
+        //    neighboring bar and reads as the wrong band.
+        if(ui->fScrubBand>=0 && ui->fScrubBand<16){
+            const int b=ui->fScrubBand;
+            const lv_coord_t bx=(lv_coord_t)(scx+(lv_coord_t)((scw-sbw)*b/15));
+            lv_area_t col;
+            col.x1=bx; col.x2=(lv_coord_t)(bx+sbw-1);
+            col.y1=(lv_coord_t)(cc.y1+pt); col.y2=contentBottom;
+            lv_draw_rect_dsc_t hd; lv_draw_rect_dsc_init(&hd);
+            hd.bg_color=COL_HIGHLIGHT; hd.bg_opa=LV_OPA_20;
+            hd.radius=0; hd.border_width=0;
+            lv_draw_rect(layer,&hd,&col);
+        }
+        // 2) trim tick strip at the plot floor — the edit's durable trace:
+        //    bottom row 3px = GAIN trim applied (blue), 2px row above =
+        //    DECAY trim applied (green), each drawn only where the trim
+        //    differs from default by >2%. Edited bands stay marked after the
+        //    drag ends — the "what did I change" memory the user asked for.
+        for(int b=0;b<16;++b){
+            const lv_coord_t bx=(lv_coord_t)(scx+(lv_coord_t)((scw-sbw)*b/15));
+            const lv_coord_t bx1=(lv_coord_t)(bx+1);
+            const lv_coord_t bx2=(lv_coord_t)(bx+sbw-2);
+            if(bx2<bx1) continue;
+            const float gt=ui->paramCache[PluginMultiScaleBody::kParamBand0+b];
+            const float dt=ui->paramCache[PluginMultiScaleBody::kParamBandDecay0+b];
+            lv_draw_rect_dsc_t td; lv_draw_rect_dsc_init(&td);
+            td.radius=0; td.border_width=0;
+            if(std::fabs(dt-0.5f)>0.02f){   // decay: above the gain row
+                td.bg_color=COL_METER_SAFE; td.bg_opa=LV_OPA_COVER;
+                lv_area_t ad={bx1,(lv_coord_t)(contentBottom-6),bx2,(lv_coord_t)(contentBottom-5)};
+                lv_draw_rect(layer,&td,&ad);
+            }
+            if(std::fabs(gt-0.5f)>0.02f){   // gain: bottom-most row
+                td.bg_color=PLATE_AMBER; td.bg_opa=LV_OPA_COVER;
+                lv_area_t a={bx1,(lv_coord_t)(contentBottom-2),bx2,(lv_coord_t)(contentBottom-1)};
+                lv_draw_rect(layer,&td,&a);
+            }
+        }
     }
     // meter zone marks sit at fixed fractions of the measured bar width;
     // called after the tree has settled (positions are meaningless before)
@@ -1270,19 +1328,42 @@ private:
                 ui->fScrubBand=band;
                 ui->fScrubParamIdx=pIdx;
                 ui->fScrubLevel=level;
-                ui->editParameter((uint32_t)pIdx,true);
-                ui->setParamValue((uint32_t)pIdx, level);
             } else if(level!=ui->fScrubLevel){   // same band: write only on change
                 ui->fScrubLevel=level;
                 ui->setParamValue((uint32_t)pIdx, level);
             }
+            // wave-6: live value chip + hold the band highlight while the
+            // pointer is down (age resets each PRESS/PRESSING frame).
+            ui->updateScrubChip(band);
+            ui->fScrubLblAge=-1;   // -1 = actively dragging
+            ui->fBandTicksDirty=true;
         } else if(code==LV_EVENT_RELEASED || code==LV_EVENT_PRESS_LOST){
             if(ui->fScrubParamIdx>=0){
                 ui->editParameter((uint32_t)ui->fScrubParamIdx,false);
                 ui->fScrubParamIdx=-1;
-                ui->fScrubBand=-1;
             }
+            // wave-6: keep the highlight + chip ~1s after release so the
+            // edit remains visible as the pointer leaves (age ticks down in
+            // updateSpectrumDisplay; fScrubBand stays until it hits 0).
+            ui->fScrubLblAge=30;
+            ui->fBandTicksDirty=true;
         }
+    }
+    // wave-6: pinned value chip inside the spectrum chart — "B7 · GAIN 132 %"
+    // or "B7 · DECAY x1.35". Recomputed every scrub frame so the operator
+    // reads the exact edit, not just a bar that moved.
+    void updateScrubChip(int band){
+        if(!fScrubLbl) return;
+        char buf[32];
+        if(fScrubMode){
+            const float t=std::pow(2.f,(paramCache[PluginMultiScaleBody::kParamBandDecay0+band]-0.5f)*2.f);
+            snprintf(buf,sizeof(buf),"B%d - DECAY x%.2f",band+1,t);
+        } else {
+            snprintf(buf,sizeof(buf),"B%d - GAIN %d %%",band+1,
+                     (int)std::lround(paramCache[PluginMultiScaleBody::kParamBand0+band]*200.f));
+        }
+        lv_label_set_text(fScrubLbl,buf);
+        lv_obj_clear_flag(fScrubLbl,LV_OBJ_FLAG_HIDDEN);
     }
     void updateKeyboardNotes(){
         if(!kbContainer) return;
@@ -2569,15 +2650,38 @@ private:
         lv_obj_add_event_cb(chart,spectrumPeakDrawCb,LV_EVENT_DRAW_POST_END,this);
         fSpectrumChart=chart; for(int i=0;i<16;++i) lv_chart_set_value_by_id(chart,series,i,0);
 
-        // piece-3: B1..B16 micro-legend; B1 is the lead (selected band hairline at
-        // 100% alpha amber), the rest are dim. The dim labels still anchor the eye
-        // to a 16-step analyzer; the bright B1 is what the operator reads as "the band".
+        // wave-6: value chip pinned inside the chart — shows the exact
+        // "B# · GAIN/DECAY value" while scrubbing (and ~1s after). A chart
+        // child label, so it rides every rebuild. CLICKABLE is cleared so
+        // it can never eat the scrub drag (LVGL9 default-clickable trap),
+        // and it is excluded from the draw-callback overlays' hit path.
+        fScrubLbl=lv_label_create(chart);
+        lv_label_set_text(fScrubLbl,"");
+        lv_obj_add_flag(fScrubLbl,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(fScrubLbl,LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_clear_flag(fScrubLbl,LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_text_font(fScrubLbl,getScaledMicroFont(),0);
+        lv_obj_set_style_text_color(fScrubLbl,PLATE_AMBER_PALE,0);
+        lv_obj_set_style_bg_color(fScrubLbl,PLATE_WELL,0);
+        lv_obj_set_style_bg_opa(fScrubLbl,LV_OPA_80,0);
+        lv_obj_set_style_pad_hor(fScrubLbl,scaled(4),0);
+        lv_obj_set_style_pad_ver(fScrubLbl,scaled(2),0);
+        lv_obj_set_style_radius(fScrubLbl,scaled(3),0);
+        lv_obj_align(fScrubLbl,LV_ALIGN_TOP_LEFT,scaled(8),scaled(10));
+
+        // piece-3 + wave-6: B1..B16 micro-legend. Wave-6 restyle: instead of
+        // a permanent bright B1 (which read as "band 1 is selected" when
+        // nothing was), every label starts dim and restyleBandTicks() lights
+        // the ACTIVE scrub band + any band carrying a non-default trim
+        // (gain or decay) — the legend becomes a live map of the edits.
         lv_obj_t* tickRow=makeRow(spectrumCard,lv_pct(100),scaled(lay::TICKS_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         for(int b=0;b<16;++b){
             char nm[8]; snprintf(nm,sizeof(nm),"B%d",b+1);
-            lv_obj_t* lbl=addLabel(tickRow,nm,getScaledMicroFont(),b==0?PLATE_AMBER:PLATE_TEXT_DIM,b==0?1:0);
-            if(b==0) lv_obj_set_style_text_opa(lbl,LV_OPA_COVER,0);
+            lv_obj_t* lbl=addLabel(tickRow,nm,getScaledMicroFont(),PLATE_TEXT_DIM,0);
+            lv_obj_set_style_text_opa(lbl,LV_OPA_COVER,0);
+            fBandTicks[b]=lbl;
         }
+        fBandTicksDirty=true;
         // scope card: 24 pad + 22 head + 8 + 14 meter + 8 + 160 scope = 236
         lv_obj_t* scopeCard=makeCard(right,lv_pct(100),scaled(lay::SCOPE_CARD_H),scaled(8));
         lv_obj_t* scopeHead=makeRow(scopeCard,lv_pct(100),scaled(lay::HEAD_H),scaled(8));
@@ -2673,9 +2777,27 @@ private:
         // before their first present. One synchronous pass seeds the analyzer
         // bars and the full idle decay trace, so the panels never present blank.
         updateSpectrumDisplay();
+        applyScrubDemo();   // wave-6: pre-armed overlay state for a bare capture
     }
 
-    // R3: build the idle decay-envelope preview trace. Uses ONLY baked
+    // wave-6: MSB_SCRUB_DEMO=<band> — pre-armed demo state so a bare capture
+    // shows the scrub-visibility overlay (highlight column, value chip, trim
+    // tick strip + legend restyle) without real mouse input (the headless
+    // harness cannot inject into the LVGL pointer indev). Inert unless the
+    // var is set; never touched in normal operation.
+    void applyScrubDemo(){
+        const char* v=std::getenv("MSB_SCRUB_DEMO");
+        if(!v) return;
+        const int band=std::clamp(std::atoi(v),0,15);
+        paramCache[PluginMultiScaleBody::kParamBand0+3]=0.80f;      // gain x1.6
+        paramCache[PluginMultiScaleBody::kParamBand0+7]=0.30f;      // gain x0.6
+        paramCache[PluginMultiScaleBody::kParamBandDecay0+11]=0.77f;// decay x1.9
+        fScrubBand=band;
+        fScrubLblAge=-1;        // mid-drag look (chip + column persistent)
+        updateScrubChip(band);
+        fBandTicksDirty=false;  // demo runs outside the tick: restyle now
+        restyleBandTicks();
+    }
     // ModalData (per-mode decay rates + gains at the current strike point),
     // so it works with no audio thread alive. Mirrors the engine exactly:
     // shapeDecayRate() geometric pull toward the preset anchor, then the
@@ -2780,11 +2902,43 @@ private:
             lv_chart_refresh(fScopeChart);
         }
     }
+    // wave-6: B1..B16 legend restyle — the live map of "what is edited".
+    // Active scrub band: bright lead (PLATE_AMBER, letterspacing 1).
+    // Band with a non-default gain trim: bright text. Band with a
+    // non-default decay trim: the muted green of the decay ticks, so the
+    // legend colors match the floor tick strip (blue row = gain, green
+    // row = decay). Untouched bands stay dim.
+    void restyleBandTicks(){
+        for(int b=0;b<16;++b){
+            lv_obj_t* lbl=fBandTicks[b];
+            if(!lbl) continue;
+            lv_color_t col=PLATE_TEXT_DIM;
+            lv_coord_t ls=0;
+            const float gt=paramCache[PluginMultiScaleBody::kParamBand0+b];
+            const float dt=paramCache[PluginMultiScaleBody::kParamBandDecay0+b];
+            if(std::fabs(dt-0.5f)>0.02f){ col=COL_METER_SAFE; ls=1; }
+            if(std::fabs(gt-0.5f)>0.02f){ col=PLATE_AMBER; ls=1; }
+            if(b==fScrubBand){ col=PLATE_AMBER_PALE; ls=1; }
+            lv_obj_set_style_text_color(lbl,col,0);
+            lv_obj_set_style_text_letter_space(lbl,scaled(ls),0);
+        }
+    }
     void updateSpectrumDisplay(){
         if(!fSpectrumChart) return;
         // place the strike marker once the disc has real geometry
         if(!fMarkerPlaced && strikeDisc && lv_obj_get_width(strikeDisc)>0){ fMarkerPlaced=true; updateStrikeMarker(); }
         lv_chart_series_t* s=lv_chart_get_series_next(fSpectrumChart,nullptr); if(!s) return;
+        // wave-6: scrub highlight + chip lifetime. During a drag the cb holds
+        // fScrubLblAge=-1 (never expires while held); after release it holds
+        // ~1s (30 ticks) so the edit stays readable as the pointer leaves.
+        if(fScrubLblAge>0 && --fScrubLblAge==0){
+            fScrubBand=-1;
+            if(fScrubLbl) lv_obj_add_flag(fScrubLbl,LV_OBJ_FLAG_HIDDEN);
+            fBandTicksDirty=true;
+        }
+        // wave-6: legend restyle (active band + edited bands) — gated so
+        // idle ticks do zero label work.
+        if(fBandTicksDirty){ fBandTicksDirty=false; restyleBandTicks(); }
         float bins[16]={};
         float totalE=0.f;
         // live iff metering arrived within the last ~1.5s (45 ticks);
@@ -3108,6 +3262,19 @@ private:
     int fScrubMode=0;
     int fScrubParamIdx=-1;
     lv_obj_t* fScrubToggle=nullptr;
+    // wave-6 (scrub visibility, user report "when I move things in the mode
+    // spectrum I want to see it more visually"):
+    //  - fScrubLbl: value chip pinned inside the chart (B# + live trim);
+    //  - fScrubLblAge: >0 keeps highlight + chip ~1s after RELEASED so the
+    //    edit stays visible as the pointer leaves;
+    //  - fBandTicks[16]: the B1..B16 legend labels (restyled to track the
+    //    active band + bands with non-default trims, instead of a permanent
+    //    hardcoded bright B1);
+    //  - fBandTicksDirty: restyle gate so idle 33ms ticks do no label work.
+    lv_obj_t* fScrubLbl=nullptr;
+    int fScrubLblAge=0;
+    lv_obj_t* fBandTicks[16]={};
+    bool fBandTicksDirty=true;
     // wave-4: MIDI-learn status chip (non-blocking; right-click knob -> bind next CC)
     lv_obj_t* fLearnChip=nullptr;
     lv_obj_t* fLearnLbl=nullptr;
