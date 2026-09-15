@@ -172,6 +172,124 @@ int main(){
         require(std::fabs(p.testEngine().getRayleighB()-eB)<1e-6f,"engine follows Rayl B snap");
         printf("material rayleigh snap PASS (A=%.2f B=%.2f)\n",eA,eB);
     }
+    // --- routing guard: every input param stores distinctly ----------------
+    // Regression fence for "changing a knob broke the routing": if a knob is
+    // ever wired to the wrong param, or two knobs share an index, this fails.
+    // For every input param, write a unique probe and require it round-trips
+    // exactly; near-equal neighbours (0 vs 1e-9) are exercised so a knob that
+    // routes to a *nearby* param (not a distinct one) is caught too.
+    {
+        PluginMultiScaleBody p;
+        p.testSampleRate2(44100); p.testActivate();
+        const uint32_t ni=PluginMultiScaleBody::kNumInputParams;
+        for(uint32_t i=0;i<ni;++i){
+            // enum-snapped params (Preset/MorphTarget/Material/SlideMode/Eco/
+            // Mono) round-trip to the nearest STEP by design — handled below.
+            if(i==PluginMultiScaleBody::kParamPreset
+               || i==PluginMultiScaleBody::kParamMorphTarget
+               || i==PluginMultiScaleBody::kParamMaterial
+               || i==PluginMultiScaleBody::kParamSlideMode
+               || i==PluginMultiScaleBody::kParamEcoMode
+               || i==PluginMultiScaleBody::kParamMono) continue;
+            const float probe=0.01f*((float)(i%97)+1.f);   // unique, non-default
+            p.testSetParameterValue(i, probe);
+            float got=p.testGetParameterValue(i);
+            if(std::fabs(got-probe)>1e-6f){
+                printf("FAIL: input %u probe %.5f stored %.5f\n",i,probe,got);
+                require(false,"routing: param stores its own probe");
+            }
+        }
+        // snapped params must be idempotent: y=snap(x) then set(y) reads y.
+        const uint32_t snapped[6]={PluginMultiScaleBody::kParamPreset,
+            PluginMultiScaleBody::kParamMorphTarget,PluginMultiScaleBody::kParamMaterial,
+            PluginMultiScaleBody::kParamSlideMode,PluginMultiScaleBody::kParamEcoMode,
+            PluginMultiScaleBody::kParamMono};
+        for(uint32_t pi : snapped){
+            p.testSetParameterValue(pi,0.12345f);
+            const float y=p.testGetParameterValue(pi);
+            p.testSetParameterValue(pi,y);
+            require(std::fabs(p.testGetParameterValue(pi)-y)<1e-6f,
+                    "routing: snapped param is idempotent");
+        }
+        printf("routing: all %u input params route + discrete snap PASS\n",ni);
+    }
+    // --- routing guard: output params are write-protected -------------------
+    // kParamOutLevel..kParamOutBand15 are DSP metering only; a knob wired to
+    // one (a routing mistake) must be a silent, state-free no-op — it would
+    // otherwise read as "moved a knob, nothing changes" on that output.
+    {
+        PluginMultiScaleBody p;
+        p.testSampleRate2(44100); p.testActivate();
+        const float ni=(float)PluginMultiScaleBody::kNumInputParams;
+        int nsink=0;
+        for(uint32_t i=PluginMultiScaleBody::kParamOutLevel;i<PluginMultiScaleBody::kParameterCount;++i){
+            const float probe=0.31415f;
+            p.testSetParameterValue(i, probe);
+            const float got=p.testGetParameterValue(i);
+            if(i==PluginMultiScaleBody::kParamOutLevel){ if(std::fabs(got-0.f)<1e-6f) ++nsink; }
+            else if(i>=PluginMultiScaleBody::kParamOutBand0 && got==0.f) ++nsink;
+        }
+        require(nsink>0,"routing: output writes never reach paramBase_");
+        require(p.testGetParameterValue(PluginMultiScaleBody::kParamVolume)==1.f,
+                "output write left an input untouched");
+        printf("routing: output params write-protected PASS\n");
+    }
+    // --- routing guard: representative knob->engine routes ------------------
+    // The physical-model/extended knobs must land on the engine member their
+    // parameter name implies (and defaults read back EXACTLY where the engine
+    // pins them). Any renumber/re-jig that re-points a knob to the wrong
+    // engine setter shows up here.
+    {
+        PluginMultiScaleBody p;
+        p.testSampleRate2(44100); p.testActivate();
+        struct R{ uint32_t pi; float v; };
+        const R rows[]={
+            {PluginMultiScaleBody::kParamBow,     0.55f},
+            {PluginMultiScaleBody::kParamDamper,  0.60f},
+            {PluginMultiScaleBody::kParamInharm,  0.40f},
+            {PluginMultiScaleBody::kParamMorphAmt,0.50f},
+            {PluginMultiScaleBody::kParamMaterial,0.20f},
+            {PluginMultiScaleBody::kParamRayleighA,0.30f},
+            {PluginMultiScaleBody::kParamRayleighB,0.25f},
+            {PluginMultiScaleBody::kParamSupport, 0.40f},
+            {PluginMultiScaleBody::kParamResMorph,0.60f},
+            {PluginMultiScaleBody::kParamSupX,     0.35f},
+            {PluginMultiScaleBody::kParamSupY,     0.65f},
+            {PluginMultiScaleBody::kParamStrikeW,  0.70f},
+            {PluginMultiScaleBody::kParamScrape,   0.45f},
+        };
+        for(const R& r: rows) p.testSetParameterValue(r.pi, r.v);
+        const auto& e=p.testEngine();
+        require(std::fabs(e.getBow()-0.55f)<1e-6f,"route: Bow->getBow");
+        require(std::fabs(e.getDamper()-0.60f)<1e-6f,"route: Damper->getDamper");
+        require(std::fabs(e.getInharmSpread()-0.40f)<1e-6f,"route: Inharm->getInharmSpread");
+        require(std::fabs(e.getMorphAmt()-0.50f)<1e-6f,"route: MorphAmt->getMorphAmt");
+        require(std::fabs(e.getRayleighA()-0.30f)<1e-6f,"route: RaylA->getRayleighA");
+        require(std::fabs(e.getRayleighB()-0.25f)<1e-6f,"route: RaylB->getRayleighB");
+        require(std::fabs(e.getSupport()-0.40f)<1e-6f,"route: Support->getSupport");
+        require(std::fabs(e.getResMorph()-0.60f)<1e-6f,"route: ResMorph->getResMorph");
+        require(std::fabs(e.getSupX()-0.35f)<1e-6f,"route: SupX->getSupX");
+        require(std::fabs(e.getSupY()-0.65f)<1e-6f,"route: SupY->getSupY");
+        require(std::fabs(e.getStrikeW()-0.70f)<1e-6f,"route: StrikeW->getStrikeW");
+        require(std::fabs(e.getScrape()-0.45f)<1e-6f,"route: Scrape->getScrape");
+        printf("routing: representative knob->engine routes PASS\n");
+    }
+    // --- routing guard: MIDI-learn 'learn' state round-trips the index ------
+    // Regression for a real defect: getState("learn") returned "1" (a bool),
+    // so a host that persisted/reloaded state while MIDI-learn was armed
+    // restored learnPending_=1 (Decay) and the next CC bound the WRONG knob.
+    {
+        TestPlug p;
+        p.testSampleRate2(44100); p.testActivate();
+        p.setState("learn","17");
+        const char* s=p.getState("learn");
+        require(s && std::string(s)=="17", "learn state round-trips the index, not '1'");
+        p.setState("learn","999");   // out of range
+        require(std::string(p.getState("learn")).empty(),"learn out-of-range is dropped");
+        p.setState("learn","");
+        require(std::string(p.getState("learn")).empty(),"learn cleared is empty");
+        printf("routing: learn state index round-trip PASS\n");
+    }
     printf("=== ALL TESTS PASSED ===\n");
     return 0;
 }

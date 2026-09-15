@@ -406,7 +406,7 @@ String PluginMultiScaleBody::getState(const char* key) const {
     if(key && std::string(key)=="scale") return String(scaleTxt_.c_str());
     if(key && std::string(key)=="kbm") return String(kbmTxt_.c_str());
     if(key && std::string(key)=="ccmap") return serializeCcmap(ccToParam_);
-    if(key && std::string(key)=="learn") return String(learnPending_>=0 ? "1" : "");
+    if(key && std::string(key)=="learn") return learnPending_>=0 ? String(std::to_string(learnPending_).c_str()) : String("");
     return serializeParams(paramBase_);
 }
 void PluginMultiScaleBody::setState(const char* key, const char* value){
