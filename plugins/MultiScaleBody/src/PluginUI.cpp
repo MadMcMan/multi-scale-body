@@ -213,7 +213,7 @@ public:
             case P::kParamResMorph: return "Resolution"; case P::kParamMorphAmt: return "Morph";
             case P::kParamMorphTarget: return "Morph Tgt"; case P::kParamMaterial: return "Material";
             case P::kParamRayleighA: return "Rayl A";   case P::kParamRayleighB: return "Rayl B";
-            case P::kParamEcoMode: return "Eco";       case P::kParamEcoBudget: return "Eco Budget";
+            case P::kParamModelMode: return "Elastic FEM";  case P::kParamEcoMode: return "Eco";       case P::kParamEcoBudget: return "Eco Budget";
             default: return {}; // bands and metering outputs have no knob title
         }
     }
@@ -267,6 +267,10 @@ public:
         if(i==PluginMultiScaleBody::kParamEcoMode && fEcoBtn){
             if(v>0.5f) lv_obj_add_state(fEcoBtn,LV_STATE_CHECKED);
             else lv_obj_clear_state(fEcoBtn,LV_STATE_CHECKED);
+        }
+        if(i==PluginMultiScaleBody::kParamModelMode && fModeTypeBtn){
+            if(v>0.5f) lv_obj_add_state(fModeTypeBtn,LV_STATE_CHECKED);
+            else lv_obj_clear_state(fModeTypeBtn,LV_STATE_CHECKED);
         }
         if(i==PluginMultiScaleBody::kParamMaterial && fMaterialDd)
             lv_dropdown_set_selected(fMaterialDd,std::clamp((int)std::lround(v*10.f),0,10));
@@ -355,6 +359,10 @@ public:
             if(i==PluginMultiScaleBody::kParamEcoMode && fEcoBtn){
                 if(v>0.5f) lv_obj_add_state(fEcoBtn,LV_STATE_CHECKED);
                 else lv_obj_clear_state(fEcoBtn,LV_STATE_CHECKED);
+            }
+            if(i==PluginMultiScaleBody::kParamModelMode && fModeTypeBtn){
+                if(v>0.5f) lv_obj_add_state(fModeTypeBtn,LV_STATE_CHECKED);
+                else lv_obj_clear_state(fModeTypeBtn,LV_STATE_CHECKED);
             }
             if(i==PluginMultiScaleBody::kParamMaterial && fMaterialDd)
                 lv_dropdown_set_selected(fMaterialDd,std::clamp((int)std::lround(v*10.f),0,10));
@@ -562,7 +570,7 @@ private:
         fLearnChip=fLearnLbl=nullptr; fLearnParam=-1;
         fEdoDropdown=nullptr; fScaleLbl=nullptr;
         fRecBtn=fPlayBtn=nullptr; fRecOn=false; fRecPlaying=false; fRecN=0; fRecCursor=0; fPlayHeld=false;
-        fMaterialDd=fMorphDd=fEcoBtn=nullptr;
+        fModeTypeBtn=fMaterialDd=fMorphDd=fEcoBtn=nullptr;
         fMasterValLbl=nullptr; fStrikeChannel=0; fNextStrikeChannel=1; fLiveAge=1000; fRebuildInFlight=false;
     }
     static void previewGeometry(int& cell,int& gap,int& off){
@@ -1619,6 +1627,18 @@ private:
         ui->setParamValue(PluginMultiScaleBody::kParamEcoMode,on?1.f:0.f);
         ui->editParameter(PluginMultiScaleBody::kParamEcoMode,false);
     }
+    // elastic FEM mode switch (0 Classic baked bodies / 1 Elastic FEM bank).
+    // Keeps the whole modal bank unchanged; only selects which packed bank
+    // (kPresets vs kElasticPresets) feeds frequencies/decays/gains.
+    static void modeTypeCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* btn=(lv_obj_t*)lv_event_get_target(e);
+        if(!ui||!btn) return;
+        bool on=lv_obj_has_state(btn,LV_STATE_CHECKED);
+        ui->editParameter(PluginMultiScaleBody::kParamModelMode,true);
+        ui->setParamValue(PluginMultiScaleBody::kParamModelMode,on?1.f:0.f);
+        ui->editParameter(PluginMultiScaleBody::kParamModelMode,false);
+    }
     // ---- spectrum scrub target (idea 2): GAIN vs DECAY ---------------------
     static void scrubToggleCb(lv_event_t* e){
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
@@ -2003,6 +2023,17 @@ private:
         lv_obj_set_height(fMorphDd,scaled(25));     // (LV_SIZE_CONTENT self-size measures 2 lines here; EDO's natural 25 is the convention)
         lv_obj_set_style_translate_y(fMorphDd,scaled(26),0);
         lv_obj_add_event_cb(fMorphDd,morphDdCb,LV_EVENT_VALUE_CHANGED,this);
+        // elastic FEM mode switch: 0 = Classic baked bodies (default, bit-identity),
+        // 1 = physically-derived Elastic FEM bank. Placed with the other mode
+        // switch (ECO) in the head row so body-type selection reads top-down.
+        lv_obj_t* modeCell=makeRow(head,scaled(lay::MODEL_ECO_W),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_START);
+        fModeTypeBtn=lv_btn_create(modeCell);
+        lv_obj_set_size(fModeTypeBtn,lv_pct(100),scaled(lay::BTN_H));
+        styles.applyToggleButton(fModeTypeBtn,paramCache[P::kParamModelMode]>0.5f);
+        lv_obj_set_style_radius(fModeTypeBtn,scaled(lay::RADIUS_SM),0);
+        lv_obj_set_style_pad_all(fModeTypeBtn,0,0);
+        lv_obj_t* mtype=lv_label_create(fModeTypeBtn); lv_label_set_text(mtype,"ELASTIC"); lv_obj_center(mtype);
+        lv_obj_add_event_cb(fModeTypeBtn,modeTypeCb,LV_EVENT_CLICKED,this);
     }
     //   +-- TOP-BAR  (identity: brand mark | preset browser | master knob | zoom)
     //   +-- STAGE
@@ -3288,6 +3319,7 @@ private:
     int fPlayChannel=0;
     bool fPlayHeld=false;
     // wave-4: MODEL strip controls (persistent full-width card, no modal)
+    lv_obj_t* fModeTypeBtn=nullptr;
     lv_obj_t* fMaterialDd=nullptr;
     lv_obj_t* fMorphDd=nullptr;
     lv_obj_t* fEcoBtn=nullptr;

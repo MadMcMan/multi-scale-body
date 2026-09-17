@@ -1,7 +1,40 @@
 #include "MultiScaleBodyEngine.hpp"
+#include "ElasticModalData.hpp"
 #include <cstdint>
 #include <cmath>
 namespace modal {
+
+const PresetData& MultiScaleBodyEngine::presetData(int index) const {
+    index=std::clamp(index,0,kNumPresets-1);
+    return modelMode_ ? kElasticPresets[index] : kPresets[index];
+}
+float MultiScaleBodyEngine::modeGain(const PresetData& p,int m,int y,int x) const {
+    float v=p.gain[m][y][x];
+    if(modelMode_ && resMorph_>1e-4f){
+        const int index=int(&p-kElasticPresets);
+        v+=(kElasticFineGains[index][m][y][x]-v)*resMorph_;
+    }
+    return v;
+}
+void MultiScaleBodyEngine::setModelMode(int mode){
+    mode=mode?1:0;
+    if(mode==modelMode_) return;
+    modelMode_=mode;
+    modelBridgeL_=modelLastL_; modelBridgeR_=modelLastR_;
+    modelFadeLength_=std::max(1,int(sampleRate_*.005));
+    modelFadeLeft_=(modelLastL_!=0.f || modelLastR_!=0.f) ? modelFadeLength_ : 0;
+    setModeCount(modeCountNorm_); computeDecayRef();
+    for(auto& v:voices_) if(v.active){
+        v.n=std::min(modeCount_,presetData(presetIdx_).n);
+        for(int i=0;i<kMaxModes;++i) v.s1[i]=v.s2[i]=0.f;
+        v.bowF=0.f; v.bowYPrev=0.f;
+        rebakeVoiceTables(v); armSupportDamp(v); recomputeVoiceCoeffs(v);
+        refreshBowScale(v); armExcitation(v,v.hitX,v.hitY);
+    }
+    for(auto& x:wetBufL_) x=0.f;
+    for(auto& x:wetBufR_) x=0.f;
+    irDirty_=true; irBaking_=false;
+}
 
 void MultiScaleBodyEngine::prepare(double sr) {
     if(sr < 1000) sr = 44100;
@@ -40,6 +73,8 @@ void MultiScaleBodyEngine::reset() {
     nextAge_=0; lfoPhase_=0; lfoUpdateCounter_=0; irBakeGate_=0; sustainPedal_=false; exFollow_=0.f;
     strikeSeq_=0; transPeak_=0.f; // fresh deterministic transient sequence + telemetry per reset
     for (int c=1;c<16;++c) mpeZ_[c]=-1.f; // MPE: fresh latch set per reset (matches allSoundOff)
+    modelFadeLeft_=0;
+    modelLastL_=modelLastR_=modelBridgeL_=modelBridgeR_=0.f;
     limReset();
     widthCur_=width_; wetCur_=reverbWet_; exMixCur_=exciteMix_;
     volCur_=volumeNorm_;
@@ -58,7 +93,7 @@ void MultiScaleBodyEngine::interpolateGainsFor(float* out, float sx, float sy) c
     interpolateGainsFor(out, sx, sy, presetIdx_);
 }
 void MultiScaleBodyEngine::interpolateGainsFor(float* out, float sx, float sy, int preset) const {
-    const auto& p = kPresets[std::clamp(preset,0,kNumPresets-1)];
+    const auto& p = presetData(std::clamp(preset,0,kNumPresets-1));
     float fx = std::clamp(sx,0.f,1.f) * (kGainGrid-1);
     float fy = std::clamp(sy,0.f,1.f) * (kGainGrid-1);
     int ix = (int)std::floor(fx); int iy = (int)std::floor(fy);
@@ -75,10 +110,10 @@ void MultiScaleBodyEngine::interpolateGainsFor(float* out, float sx, float sy, i
         float col[4];
         for(int j=0;j<4;++j){
             int yj = std::clamp(iy-1+j, 0, kGainGrid-1);
-            float r0 = p.gain[m][yj][std::clamp(ix-1,0,kGainGrid-1)];
-            float r1 = p.gain[m][yj][std::clamp(ix,0,kGainGrid-1)];
-            float r2 = p.gain[m][yj][std::clamp(ix+1,0,kGainGrid-1)];
-            float r3 = p.gain[m][yj][std::clamp(ix+2,0,kGainGrid-1)];
+            float r0 = modeGain(p,m,yj,std::clamp(ix-1,0,kGainGrid-1));
+            float r1 = modeGain(p,m,yj,std::clamp(ix,0,kGainGrid-1));
+            float r2 = modeGain(p,m,yj,std::clamp(ix+1,0,kGainGrid-1));
+            float r3 = modeGain(p,m,yj,std::clamp(ix+2,0,kGainGrid-1));
             col[j]=cubicInterp(r0,r1,r2,r3,tx);
         }
         float base = cubicInterp(col[0],col[1],col[2],col[3],ty);
@@ -123,7 +158,7 @@ void MultiScaleBodyEngine::analyseBands(float* out16){
 // the body's defining slow ring. Anchoring below dmin lets every mode be
 // pulled toward a longer, more uniform ring without touching ModalData.hpp.
 void MultiScaleBodyEngine::computeDecayRef(){
-    const auto& p=kPresets[presetIdx_];
+    const auto& p=presetData(presetIdx_);
     float mn=p.decay[0];
     for(int i=1;i<p.n;++i) if(p.decay[i]<mn) mn=p.decay[i];
     presetDecayRef_=mn/kDecayAnchorDiv;
@@ -312,8 +347,20 @@ void MultiScaleBodyEngine::recomputeVoiceCoeffs(Voice& v) {
         if(rayA_>1e-4f||rayB_>1e-4f)
             d += (float)(0.5*(kRayAlphaMax*rayA_*rayA_
                               + kRayBetaMax*rayB_*rayB_*(double)f*(double)f*39.47841760435743));
-        if (f < 20.f) f=20.f;
-        if (f > 18000.f) f=18000.f;
+        if(modelMode_){
+            // Elastic tables contain angular frequency. Suppress, never fold
+            // out-of-band modes onto one audible frequency.
+            if(!(f>0.f) || f>=float(M_PI*sampleRate_)){
+                v.R[i]=v.cosTheta[i]=v.radGain[i]=0.f;
+                v.excNorm[i]=v.strikeNorm[i]=v.strikeEff[i]=0.f;
+                v.s1[i]=v.s2[i]=0.f;
+                v.bendTilt[i]=tilt;
+                continue;
+            }
+        } else {
+            if (f < 20.f) f=20.f;
+            if (f > 18000.f) f=18000.f;
+        }
         if (d < 0.2f) d=0.2f;
         if (d > 8000.f) d=8000.f;
         double R = std::exp(- (double)d / sampleRate_);
@@ -471,7 +518,7 @@ float MultiScaleBodyEngine::bodyFreq(const PresetData& p, int i, int n) const {
     // mode count — tables past a small body's n hold zeros, never morph into
     // silence.
     if(morphAmt_>1e-4f){
-        const PresetData& t=kPresets[morphTarget_];
+        const PresetData& t=presetData(morphTarget_);
         const int ti=std::min(i,std::max(1,t.n)-1);
         f = f + (t.freq[ti]-f)*morphAmt_;
     }
@@ -488,7 +535,7 @@ float MultiScaleBodyEngine::bodyDecay(const PresetData& p, int i, int n) const {
     float d = p.decay[i];
     if(resMorph_>1e-4f) d = d + (p.fineDecay[i]-d)*resMorph_;
     if(morphAmt_>1e-4f){
-        const PresetData& t=kPresets[morphTarget_];
+        const PresetData& t=presetData(morphTarget_);
         const int ti=std::min(i,std::max(1,t.n)-1);
         d = d + (t.decay[ti]-d)*morphAmt_;
     }
@@ -546,7 +593,7 @@ void MultiScaleBodyEngine::armSupportDamp(Voice& v){
 // are the caller's business: noteOn zeroes states after this; setPreset
 // keeps them ringing.
 void MultiScaleBodyEngine::rebakeVoiceTables(Voice& v){
-    const auto& p = kPresets[presetIdx_];
+    const auto& p = presetData(presetIdx_);
     float gains[kMaxModes];
     interpolateGainsFor(gains,v.hitX,v.hitY);
     // idea 4: blend the target body's sound map at the same strike point
@@ -575,7 +622,7 @@ void MultiScaleBodyEngine::rebakeVoiceTables(Voice& v){
 // pitch curve is preserved; only the per-body bias is removed).
 void MultiScaleBodyEngine::refreshBowScale(Voice& v){
     if(!(bowPressure_>1e-4f)){ v.bowScale=1.f; return; }
-    const auto& p = kPresets[presetIdx_];
+    const auto& p = presetData(presetIdx_);
     double s=0.0;
     for(int i=0;i<v.n;++i){
         const double R=v.R[i];
@@ -623,13 +670,13 @@ void MultiScaleBodyEngine::beginIrBake(){
     // bit-identical.
     if(support_>1e-4f){
         supportDampWeights(irSupW_);
-        const auto& bp=kPresets[presetIdx_];
+        const auto& bp=presetData(presetIdx_);
         const int bn=std::min(bp.n,modeCount_);
         irSupMx_=0.f; for(int i=0;i<bn;++i) irSupMx_=std::max(irSupMx_,irSupW_[i]);
     } else { irSupMx_=0.f; for(int i=0;i<kMaxModes;++i) irSupW_[i]=0.f; }
 }
 bool MultiScaleBodyEngine::stepIrBake(int budgetModes){
-    const auto& p=kPresets[presetIdx_];
+    const auto& p=presetData(presetIdx_);
     int n=std::min(p.n,modeCount_);
     int end=std::min(n,irBakeCursor_+budgetModes);
     float fx=std::clamp(strikeX_,0.f,1.f)*(kGainGrid-1);
@@ -640,10 +687,10 @@ bool MultiScaleBodyEngine::stepIrBake(int budgetModes){
         float col[4];
         for(int j=0;j<4;++j){
             int yj=std::clamp(iy-1+j,0,kGainGrid-1);
-            col[j]=cubicInterp(p.gain[m][yj][std::clamp(ix-1,0,15)],
-                               p.gain[m][yj][std::clamp(ix,0,15)],
-                               p.gain[m][yj][std::clamp(ix+1,0,15)],
-                               p.gain[m][yj][std::clamp(ix+2,0,15)],tx);
+            col[j]=cubicInterp(modeGain(p,m,yj,std::clamp(ix-1,0,15)),
+                               modeGain(p,m,yj,std::clamp(ix,0,15)),
+                               modeGain(p,m,yj,std::clamp(ix+1,0,15)),
+                               modeGain(p,m,yj,std::clamp(ix+2,0,15)),tx);
         }
         float g=cubicInterp(col[0],col[1],col[2],col[3],ty);
         // wave-3: the IR mirrors the current physical model (resolution morph,
@@ -654,7 +701,7 @@ bool MultiScaleBodyEngine::stepIrBake(int budgetModes){
             const float im=(n>1)?(float)(m*m)/(float)((n-1)*(n-1)):0.f;
             f *= 1.f + inharm_*im;
         }
-        if(f<20.f||f>18000.f){ continue; }
+        if(modelMode_ ? (!(f>0.f) || f>=float(M_PI*sampleRate_)) : (f<20.f||f>18000.f)) continue;
         float d=shapeDecayRate(bodyDecay(p,m,n))*decayScale_; // same ring shaping as voices
         // idea 2: per-band decay trim mirrors the voice path (1.0 = identity skip)
         {
@@ -768,8 +815,9 @@ void MultiScaleBodyEngine::setStrike(float x, float y) {
 }
 void MultiScaleBodyEngine::setModeCount(float v) {
     v = std::clamp(v,0.f,1.f);
+    modeCountNorm_=v;
     modeCount_ = 8 + int(v * 120.f);
-    const auto& p = kPresets[presetIdx_];
+    const auto& p = presetData(presetIdx_);
     if (modeCount_ > p.n) modeCount_ = p.n;
     interpolateGainsFor(nextGain_, strikeX_, strikeY_);
     irDirty_=true;
@@ -848,7 +896,7 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
     if(monoMode_ && monoTopVoice_>=0 && voices_[monoTopVoice_].active){
         Voice& v=voices_[monoTopVoice_];
         v.midiNote=midiNote; v.midiChannel=channel; v.sustainHold=false;
-        const auto& p=kPresets[presetIdx_];
+        const auto& p=presetData(presetIdx_);
         float noteShift=std::pow(2.f,(midiNote-60)/12.f);
         // velocity morph strike position
         float vx=strikeX_+(0.5f-strikeX_)*0.f; // base
@@ -912,7 +960,7 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
     v.midiChannel = channel;
     v.age = nextAge_++;
     v.n = modeCount_;
-    const auto& p = kPresets[presetIdx_];
+    const auto& p = presetData(presetIdx_);
     if (v.n > p.n) v.n = p.n;
     // ideas 7+8: scene-adaptive resolution — cap this voice's mode count to
     // (total budget / active voices) at noteOn, the paper's "resolution
@@ -1091,6 +1139,7 @@ void MultiScaleBodyEngine::processSampleStereo(float &outL, float &outR) {
             bowF=fraw*v.bowF;
         }
         for (int i=0;i<v.n;++i) {
+            if(modelMode_ && v.radGain[i]==0.f) continue;
             float R = v.R[i];
             float c = v.cosTheta[i];
             float a1 = 2.f * R * c;
@@ -1200,6 +1249,12 @@ void MultiScaleBodyEngine::processSampleStereo(float &outL, float &outR) {
         const float g=volCur_*volCur_;
         outL*=g; outR*=g;
     }
+    if(modelFadeLeft_>0){
+        const float old=float(modelFadeLeft_--)/float(modelFadeLength_);
+        outL=outL*(1.f-old)+modelBridgeL_*old;
+        outR=outR*(1.f-old)+modelBridgeR_*old;
+    }
+    modelLastL_=outL; modelLastR_=outR;
     // === final stage: look-ahead brickwall limiter (stereo-linked) ====
     {
         // 1) slide the sample into the delay ring; the stereo-linked peak of

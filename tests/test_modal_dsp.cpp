@@ -3,6 +3,7 @@
 #endif
 #include "MultiScaleBodyEngine.hpp"
 #include "ModalData.hpp"
+#include "ElasticModalData.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -1343,6 +1344,66 @@ int main(){
         const double glass=lateLevel(9,60);
         require(bowl/glass<8.0 && glass/bowl<8.0,"bow leveling: body spread bounded");
         printf("bow leveling PASS (Bowl:Glass %.1fx)\n",bowl/glass);
+    }
+
+    // --- Elastic FEM mode (kParamModelMode): additive bank selection --------
+    // The Classic bank (mode 0, default) must stay byte-identical across
+    // engines; the Elastic FEM bank must be audibly distinct, finite, and
+    // bounded on every body; switching between banks while a note rings must
+    // not click. All comparisons bit-identity per the repo's golden contract.
+    {
+        auto render=[&](int mode,int preset){
+            MultiScaleBodyEngine e; e.prepare(48000); e.reset();
+            e.setPreset(preset); e.setModeCount(1.f); e.setStrike(.37f,.63f);
+            e.setContactNoise(0.f); e.setModelMode(mode); e.noteOn(48,.8f,0);
+            std::vector<float> v; v.reserve(2*24000);
+            float peak=0.f;
+            for(int i=0;i<24000;++i){
+                float l,r; e.processSampleStereo(l,r);
+                require(std::isfinite(l)&&std::isfinite(r),"elastic finite render");
+                v.push_back(l); v.push_back(r); peak=std::max(peak,std::max(std::fabs(l),std::fabs(r)));
+            }
+            return std::make_pair(v,peak);
+        };
+        const auto c=render(0,6), e=render(1,6), c2=render(0,6);
+        require(c.first!=e.first,"elastic distinct from classic (Bar)");
+        require(c.first==c2.first,"elastic off: classic byte-identical across engines");
+        require(e.second<=0.951f,"elastic peak bounded under limiter ceiling");
+        printf("elastic FEM mode PASS (classic peak %.4f, elastic peak %.4f)\n",c.second,e.second);
+        // every factory body: all 18 elastic presets structurally valid and
+        // bounded under a strike (freq>0 or suppressed, finite, no blow-up).
+        for(int p=0;p<modal::kNumPresets;++p){
+            const auto& ep=modal::kElasticPresets[p];
+            require(ep.n>=8 && ep.n<=128,"elastic preset n range");
+            for(int i=1;i<ep.n;++i) require(ep.freq[i]>=ep.freq[i-1]-1e-3f,"elastic freq sorted");
+            MultiScaleBodyEngine b; b.prepare(48000); b.reset();
+            b.setPreset(p); b.setModeCount(1.f); b.setContactNoise(0.f); b.setModelMode(1);
+            b.noteOn(52,.9f,0);
+            float pk=0.f;
+            for(int i=0;i<12000;++i){ float l,r; b.processSampleStereo(l,r);
+                require(std::isfinite(l)&&std::isfinite(r),"elastic all-body finite");
+                pk=std::max(pk,std::max(std::fabs(l),std::fabs(r))); }
+            require(pk>1e-8f,"elastic body speaks");
+            require(pk<=0.951f,"elastic body bounded");
+        }
+        printf("elastic all-body PASS\n");
+        // mid-note CTC: toggling Classic->Elastic->Classic while a note rings
+        // must not produce a hard discontinuity (max adjacent-sample step).
+        {
+            MultiScaleBodyEngine b; b.prepare(48000); b.reset();
+            b.setPreset(3); b.setModeCount(1.f); b.setContactNoise(0.f); b.setModelMode(0);
+            b.noteOn(48,.9f,0);
+            float prev=0.f, step=0.f;
+            for(int i=0;i<24000;++i){
+                if(i==6000) b.setModelMode(1);
+                if(i==12000) b.setModelMode(0);
+                float l,r; b.processSampleStereo(l,r);
+                step=std::max(step,std::max(std::fabs(l-prev),std::fabs(r-prev)));
+                prev=l;
+            }
+            require(step<=0.5f,"elastic toggle no click (adjacent-sample step bounded)");
+            printf("elastic toggle CTC PASS (max step %.4f)\n",step);
+        }
     }
 
     printf("=== ALL TESTS PASSED ===\n");

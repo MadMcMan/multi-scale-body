@@ -113,6 +113,7 @@ void PluginMultiScaleBody::initParameter(uint32_t index, Parameter& p){
         case kParamStrikeW: p.name="Head"; p.symbol="strikew"; p.ranges.def=0.5f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamScrape: p.name="Scrape"; p.symbol="scrape"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamContactNoise: p.name="Contact Noise"; p.symbol="contact_noise"; p.ranges.def=0.5f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamModelMode: p.name="Elastic FEM"; p.symbol="elastic_fem"; p.hints|=kParameterIsBoolean|kParameterIsInteger; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamMaterial: p.name="Material"; p.symbol="material"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamRayleighA: p.name="Rayl A"; p.symbol="rayla"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamRayleighB: p.name="Rayl B"; p.symbol="raylb"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
@@ -207,6 +208,7 @@ void PluginMultiScaleBody::setParameterValue(uint32_t idx,float v){
         case kParamStrikeW: engine_.setStrikeW(v); break;
         case kParamScrape: engine_.setScrape(v); break;
         case kParamContactNoise: engine_.setContactNoise(v); break;
+        case kParamModelMode: paramBase_[idx]=v>0.5f?1.f:0.f; engine_.setModelMode(v>0.5f); break;
         case kParamRayleighA: engine_.setRayleigh(v,paramBase_[kParamRayleighB]); break;
         case kParamRayleighB: engine_.setRayleigh(paramBase_[kParamRayleighA],v); break;
         case kParamEcoMode: engine_.setEco(v>0.5f,paramBase_[kParamEcoBudget]); break;
@@ -231,6 +233,7 @@ float PluginMultiScaleBody::getParameterValue(uint32_t idx) const {
 }
 void PluginMultiScaleBody::sampleRateChanged(double sr){
     engine_.prepare(sr);
+    engine_.setModelMode(paramBase_[kParamModelMode]>0.5f);
     engine_.setPitchScale(paramBase_[kParamPitch]); engine_.setDecayScale(paramBase_[kParamDecay]);
     engine_.setBrightness(paramBase_[kParamBrightness]); engine_.setStrike(paramBase_[kParamStrikeX],paramBase_[kParamStrikeY]);
     engine_.setModeCount(paramBase_[kParamModeCount]); engine_.setWidth(paramBase_[kParamWidth]);
@@ -427,6 +430,7 @@ void PluginMultiScaleBody::setState(const char* key, const char* value){
         return;
     }
     if(k!="patch") return;
+    setParameterValue(kParamModelMode,0.f); // old patches always restore Classic
     const char* c=value;
     while(*c){
         char* end=nullptr;
@@ -559,7 +563,8 @@ void PluginMultiScaleBody::rebuildScaleFromScl(const char* sclText){
                 if(nn<0||nn>127){ notes.clear(); break; }
                 notes.push_back(nn);
                 const char* nc=strchr(c,',');
-                if(!nc) break; c=nc+1;
+                if(!nc) break;
+                c=nc+1;
             }
             bool consec=((int)notes.size()==M);
             if(consec) for(int i=0;i<M;++i) if(notes[i]!=first+i){ consec=false; break; }

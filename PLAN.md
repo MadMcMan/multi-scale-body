@@ -196,6 +196,7 @@ Verified against `paper_47.md` (Eq. 1 + prose; several forms are RECONSTRUCTED p
 | Sup Y | `supy` | 0..1 | 0.5 | Clamp touch Y |
 | Head | `strikew` | 0..1 | 0.5 | Mallet head size: contact-pulse length ×(0.25+1.5·v), 0.5 = nominal; summit within 2 dB |
 | Scrape | `scrape` | 0..1 | 0 | Strike friction blend: transient length ×(1+3·s), level ×(1+2·s) |
+| Elastic FEM | `elastic_fem` | 0..1 (bool) | 0 | Select the physically-derived Elastic FEM body bank (1) vs the baked Classic bank (0 = default, bit-identity) |
 
 ### Engine contracts
 
@@ -209,3 +210,17 @@ Verified against `paper_47.md` (Eq. 1 + prose; several forms are RECONSTRUCTED p
 ### UI chassis (1440×1068)
 
 - PHYSICS strip grows to two knob rows (202px = 24 pad + 22 head + 6 + 72 + 6 + 72): row1 CLAMP+CONTACT (Support, Sup X, Sup Y, Head, Scrape + ECO + Material/Morph selects, 932px centered), row2 BODY CHARACTER (Hold Damp, Resolution, Morph, Rayl A, Rayl B, Eco Budget, 492px centered). STAGE/keyboard untouched; BASE_H 990→1068; default window + harness sizes + zoom50 (720×534) + arc comment (32) follow.
+
+## 15. Elastic FEM Body Bank (shipped)
+
+### New input parameter (identity-safe default; golden md5 `f509d7f…` unchanged)
+`elastic_fem` (0/1, default 0 = Classic, bit-identity preserved by regenerated golden). Appended after `kParamContactNoise`; `kNumInputParams = kParamOutLevel+2`, so patch serialization picks it up with no extra work.
+
+### Engine contracts
+- `presetData(idx)` selects `kElasticPresets` (ElasticMode) vs `kPresets` (Classic); `modeGain()` adds the Elastic fine-gain lerp (syncs with the Resolution morph) while returning the raw value on Classic (identity).
+- `setModelMode(0/1)`: mode switch only; calls `setModeCount` (re-caps v.n per bank), `computeDecayRef`, re-bakes + re-arms active voices, clears the wet history, marks IR dirty. A 5 ms bridge crossfade (from the last pre-switch output sample) de-clicks mid-note toggles; reset() clears the bridge/last state so fresh renders are exact.
+- Elastic tables hold **angular frequency** (rad/s); the coeff clamps differ by mode — Elastic suppresses `f<=0 || f>=π·sr` (zeroed coefficients + sample-loop skip, never folded onto one audible pitch), Classic keeps the `20..18000 Hz` clamp untouched.
+- Per-feature gates (`support/felt/rayleigh/inharm/band-trim`) run identically on both banks; Frequency tables sorted + `n≤128` enforced for both in `test_modal_dsp`.
+- Plugin: `setParameterValue` snaps to `paramBase_[…]=v>0.5?1:0` + `engine_.setModelMode`; `sampleRateChanged` re-pushes the mode; `setState("patch")` **forces Classic first** so legacy patches (no `elastic_fem` field) restore the exact old sound.
+- UI: ELASTIC toggle in the PHYSICS header (next to ECO, same `applyToggleButton` grammar), synced on both programmatic writes and host echo; `parameterName` carries the title for MIDI-learn consistency.
+- Regenerate with `tools/elastic_bake.py` (isotropic trilinear-hex FE, consistent mass, subvoxel material, all 10 classic shapes on the 16³ grid → 18 banks × 128 modes, 6 verified rigid modes each).

@@ -192,6 +192,7 @@ int main(){
                || i==PluginMultiScaleBody::kParamMaterial
                || i==PluginMultiScaleBody::kParamSlideMode
                || i==PluginMultiScaleBody::kParamEcoMode
+               || i==PluginMultiScaleBody::kParamModelMode
                || i==PluginMultiScaleBody::kParamMono) continue;
             const float probe=0.01f*((float)(i%97)+1.f);   // unique, non-default
             p.testSetParameterValue(i, probe);
@@ -299,6 +300,56 @@ int main(){
         p.setState("learn","");
         require(std::string(p.getState("learn")).empty(),"learn cleared is empty");
         printf("routing: learn state index round-trip PASS\n");
+    }
+    // --- elastic FEM mode: dispatch, state recall, legacy-patch default ------
+    {
+        PluginMultiScaleBody p;
+        require(std::fabs(p.testGetParameterValue(PluginMultiScaleBody::kParamModelMode))<1e-6f,
+                "modelMode default 0 (Classic)");
+        require(p.testEngine().getModelMode()==0,"engine modelMode default 0");
+        printf("elastic: modelMode default 0 PASS\n");
+    }
+    {
+        // plugin dispatch: setting kParamModelMode=1 selects Elastic output
+        // (distinct from Classic), =0 restores Classic byte-exact on a
+        // fresh-engine basis; patch recall carries the mode; a legacy patch
+        // (no model field) always restores Classic so old sounds are unchanged.
+        auto render=[&](float m){
+            PluginMultiScaleBody p; p.testSampleRate2(48000); p.testActivate();
+            p.testSetParameterValue(PluginMultiScaleBody::kParamPreset, 6.f/17.f);
+            p.testSetParameterValue(PluginMultiScaleBody::kParamContactNoise, 0.f);
+            if(m>0.f) p.testSetParameterValue(PluginMultiScaleBody::kParamModelMode, 1.f);
+            float L[256],R[256]; float* out[]={L,R};
+            MidiEvent on{}; on.size=3; on.data[0]=0x90; on.data[1]=48; on.data[2]=100;
+            std::vector<float> x; double en=0; float pk=0;
+            for(int b=0;b<94;++b){
+                p.testRun2(nullptr,out,256,b?nullptr:&on,b?0:1);
+                for(int i=0;i<256;++i){ x.push_back(L[i]); x.push_back(R[i]);
+                    if(!std::isfinite(L[i])||!std::isfinite(R[i])) std::exit(2);
+                    en+=double(L[i])*L[i]+double(R[i])*R[i]; pk=std::max(pk,std::max(std::fabs(L[i]),std::fabs(R[i]))); }
+            }
+            require(en>1e-10&&pk<=0.951f,"elastic plugin render finite + bounded");
+            return x;
+        };
+        const std::vector<float> c=render(0.f), e=render(1.f), c2=render(0.f);
+        require(c!=e,"elastic: plugin Elastic output distinct from Classic");
+        require(c==c2,"elastic: plugin Classic byte-exact across dispatch");
+        printf("elastic dispatch PASS (classic==classic byte-exact, elastic distinct)\n");
+    }
+    {
+        // patch recall: a saved patch with model=1 restores Elastic; a legacy
+        // patch (no model field) forces Classic so old sounds are untouched.
+        TestPlug p; p.testSampleRate2(44100); p.testActivate();
+        p.testSetParameterValue(PluginMultiScaleBody::kParamModelMode, 1.f);
+        require(p.testEngine().getModelMode()==1,"elastic engine follows param");
+        std::string patch=p.getState("patch").buffer();
+        TestPlug q; q.testSampleRate2(44100); q.testActivate();
+        q.setState("patch",patch.c_str());
+        require(q.testEngine().getModelMode()==1,"elastic patch recall keeps mode 1");
+        TestPlug r; r.testSampleRate2(44100); r.testActivate();
+        r.setState("patch","0=0;");   // legacy patch: no model field
+        require(r.testEngine().getModelMode()==0,"elastic legacy patch forces Classic");
+        printf("elastic state recall + legacy default PASS\n");
     }
     printf("=== ALL TESTS PASSED ===\n");
     return 0;

@@ -28,6 +28,7 @@ VST3 · CLAP · LV2 · JACK standalone (DPF), with an LVGL-based UI.
 - **Felt damper + half-pedal**: a Damper knob loads a felt strip (frequency-dependent absorption); CC64 is continuous — full pedal defers note-offs, half-pedal deadens the ring
 - **Microtonal tuning**: pick an EDO (5, 7, 10, 12, 15, 17, 19, 22, 24, 31, 41, 53, 72) or LOAD a Scala `.scl` file (keyboard row → EDIT); the keyboard remaps chromatically, Tune stays a global offset. Optional kbm-style mapping ("first,last" + optional consecutive note list).
 - **Inharmonicity**: one knob stretches partials from the baked pure ratios toward bell-like quadratic spacing
+- **Elastic FEM mode**: a second, physically-derived body bank — isotropic 3D trilinear-hex FE modal analysis (consistent mass, subvoxel material, all 10 classic shapes re-evaluated on the 16³ voxel grid) — replaces the baked modal tables while the DSP resonator bank runs identically. One ELASTIC toggle in the PHYSICS header switches banks; off (default) is the exact Classic sound (bit-identity golden preserved). Elastic body modes live above ~2 kHz (thin-shell FE), so the mode spectrum stays audibly bright; a 5 ms bridge crossfade de-clicks mid-note bank switches. Regenerate with `tools/elastic_bake.py`.
 - **MIDI learn**: right-click any knob → move a CC on channel 0 → the binding saves with the patch
 - **MPE slide routing**: Slide mode routes per-channel pitch bend to classic whole-voice bend (default), per-mode dispersion bend, or a per-voice brightness macro
 - **Physical model strip** (always visible, between stage and keyboard): Rayleigh damping law (αM/βK per the paper's C = αM + βK), boundary support with clamp touch position, mallet head + scrape, FEM-resolution morph (4³→8³ baked tables), body morphing with target dropdown, material physics rescale with Rayleigh defaults, ECO toggle + budget — no modals, everything on one 1440×1068 screen
@@ -64,6 +65,7 @@ Artifacts land in `build/bin/`.
 
 ```sh
 python tools/modal_bake.py -o plugins/MultiScaleBody/src/ModalData.hpp   # needs numpy + scipy
+python tools/elastic_bake.py -o plugins/MultiScaleBody/src/ElasticModalData.hpp  # elastic FEM bank
 ```
 
 ## Tests

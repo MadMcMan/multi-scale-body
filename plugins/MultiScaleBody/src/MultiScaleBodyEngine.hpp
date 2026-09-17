@@ -204,6 +204,10 @@ public:
     void prepare(double sr);
     void reset();
     void setPreset(int idx);
+    void setModelMode(int mode);
+    int getModelMode() const { return modelMode_; }
+    const PresetData& presetData(int index) const;
+    float modeGain(const PresetData& p,int m,int y,int x) const;
     void setPitchScale(float v);
     void setDecayScale(float v);
     void setBrightness(float v);
@@ -397,6 +401,10 @@ public:
     // otherwise calls startStrikeBurst unchanged (bit-identity default).
     void armExcitation(Voice& v,float vx,float vy);
     double sampleRate_=44100; int presetIdx_=0; int modeCount_=80;
+    int modelMode_=0;
+    float modeCountNorm_=0.6f;
+    int modelFadeLeft_=0, modelFadeLength_=1;
+    float modelLastL_=0.f, modelLastR_=0.f, modelBridgeL_=0.f, modelBridgeR_=0.f;
     float pitchScale_=1.f, decayScale_=1.f, brightness_=0.65f, strikeX_=0.5f, strikeY_=0.5f, width_=0.3f;
     float bandTrim_[16] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
     float radiationMix_=0.45f;
