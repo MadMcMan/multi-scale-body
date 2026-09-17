@@ -272,6 +272,8 @@ public:
     // Strike friction blend (wave-5): stretches the contact-transient layer
     // in time and level (tangential scrape). 0 = untouched transient.
     void setScrape(float v);
+    // Independent contact chatter level: 0 mute, 0.5 unity, 1 double.
+    void setContactNoise(float v) { contactNoiseGain_=2.f*std::clamp(v,0.f,1.f); }
     // FEM-resolution morph 0..1 (idea 3): interpolates each mode's frequency
     // and decay between the committed 4^3 bake and the new 8^3 fine bake
     // (ModalData::fineFreq/fineDecay). 0 = committed tables, bit-identical.
@@ -471,6 +473,7 @@ public:
     float supX_=0.5f, supY_=0.5f;       // clamp touch position on the disc (wave-5)
     float strikeW_=0.5f;                // mallet head size (wave-5): 0.5 = nominal pulse
     float scrape_=0.f;                  // strike friction blend (wave-5): transient stretch
+    float contactNoiseGain_=1.f, contactNoiseCur_=1.f;
     int   material_=0;                  // material preset (0 = body default)
     float materialFreqMul_=1.f;         // sqrt((E/rho)_mat / (E/rho)_body)
     float rayA_=0.f, rayB_=0.f;         // Rayleigh alpha/beta knob values (raw 0..1)

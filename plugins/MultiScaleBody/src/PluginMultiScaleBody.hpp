@@ -61,9 +61,12 @@ public:
         kParamOutBand4,kParamOutBand5,kParamOutBand6,kParamOutBand7,kParamOutBand8,
         kParamOutBand9,kParamOutBand10,kParamOutBand11,kParamOutBand12,kParamOutBand13,
         kParamOutBand14,kParamOutBand15,
+        kParamContactNoise,   // appended input: preserve all existing host parameter IDs
         kParameterCount
     };
-    static constexpr uint32_t kNumInputParams = kParamOutLevel;
+    static constexpr uint32_t kNumInputParams = kParamOutLevel+1;
+    static constexpr bool isOutputParameter(uint32_t i) { return i>=kParamOutLevel && i<=kParamOutBand15; }
+    static constexpr bool isInputParameter(uint32_t i) { return i<kParameterCount && !isOutputParameter(i); }
 private:
     modal::MultiScaleBodyEngine engine_;
     std::array<float, kParameterCount> paramBase_{};

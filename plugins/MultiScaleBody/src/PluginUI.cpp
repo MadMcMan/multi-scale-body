@@ -209,6 +209,7 @@ public:
             case P::kParamSupport: return "Support";   case P::kParamHoldDamp: return "Hold Damp";
             case P::kParamSupX: return "Sup X";        case P::kParamSupY: return "Sup Y";
             case P::kParamStrikeW: return "Head";      case P::kParamScrape: return "Scrape";
+            case P::kParamContactNoise: return "Contact";
             case P::kParamResMorph: return "Resolution"; case P::kParamMorphAmt: return "Morph";
             case P::kParamMorphTarget: return "Morph Tgt"; case P::kParamMaterial: return "Material";
             case P::kParamRayleighA: return "Rayl A";   case P::kParamRayleighB: return "Rayl B";
@@ -319,7 +320,7 @@ public:
         // fLiveAge resets on every metering write so the idle preview
         // resumes after ~1.5s of silence instead of flatlining.
         if(i==PluginMultiScaleBody::kParamOutLevel){ fVizLevel=v; fGotLiveViz=true; fLiveAge=0; return; }
-        if(i>=PluginMultiScaleBody::kParamOutBand0 && i<PluginMultiScaleBody::kParameterCount){
+        if(i>=PluginMultiScaleBody::kParamOutBand0 && i<=PluginMultiScaleBody::kParamOutBand15){
             fVizBins[i-PluginMultiScaleBody::kParamOutBand0]=v;
             fGotLiveViz=true; fLiveAge=0;
             return;
@@ -1092,6 +1093,10 @@ private:
             case P::kParamSupY:       snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
             case P::kParamStrikeW:    snprintf(buf,cap,"x%.2f",0.25f+1.5f*v); break;
             case P::kParamScrape:     snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
+            case P::kParamContactNoise:
+                if(v<=0.f) snprintf(buf,cap,"OFF");
+                else snprintf(buf,cap,"%d %%",(int)std::lround(v*200.f));
+                break;
             case P::kParamResMorph:  snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
             case P::kParamMorphAmt:   snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
             case P::kParamMorphTarget: {
@@ -1490,6 +1495,7 @@ private:
         set(PluginMultiScaleBody::kParamSupY, rnd(0.25f,0.75f));
         set(PluginMultiScaleBody::kParamStrikeW, rnd(0.3f,0.7f));
         set(PluginMultiScaleBody::kParamScrape, (std::rand()%100)<20 ? rnd(0.1f,0.4f) : 0.f);
+        set(PluginMultiScaleBody::kParamContactNoise, rnd(0.25f,0.65f));
         set(PluginMultiScaleBody::kParamResMorph, rnd(0.f,1.f));
         set(PluginMultiScaleBody::kParamMorphTarget, (float)(std::rand()%(mx+1))/(float)mx);
         set(PluginMultiScaleBody::kParamMorphAmt, (std::rand()%100)<25 ? rnd(0.2f,0.6f) : 0.f);
@@ -1515,7 +1521,7 @@ private:
         while(arc && !lv_obj_check_type(arc,&lv_arc_class)) arc=lv_obj_get_parent(arc);
         if(!arc){ cancelLearn(); return; }   // empty space (or 2nd click) cancels
         const intptr_t ud=(intptr_t)lv_obj_get_user_data(arc);
-        if(ud<0 || ud>=(intptr_t)PluginMultiScaleBody::kNumInputParams){ cancelLearn(); return; }
+        if(ud<0 || !PluginMultiScaleBody::isInputParameter((uint32_t)ud)){ cancelLearn(); return; }
         armLearn((int)ud);
     }
     // wave-4: MIDI learn arms a non-blocking keyboard-header chip instead of
@@ -1911,16 +1917,13 @@ private:
     }
 
     // ---- wave-4 PHYSICS strip (no modals) ----------------------------------
-    // Round-2 critic fix: ONE continuous 14-cell grid owns the full band
-    // width (11 full-anatomy machined knobs + ECO + Material + Morph Tgt),
-    // so no horizontal empty-panel run exceeds one gutter. Budget @s=1:
-    // 2 border + 24 pad + 22 head + 6 gap + 148 row = 202 exact.
+    // Twelve full-anatomy knobs and two selects; ECO lives in the header.
+    // 12*88 + 2*137 + 13*4 = 1382px. Vertical budget remains 202px.
     void stripKnob(lv_obj_t* row,uint32_t pi){
         // Round-2: normalArcSpec() = the upper-bank BODY dial anatomy (arc
         // 76, cap 64, 12 ticks x 5px, needle 3/4, montserrat_12 title and
         // value) - the same machined knob as the bank, no third idiom. Only
-        // the invisible container box narrows 92 -> 88 (KNOB_W_C) so 11
-        // knobs + ECO + 2 selects fill the 1382px band edge-to-edge.
+        // the invisible container narrows to 88px; anatomy is unchanged.
         ArcVisualSpec spec=normalArcSpec();
         spec.containerW=scaled(lay::KNOB_W_C);
         lv_obj_t* arc=UIWidgets::createArcKnob(row,pi,this,styles,spec);
@@ -1954,37 +1957,28 @@ private:
     void buildModelStrip(lv_obj_t* root){
         using P=PluginMultiScaleBody;
         lv_obj_t* strip=makeCard(root,lv_pct(100),scaled(lay::MODEL_STRIP_H),scaled(6),LV_FLEX_ALIGN_START);
-        lv_obj_t* head=makeRow(strip,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_START);
+        lv_obj_t* head=makeRow(strip,lv_pct(100),scaled(lay::HEAD_H),scaled(12),LV_FLEX_ALIGN_START);
         addLabel(head,"PHYSICAL MODEL",getScaledSmallFont(),COL_HIGHLIGHT,2);
-        // Round-2 (critic c/e): one continuous grid, 14 cells, full anatomy:
-        // 11 machined knob cells x 88 + ECO cell 76 + 2 selects x 143,
-        // gutters 4px -> 1382 = the full inner width. Order = signal chain: clamp,
-        // strike, damping, resolution, morph(+target), Rayleigh, ECO
-        // (+budget), material. Captions ride the knob-title baseline; the
-        // controls center on the arc band (arc center = row_y + 74).
+        // Read left to right: clamp, contact, damping, body, material.
         lv_obj_t* row=makeRow(strip,lv_pct(100),scaled(lay::MODEL_ROW_H),scaled(4),LV_FLEX_ALIGN_START);
         stripKnob(row,P::kParamSupport);
         stripKnob(row,P::kParamSupX);
         stripKnob(row,P::kParamSupY);
         stripKnob(row,P::kParamStrikeW);
+        stripKnob(row,P::kParamContactNoise);
         stripKnob(row,P::kParamScrape);
         stripKnob(row,P::kParamHoldDamp);
         stripKnob(row,P::kParamResMorph);
         stripKnob(row,P::kParamMorphAmt);
         stripKnob(row,P::kParamRayleighA);
         stripKnob(row,P::kParamRayleighB);
-        // ECO cell: caption on the knob-title baseline (cell nudged down 2
-        // so its top-aligned caption matches the centered knob containers),
-        // toggle centered on the arc band (22px button -> translate +28).
-        lv_obj_t* ecoCell=makeCol(row,scaled(lay::MODEL_ECO_W),scaled(lay::KNOB_H_N),scaled(2),LV_FLEX_ALIGN_START);
-        addLabel(ecoCell,"Eco",getScaledSmallFont(),PLATE_LABEL_ACCENT,0);
-        lv_obj_set_style_translate_y(ecoCell,scaled(2),0);
+        // ECO is a mode switch rather than a continuous physical control.
+        lv_obj_t* ecoCell=makeRow(head,scaled(lay::MODEL_ECO_W),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_START);
         fEcoBtn=lv_btn_create(ecoCell);
         lv_obj_set_size(fEcoBtn,lv_pct(100),scaled(lay::BTN_H));
         styles.applyToggleButton(fEcoBtn,paramCache[P::kParamEcoMode]>0.5f);
         lv_obj_set_style_radius(fEcoBtn,scaled(lay::RADIUS_SM),0);
         lv_obj_set_style_pad_all(fEcoBtn,0,0);
-        lv_obj_set_style_translate_y(fEcoBtn,scaled(28),0);
         lv_obj_t* elbl=lv_label_create(fEcoBtn); lv_label_set_text(elbl,"ECO"); lv_obj_center(elbl);
         // Eco Budget knob pairs with the ECO toggle it feeds.
         stripKnob(row,P::kParamEcoBudget);

@@ -17,6 +17,7 @@ void MultiScaleBodyEngine::prepare(double sr) {
     bowSmCoef_ = 1.f - std::exp(-1.f/(0.005f*(float)sampleRate_)); // ~5 ms bow friction smoothing
     widthCur_=width_; wetCur_=reverbWet_; exMixCur_=exciteMix_;   // start settled, no ramp-in
     volCur_=volumeNorm_;                                          // volume: settled too (unity default)
+    contactNoiseCur_=contactNoiseGain_;
     irDirty_=true; irBaking_=false;
     rebuildDetuneTable();
     computeDecayRef(); // uniform-damping ring anchor for the current preset
@@ -42,6 +43,7 @@ void MultiScaleBodyEngine::reset() {
     limReset();
     widthCur_=width_; wetCur_=reverbWet_; exMixCur_=exciteMix_;
     volCur_=volumeNorm_;
+    contactNoiseCur_=contactNoiseGain_;
 }
 
 float MultiScaleBodyEngine::cubicInterp(float p0,float p1,float p2,float p3,float t){
@@ -1026,6 +1028,8 @@ void MultiScaleBodyEngine::processSampleStereo(float &outL, float &outR) {
     // converges to an exact deterministic gain.
     volCur_ += (volumeNorm_-volCur_)*rtSmCoef_;
     if(std::fabs(volumeNorm_-volCur_)<1e-3f) volCur_=volumeNorm_;
+    contactNoiseCur_ += (contactNoiseGain_-contactNoiseCur_)*rtSmCoef_;
+    if(std::fabs(contactNoiseGain_-contactNoiseCur_)<1e-5f) contactNoiseCur_=contactNoiseGain_;
     // LFO modulates mode freqs + LP cutoff; refreshing all voice coefficients
     // per sample is unaffordable, so throttle to every 32 samples (~1.5 kHz at
     // 48k) - far above the <=12 Hz LFO band, inaudibly stepped
@@ -1140,7 +1144,9 @@ void MultiScaleBodyEngine::processSampleStereo(float &outL, float &outR) {
             const float nz=(float)s*(1.f/2147483648.f)-1.f; // [-1,1)
             v.transLP+=v.transCoef*(nz-v.transLP);
             const float fade=(float)v.transLeft/(float)v.transLen;
-            const float tr=v.transAmp*v.transLP*fade;
+            float tr=v.transAmp*v.transLP*fade;
+            // Keep the original arithmetic at unity; mute never freezes RNG/filter state.
+            if(contactNoiseCur_!=1.f) tr*=contactNoiseCur_;
             const float atr=std::fabs(tr);
             if(atr>transPeak_) transPeak_=atr;
             const float angV=(voicePan+1.f)*0.25f*(float)M_PI;

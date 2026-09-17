@@ -22,6 +22,7 @@ VST3 · CLAP · LV2 · JACK standalone (DPF), with an LVGL-based UI.
 - **Playable strike disc**: click sets strike position (X/Y) and triggers a hit; onset-triggered ripple rings
 - **Tone shaping**: tune, decay, brightness, stereo width
 - **Exciter**: exciter mix, velocity-to-strike, detune spread, glide, mono mode, LFO (rate/depth), bow/friction excitation (held notes swell instead of decaying — a stick-slip friction bridge feeding the same modal bank, a documented extension: see below)
+- **Contact**: independent contact-noise level in the physical-model strip, OFF–200% (default 100%). Scrape still controls transient duration/texture. Contact affects only the added chatter layer, not the modal ring or bow; this noise layer is a deliberate extension beyond paper 47's Dirac excitation. Supports automation, patch recall and MIDI learn; existing parameter IDs and default sound are preserved.
 - **Space**: radiation mix, 16-band output EQ trims, wet/dry
 - **Per-band decay trims**: the 16-band spectrum chart scrubs gain (default) or per-band decay via the GAIN/DECAY toggle, so highs can dull while lows bloom
 - **Felt damper + half-pedal**: a Damper knob loads a felt strip (frequency-dependent absorption); CC64 is continuous — full pedal defers note-offs, half-pedal deadens the ring

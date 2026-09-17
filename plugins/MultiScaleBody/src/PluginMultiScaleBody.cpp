@@ -31,6 +31,7 @@ PluginMultiScaleBody::PluginMultiScaleBody() : Plugin(kNumParams, 0, 6) {
     paramBase_[kParamEcoMode]=0.f; paramBase_[kParamEcoBudget]=0.5f;
     paramBase_[kParamSupX]=0.5f; paramBase_[kParamSupY]=0.5f;
     paramBase_[kParamStrikeW]=0.5f; paramBase_[kParamScrape]=0.f;
+    paramBase_[kParamContactNoise]=0.5f;
     double sr=getSampleRate(); if(sr<1000) sr=44100;
     engine_.prepare(sr);
     engine_.setPitchScale(paramBase_[kParamPitch]); engine_.setDecayScale(paramBase_[kParamDecay]);
@@ -62,6 +63,7 @@ PluginMultiScaleBody::PluginMultiScaleBody() : Plugin(kNumParams, 0, 6) {
     engine_.setSupPos(paramBase_[kParamSupX], paramBase_[kParamSupY]);
     engine_.setStrikeW(paramBase_[kParamStrikeW]);
     engine_.setScrape(paramBase_[kParamScrape]);
+    engine_.setContactNoise(paramBase_[kParamContactNoise]);
     // look-ahead limiter delay: hosts compensate when aligning PDC.
     // Reporting requires DISTRHO_PLUGIN_WANT_LATENCY=1 in DistrhoPluginInfo.h
     // (left off for now; guarded so enabling the flag just works).
@@ -110,6 +112,7 @@ void PluginMultiScaleBody::initParameter(uint32_t index, Parameter& p){
         case kParamSupY: p.name="Sup Y"; p.symbol="supy"; p.ranges.def=0.5f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamStrikeW: p.name="Head"; p.symbol="strikew"; p.ranges.def=0.5f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamScrape: p.name="Scrape"; p.symbol="scrape"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamContactNoise: p.name="Contact Noise"; p.symbol="contact_noise"; p.ranges.def=0.5f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamMaterial: p.name="Material"; p.symbol="material"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamRayleighA: p.name="Rayl A"; p.symbol="rayla"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamRayleighB: p.name="Rayl B"; p.symbol="raylb"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
@@ -128,7 +131,7 @@ void PluginMultiScaleBody::initParameter(uint32_t index, Parameter& p){
                 char sym[16]; snprintf(sym,sizeof(sym),"band%d",band+1);
                 p.name=String(name); p.symbol=String(sym); p.ranges.def=0.5f; p.ranges.min=0.f; p.ranges.max=1.f;
             }
-            else if(index>=kParamOutLevel && index<kParameterCount){
+            else if(isOutputParameter(index)){
                 // metering outputs: DSP -> host -> UI only, never automatable
                 p.hints=kParameterIsOutput;
                 p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f;
@@ -144,8 +147,7 @@ void PluginMultiScaleBody::initParameter(uint32_t index, Parameter& p){
     }
 }
 void PluginMultiScaleBody::setParameterValue(uint32_t idx,float v){
-    if(idx>=kParameterCount) return;
-    if(idx>=kParamOutLevel) return; // outputs are written by run(), not the host
+    if(!isInputParameter(idx)) return;
     v=std::clamp(v,0.f,1.f); paramBase_[idx]=v;
     switch(idx){
         case kParamPitch: engine_.setPitchScale(v); break;
@@ -204,6 +206,7 @@ void PluginMultiScaleBody::setParameterValue(uint32_t idx,float v){
             engine_.setSupPos(paramBase_[kParamSupX],paramBase_[kParamSupY]); break;
         case kParamStrikeW: engine_.setStrikeW(v); break;
         case kParamScrape: engine_.setScrape(v); break;
+        case kParamContactNoise: engine_.setContactNoise(v); break;
         case kParamRayleighA: engine_.setRayleigh(v,paramBase_[kParamRayleighB]); break;
         case kParamRayleighB: engine_.setRayleigh(paramBase_[kParamRayleighA],v); break;
         case kParamEcoMode: engine_.setEco(v>0.5f,paramBase_[kParamEcoBudget]); break;
@@ -222,8 +225,8 @@ void PluginMultiScaleBody::setParameterValue(uint32_t idx,float v){
 }
 float PluginMultiScaleBody::getParameterValue(uint32_t idx) const {
     if(idx==kParamOutLevel) return vizLevel_;
-    if(idx>=kParamOutBand0 && idx<kParameterCount) return vizBins_[idx-kParamOutBand0];
-    if(idx<kNumInputParams) return paramBase_[idx];
+    if(idx>=kParamOutBand0 && idx<=kParamOutBand15) return vizBins_[idx-kParamOutBand0];
+    if(isInputParameter(idx)) return paramBase_[idx];
     return 0.f;
 }
 void PluginMultiScaleBody::sampleRateChanged(double sr){
@@ -259,6 +262,7 @@ void PluginMultiScaleBody::sampleRateChanged(double sr){
     engine_.setSupPos(paramBase_[kParamSupX], paramBase_[kParamSupY]);
     engine_.setStrikeW(paramBase_[kParamStrikeW]);
     engine_.setScrape(paramBase_[kParamScrape]);
+    engine_.setContactNoise(paramBase_[kParamContactNoise]);
     if(!scaleTxt_.empty()) engine_.setTuning(scaleRatios_, scaleActive_); // survives SR change
 #if DISTRHO_PLUGIN_WANT_LATENCY
     setLatency(engine_.limiterLatency());
@@ -299,13 +303,13 @@ void PluginMultiScaleBody::run(const float** inputs,float** outputs,uint32_t fra
             // BEFORE the built-in CC semantics (a learned binding overrides
             // the default behavior of that controller).
             if(ch==0){
-                if(learnPending_>=0 && learnPending_<(int)PluginMultiScaleBody::kNumInputParams){
+                if(learnPending_>=0 && isInputParameter((uint32_t)learnPending_)){
                     ccToParam_[d1]=learnPending_;
                     learnPending_=-1;   // binding consumed; value untouched
                     return;
                 }
                 const int mapped=ccToParam_[d1];
-                if(mapped>=0 && mapped<(int)PluginMultiScaleBody::kNumInputParams){
+                if(mapped>=0 && isInputParameter((uint32_t)mapped)){
                     setParameterValue((uint32_t)mapped, d2/127.f);
                     return;
                 }
@@ -360,7 +364,8 @@ void PluginMultiScaleBody::run(const float** inputs,float** outputs,uint32_t fra
 static String serializeParams(const std::array<float,kNumParams>& pb){
     String s;
     char buf[24];
-    for(uint32_t i=0;i<PluginMultiScaleBody::kNumInputParams;++i){
+    for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount;++i){
+        if(!PluginMultiScaleBody::isInputParameter(i)) continue;
         snprintf(buf,sizeof(buf),"%u=%.4f;",i,pb[i]);
         s+=buf;
     }
@@ -418,7 +423,7 @@ void PluginMultiScaleBody::setState(const char* key, const char* value){
     if(k=="ccmap"){ parseCcmap(value); return; }
     if(k=="learn"){
         learnPending_ = (value[0]>='0' && value[0]<='9') ? std::atoi(value) : -1;
-        if(learnPending_<0 || learnPending_>=(int)PluginMultiScaleBody::kNumInputParams) learnPending_=-1;
+        if(learnPending_<0 || !isInputParameter((uint32_t)learnPending_)) learnPending_=-1;
         return;
     }
     if(k!="patch") return;
@@ -430,7 +435,7 @@ void PluginMultiScaleBody::setState(const char* key, const char* value){
         c=end+1;
         float v=strtof(c,&end);
         if(end==c) break;
-        if(idx>=0 && idx<(long)PluginMultiScaleBody::kNumInputParams) setParameterValue((uint32_t)idx,v);
+        if(idx>=0 && idx<(long)kParameterCount && isInputParameter((uint32_t)idx)) setParameterValue((uint32_t)idx,v);
         c=end;
         if(*c==';') ++c; else break;
     }
@@ -455,7 +460,7 @@ void PluginMultiScaleBody::parseCcmap(const char* str){
         c=end+1;
         long cc=strtol(c,&end,10);
         if(end==c) break;
-        if(p>=0 && p<(long)PluginMultiScaleBody::kNumInputParams && cc>=0 && cc<128)
+        if(p>=0 && p<(long)kParameterCount && isInputParameter((uint32_t)p) && cc>=0 && cc<128)
             ccToParam_[cc]=(int)p;
         c=end;
         if(*c==';') ++c; else break;

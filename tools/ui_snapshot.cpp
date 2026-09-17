@@ -26,8 +26,11 @@ START_NAMESPACE_DISTRHO
 
 // interaction-proof counters: every UI->plugin route lands in one of these
 static int gNoteOns=0,gNoteOffs=0,gParamWrites=0,gStrikeWrites=0,gPresetWrites=0,gBandWrites=0;
+static uint32_t gLastParam=UINT32_MAX;
+static float gLastValue=0.f;
 static void stubEditParam(void*, uint32_t, bool) {}
-static void stubSetParam(void*, uint32_t i, float){
+static void stubSetParam(void*, uint32_t i, float value){
+    gLastParam=i; gLastValue=value;
     ++gParamWrites;
     if(i==PluginMultiScaleBody::kParamStrikeX||i==PluginMultiScaleBody::kParamStrikeY) ++gStrikeWrites;
     else if(i==PluginMultiScaleBody::kParamPreset) ++gPresetWrites;
@@ -408,6 +411,55 @@ static void wheelAt(HWND hwnd,int clientX,int clientY,double delta)
     const WPARAM wp=(WPARAM)((int)(delta*120)<<16);
     PostMessage(hwnd,WM_MOUSEWHEEL,wp,MAKELPARAM(p.x,p.y));
 }
+
+static lv_obj_t* findParamArc(lv_obj_t* obj,uint32_t param){
+    if(lv_obj_check_type(obj,&lv_arc_class) && (uintptr_t)lv_obj_get_user_data(obj)==param) return obj;
+    for(uint32_t i=0;i<lv_obj_get_child_count(obj);++i)
+        if(auto* found=findParamArc(lv_obj_get_child(obj,i),param)) return found;
+    return nullptr;
+}
+static lv_point_t contactPointer{};
+static bool contactPressed=false;
+static void contactPointerRead(lv_indev_t*,lv_indev_data_t* data){
+    data->point=contactPointer;
+    data->state=contactPressed?LV_INDEV_STATE_PRESSED:LV_INDEV_STATE_RELEASED;
+}
+static void contactProof(DISTRHO::UIExporter* exp,HWND hwnd){
+    const auto pi=PluginMultiScaleBody::kParamContactNoise;
+    bool first=true;
+    for(const auto dims : {std::pair<int,int>{1440,1068},{1100,816}}){
+        resizeWindow(hwnd,exp,dims.first,dims.second,first);
+        lv_obj_update_layout(lv_screen_active());
+        lv_obj_t* arc=findParamArc(lv_screen_active(),pi);
+        EXPECT(arc!=nullptr,"Contact arc present");
+        if(!arc) continue;
+        exp->parameterChanged(pi,0.5f);
+        EXPECT(lv_arc_get_value(arc)==500,"Contact host echo 100 percent");
+        lv_area_t a; lv_obj_get_coords(arc,&a);
+        contactPointer={(lv_coord_t)((a.x1+a.x2)/2),(lv_coord_t)((a.y1+a.y2)/2)};
+        EXPECT(lv_indev_search_obj(lv_screen_active(),&contactPointer)==arc,"Contact cap does not steal clicks");
+        lv_indev_t* pointer=lv_indev_create();
+        lv_indev_set_type(pointer,LV_INDEV_TYPE_POINTER);
+        lv_indev_set_display(pointer,lv_display_get_default());
+        lv_indev_set_read_cb(pointer,contactPointerRead);
+        gLastParam=UINT32_MAX; gLastValue=0.f;
+        contactPressed=true; lv_indev_read(pointer);
+        contactPointer.y-=150; lv_indev_read(pointer);
+        EXPECT(gLastParam==pi && gLastValue>0.9f,"Contact drag reaches host independently");
+        contactPressed=false; lv_indev_read(pointer); lv_indev_delete(pointer);
+        exp->parameterChanged(pi,0.f);
+        EXPECT(lv_arc_get_value(arc)==0,"Contact host echo OFF");
+        exp->parameterChanged(pi,1.f);
+        EXPECT(lv_arc_get_value(arc)==1000,"Contact host echo 200 percent");
+        exp->parameterChanged(pi,0.5f);
+        idleFrames(exp,30); lv_obj_update_layout(lv_screen_active());
+        checkLayout("contact");
+        EXPECT(gBoundFails==0 && gOverlapFails==0,"Contact layout inside surface");
+        char name[64]; snprintf(name,sizeof(name),"contact_%d.bmp",dims.first);
+        writeBMP(hwnd,name);
+        LOGF("CONTACT capture=%s arc=[%d,%d,%d,%d] writes=%d value=%.3f\n",name,a.x1,a.y1,a.x2,a.y2,gParamWrites,gLastValue);
+    }
+}
 END_NAMESPACE_DISTRHO
 
 int main(int argc,char** argv)
@@ -431,6 +483,13 @@ int main(int argc,char** argv)
 
     idleFrames(exp,360);
      presentKick(hwnd,exp);
+    if(argc>1 && std::strcmp(argv[1],"--selftest")==0){
+        contactProof(exp,hwnd);
+        LOGF("CONTACT RESULT failures=%d\n",gTestFails);
+        exp->quit(); delete exp;
+        if(gLog) fclose(gLog);
+        return gTestFails?1:0;
+    }
 
     struct Sz{ int w,h; const char* bmp; const char* tag; };
     // R3 scope-preview probe: dump the second chart's (decay scope) series

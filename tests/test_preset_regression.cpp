@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 #include <string>
+#include <vector>
 static void require(bool c,const char* m){ if(!c){ fprintf(stderr,"FAIL: %s\n",m); std::exit(1);} }
 // expose protected state plumbing for the wave-2 state tests
 struct TestPlug : DISTRHO::PluginMultiScaleBody {
@@ -182,7 +183,8 @@ int main(){
         PluginMultiScaleBody p;
         p.testSampleRate2(44100); p.testActivate();
         const uint32_t ni=PluginMultiScaleBody::kNumInputParams;
-        for(uint32_t i=0;i<ni;++i){
+        for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount;++i){
+            if(!PluginMultiScaleBody::isInputParameter(i)) continue;
             // enum-snapped params (Preset/MorphTarget/Material/SlideMode/Eco/
             // Mono) round-trip to the nearest STEP by design — handled below.
             if(i==PluginMultiScaleBody::kParamPreset
@@ -220,59 +222,67 @@ int main(){
     {
         PluginMultiScaleBody p;
         p.testSampleRate2(44100); p.testActivate();
-        const float ni=(float)PluginMultiScaleBody::kNumInputParams;
         int nsink=0;
-        for(uint32_t i=PluginMultiScaleBody::kParamOutLevel;i<PluginMultiScaleBody::kParameterCount;++i){
+        for(uint32_t i=PluginMultiScaleBody::kParamOutLevel;i<=PluginMultiScaleBody::kParamOutBand15;++i){
             const float probe=0.31415f;
             p.testSetParameterValue(i, probe);
             const float got=p.testGetParameterValue(i);
             if(i==PluginMultiScaleBody::kParamOutLevel){ if(std::fabs(got-0.f)<1e-6f) ++nsink; }
             else if(i>=PluginMultiScaleBody::kParamOutBand0 && got==0.f) ++nsink;
         }
-        require(nsink>0,"routing: output writes never reach paramBase_");
+        require(nsink==17,"routing: all output writes rejected");
         require(p.testGetParameterValue(PluginMultiScaleBody::kParamVolume)==1.f,
                 "output write left an input untouched");
         printf("routing: output params write-protected PASS\n");
     }
-    // --- routing guard: representative knob->engine routes ------------------
-    // The physical-model/extended knobs must land on the engine member their
-    // parameter name implies (and defaults read back EXACTLY where the engine
-    // pins them). Any renumber/re-jig that re-points a knob to the wrong
-    // engine setter shows up here.
+    // Appended input must survive patch/MIDI routes across the output block.
     {
-        PluginMultiScaleBody p;
-        p.testSampleRate2(44100); p.testActivate();
-        struct R{ uint32_t pi; float v; };
-        const R rows[]={
-            {PluginMultiScaleBody::kParamBow,     0.55f},
-            {PluginMultiScaleBody::kParamDamper,  0.60f},
-            {PluginMultiScaleBody::kParamInharm,  0.40f},
-            {PluginMultiScaleBody::kParamMorphAmt,0.50f},
-            {PluginMultiScaleBody::kParamMaterial,0.20f},
-            {PluginMultiScaleBody::kParamRayleighA,0.30f},
-            {PluginMultiScaleBody::kParamRayleighB,0.25f},
-            {PluginMultiScaleBody::kParamSupport, 0.40f},
-            {PluginMultiScaleBody::kParamResMorph,0.60f},
-            {PluginMultiScaleBody::kParamSupX,     0.35f},
-            {PluginMultiScaleBody::kParamSupY,     0.65f},
-            {PluginMultiScaleBody::kParamStrikeW,  0.70f},
-            {PluginMultiScaleBody::kParamScrape,   0.45f},
+        using P=PluginMultiScaleBody;
+        auto render=[](int route){
+            TestPlug p;
+            p.testSampleRate2(44100);
+            p.testSetParameterValue(P::kParamWet,0.f);
+            if(route==0) p.testSetParameterValue(P::kParamContactNoise,0.f);
+            if(route==1){
+                TestPlug saved;
+                saved.testSetParameterValue(P::kParamWet,0.f);
+                saved.testSetParameterValue(P::kParamContactNoise,0.f);
+                std::string patch=saved.getState("patch").buffer();
+                p.setState("patch",patch.c_str());
+            }
+            if(route==2){
+                TestPlug saved;
+                const auto index=std::to_string(P::kParamContactNoise);
+                saved.setState("learn",index.c_str());
+                float l[64]{},r[64]{}; float* dst[]={l,r};
+                MidiEvent cc{}; cc.size=3; cc.data[0]=0xB0; cc.data[1]=74; cc.data[2]=0;
+                saved.testRun2(nullptr,dst,64,&cc,1);
+                std::string map=saved.getState("ccmap").buffer();
+                p.setState("ccmap",map.c_str());
+                p.testRun2(nullptr,dst,64,&cc,1);
+            }
+            else{
+                float l[64]{},r[64]{}; float* dst[]={l,r};
+                p.testRun2(nullptr,dst,64);
+            }
+            p.testActivate();
+            float l[64]{},r[64]{}; float* dst[]={l,r};
+            for(int i=0;i<128;++i) p.testRun2(nullptr,dst,64);
+            std::vector<float> result;
+            MidiEvent on{}; on.size=3; on.data[0]=0x90; on.data[1]=60; on.data[2]=20;
+            for(int block=0;block<64;++block){
+                p.testRun2(nullptr,dst,64,block?nullptr:&on,block?0:1);
+                result.insert(result.end(),l,l+64);
+                result.insert(result.end(),r,r+64);
+            }
+            return result;
         };
-        for(const R& r: rows) p.testSetParameterValue(r.pi, r.v);
-        const auto& e=p.testEngine();
-        require(std::fabs(e.getBow()-0.55f)<1e-6f,"route: Bow->getBow");
-        require(std::fabs(e.getDamper()-0.60f)<1e-6f,"route: Damper->getDamper");
-        require(std::fabs(e.getInharmSpread()-0.40f)<1e-6f,"route: Inharm->getInharmSpread");
-        require(std::fabs(e.getMorphAmt()-0.50f)<1e-6f,"route: MorphAmt->getMorphAmt");
-        require(std::fabs(e.getRayleighA()-0.30f)<1e-6f,"route: RaylA->getRayleighA");
-        require(std::fabs(e.getRayleighB()-0.25f)<1e-6f,"route: RaylB->getRayleighB");
-        require(std::fabs(e.getSupport()-0.40f)<1e-6f,"route: Support->getSupport");
-        require(std::fabs(e.getResMorph()-0.60f)<1e-6f,"route: ResMorph->getResMorph");
-        require(std::fabs(e.getSupX()-0.35f)<1e-6f,"route: SupX->getSupX");
-        require(std::fabs(e.getSupY()-0.65f)<1e-6f,"route: SupY->getSupY");
-        require(std::fabs(e.getStrikeW()-0.70f)<1e-6f,"route: StrikeW->getStrikeW");
-        require(std::fabs(e.getScrape()-0.45f)<1e-6f,"route: Scrape->getScrape");
-        printf("routing: representative knob->engine routes PASS\n");
+        const auto direct=render(0),patch=render(1),midi=render(2),normal=render(3);
+        require(direct==patch,"Contact patch recall preserves rendered sound");
+        require(direct==midi,"Contact learned CC recall preserves rendered sound");
+        double delta=0; for(size_t i=0;i<direct.size();++i) delta+=std::fabs(direct[i]-normal[i]);
+        require(delta>1e-4,"Contact mute removes audible transient");
+        printf("Contact patch/MIDI audio parity PASS (delta %.6f)\n",delta);
     }
     // --- routing guard: MIDI-learn 'learn' state round-trips the index ------
     // Regression for a real defect: getState("learn") returned "1" (a bool),

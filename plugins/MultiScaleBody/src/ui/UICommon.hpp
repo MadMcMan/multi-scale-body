@@ -131,7 +131,7 @@ namespace lay {
     // "DEFAULT" inside the closed dropdown at every zoom >= 65%.
     constexpr int MODEL_STRIP_H = 202;
     constexpr int MODEL_ROW_H = 148;             // = 202 - 2 - 2*CARD_PAD - HEAD_H - ROW_GAP
-    constexpr int MODEL_SEL_W = 143;             // material / morph select cells
+    constexpr int MODEL_SEL_W = 137;             // 12 knobs + 2 selects fit the existing strip
     constexpr int MODEL_ECO_W = 76;              // ECO toggle (and its cell)
     // keyboard-header select cluster (EDO 110 + LOAD 130 + CLEAR 80 + 2 x 8)
     constexpr int KB_SEL_W = 336;
