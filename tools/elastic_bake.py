@@ -147,11 +147,25 @@ def gains(V,active,g,field):
     return out
 
 
+# Per-preset gain scale = RMS_classic/RMS_elastic at a reference strike, so the
+# Elastic FEM bank renders equal loudness to the Classic bank on every body.
+# The engine path is exactly linear in gain (strike injection =
+# force*gain[i]*strikeEff[i]; resonator state linear in force), so ONE
+# multiplicative constant per preset equalizes RMS at ANY strike point / mode
+# count / decay, not just the reference. Measured from the real engine
+# (modeCount=1, strike .37/.63, decay .5, contact OFF so only the modal ring is
+# calibrated, 44.1k, 24000 frames), audited under commit 2a3d063. Classic bank
+# untouched (golden md5 unchanged); only elastic gains carry this scale.
+GAIN_CAL = [7.1841,8.5952,4.1660,15.4803,11.2872,3.8970,5.2738,3.7559,
+            5.0155,7.5557,4.9341,3.9318,1.9235,3.6008,4.9460,6.4131,8.7939,7.9340]
+
+
 def bake(p):
     field=material_field(p); data=[]
+    cal=GAIN_CAL[classic.PRESETS.index(p)]
     for g in (4,8):
         K,M,active=assemble(p,g,field); freq,V=modes(K,M)
-        G=gains(V,active,g,field)
+        G=gains(V,active,g,field)*cal
         decay=.5*(p['alpha1']+p['alpha2']*freq**2)
         data.append((freq,decay,G))
         translation=(active%3==0).astype(float)
