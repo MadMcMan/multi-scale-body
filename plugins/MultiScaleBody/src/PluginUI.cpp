@@ -2815,6 +2815,9 @@ private:
         if(!v) return;
         const int band=std::clamp(std::atoi(v),0,15);
         paramCache[PluginMultiScaleBody::kParamBand0+3]=0.80f;      // gain x1.6
+        // B4 carries BOTH trims so the demo covers all three legend states:
+        // B4 both (teal), B8 gain-only (blue), B12 decay-only (green).
+        paramCache[PluginMultiScaleBody::kParamBandDecay0+3]=0.65f; // decay x1.41
         paramCache[PluginMultiScaleBody::kParamBand0+7]=0.30f;      // gain x0.6
         paramCache[PluginMultiScaleBody::kParamBandDecay0+11]=0.77f;// decay x1.9
         fScrubBand=band;
@@ -2928,11 +2931,16 @@ private:
         }
     }
     // wave-6: B1..B16 legend restyle — the live map of "what is edited".
-    // Active scrub band: bright lead (PLATE_AMBER, letterspacing 1).
-    // Band with a non-default gain trim: bright text. Band with a
-    // non-default decay trim: the muted green of the decay ticks, so the
-    // legend colors match the floor tick strip (blue row = gain, green
-    // row = decay). Untouched bands stay dim.
+    // Colors mirror the floor tick strip (blue row = gain, green row =
+    // decay). Precedence, highest first:
+    //   active scrub band -> pale blue (the chip + column already identify
+    //     it, so it may mask its own trim state)
+    //   gain AND decay    -> teal blend (was: gain overwrote decay, so a
+    //     both-trimmed band reported blue only while the floor strip
+    //     correctly drew BOTH rows — the legend under-reported the edit)
+    //   gain only         -> blue
+    //   decay only        -> green
+    //   untouched         -> dim
     void restyleBandTicks(){
         for(int b=0;b<16;++b){
             lv_obj_t* lbl=fBandTicks[b];
@@ -2941,8 +2949,11 @@ private:
             lv_coord_t ls=0;
             const float gt=paramCache[PluginMultiScaleBody::kParamBand0+b];
             const float dt=paramCache[PluginMultiScaleBody::kParamBandDecay0+b];
-            if(std::fabs(dt-0.5f)>0.02f){ col=COL_METER_SAFE; ls=1; }
-            if(std::fabs(gt-0.5f)>0.02f){ col=PLATE_AMBER; ls=1; }
+            const bool hasGain  = std::fabs(gt-0.5f)>0.02f;
+            const bool hasDecay = std::fabs(dt-0.5f)>0.02f;
+            if(hasDecay){ col=COL_METER_SAFE; ls=1; }
+            if(hasGain) { col=PLATE_AMBER;      ls=1; }
+            if(hasGain && hasDecay) col=PLATE_TRIM_BOTH;   // never hide the second trim
             if(b==fScrubBand){ col=PLATE_AMBER_PALE; ls=1; }
             lv_obj_set_style_text_color(lbl,col,0);
             lv_obj_set_style_text_letter_space(lbl,scaled(ls),0);

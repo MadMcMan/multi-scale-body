@@ -60,6 +60,7 @@ public:
 #define PLATE_MARK        lv_color_hex(0x3A3E48)  // witness marks
 #define PLATE_BTN_PRESS    lv_color_hex(0x232830)  // flat-button pressed surface
 #define COL_METER_SAFE    lv_color_hex(0x8FAE5A)  // muted green: nominal level
+#define PLATE_TRIM_BOTH    lv_color_hex(0x73B6B7)  // teal blend: band has BOTH gain+decay trim
 #define COL_METER_HOT     lv_color_hex(0xD9534A)  // red: headroom exceeded
 #define KB_WELL           lv_color_hex(0x15181E)
 #define KB_BLACK          lv_color_hex(0x14181E)

@@ -39,3 +39,4 @@ __pycache__/
 # Nested git dirs safety
 **/.git/
 **/.git_disabled/
+msb_spectrum*.png
