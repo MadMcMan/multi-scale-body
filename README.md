@@ -54,7 +54,7 @@ Requires CMake + Ninja and DPF/LVGL under `deps/` (see `BUILD.md`):
 
 ```sh
 cmake -S . -B build -G Ninja
-cmake --build build --target MultiScaleBody-vst3 MultiScaleBody-clap MultiScaleBody-lv2 MultiScaleBody-jack
+cmake --build build --target MultiScaleBody-vst3 MultiScaleBody-clap MultiScaleBody-lv2 MultiScaleBody-lv2-ui MultiScaleBody-jack
 ```
 
 Artifacts land in `build/bin/`.

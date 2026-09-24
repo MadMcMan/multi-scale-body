@@ -9,7 +9,12 @@ MinGW Makefiles runs through `cmd.exe` where `&` splits commands → `cc.exe: no
 
 ```sh
 cmake -S . -B build -G Ninja
-cmake --build build --target MultiScaleBody-vst3 MultiScaleBody-clap MultiScaleBody-lv2 MultiScaleBody-jack
+cmake --build build --target MultiScaleBody-vst3 MultiScaleBody-clap MultiScaleBody-lv2 MultiScaleBody-lv2-ui MultiScaleBody-jack
+
+# `MultiScaleBody-lv2` only pulls in the DSP dll. The UI dll is a SEPARATE
+# target (`MultiScaleBody-lv2-ui`) and is NOT in the lv2 alias, so omitting it
+# silently leaves a stale `MultiScaleBody_ui.dll` in build/bin/MultiScaleBody.lv2/
+# after a PluginUI.cpp / ui header edit. Keep it in the list.
 # optional full: cmake --build build
 ```
 
