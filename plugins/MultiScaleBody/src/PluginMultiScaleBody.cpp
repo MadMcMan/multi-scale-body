@@ -425,7 +425,13 @@ void PluginMultiScaleBody::setState(const char* key, const char* value){
     if(k=="kbm"){ kbmTxt_=value; if(!scaleTxt_.empty()) rebuildScaleFromScl(scaleTxt_.c_str()); return; }
     if(k=="ccmap"){ parseCcmap(value); return; }
     if(k=="learn"){
-        learnPending_ = (value[0]>='0' && value[0]<='9') ? std::atoi(value) : -1;
+        // Validate the PARSED value, not value[0]: the old single-character
+        // guard rejected a multi-digit id whose first char wasn't a digit
+        // and accepted any string starting with one. strtol with full
+        // end-pointer checking is the correct test; isInputParameter below
+        // then range-checks the result.
+        { char* end=nullptr; const long v=std::strtol(value,&end,10);
+          learnPending_ = (end!=value) ? (int)v : -1; }
         if(learnPending_<0 || !isInputParameter((uint32_t)learnPending_)) learnPending_=-1;
         return;
     }

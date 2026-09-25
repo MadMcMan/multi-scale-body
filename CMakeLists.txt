@@ -125,3 +125,35 @@ if(WIN32)
     set_target_properties(ui_snapshot PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 endif()
+
+# --- golden bit-identity gate ------------------------------------------------
+# Renders the plugin's default sound and memcmps it against the committed
+# tests/golden_default.bin. This is what makes the "default sound unchanged"
+# invariant claimed in PLAN.md enforceable instead of aspirational: the blob was
+# previously write-only (nothing ever read it) and the generator was not a build
+# target, so any DSP edit passed the test suite regardless.
+#
+#   cmake --build build --target golden_check   # gate: nonzero on drift
+#   cmake --build build --target gen_golden     # regenerate (report md5s)
+add_executable(gen_golden EXCLUDE_FROM_ALL
+    tests/gen_golden_volume.cpp
+    plugins/MultiScaleBody/src/MultiScaleBodyEngine.cpp
+)
+target_include_directories(gen_golden PRIVATE plugins/MultiScaleBody/src)
+
+# gen_golden writes/reads tests/golden_default.bin by a path relative to the
+# project root, so both tools run with WORKING_DIRECTORY at the repo root.
+add_custom_target(golden_check
+    COMMAND $<TARGET_FILE:gen_golden> --check
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    DEPENDS gen_golden
+    COMMENT "Golden: verifying the default sound is bit-identical"
+    VERBATIM
+)
+add_custom_target(regen_golden
+    COMMAND $<TARGET_FILE:gen_golden>
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    DEPENDS gen_golden
+    COMMENT "Golden: REGENERATING tests/golden_default.bin (report old+new md5)"
+    VERBATIM
+)

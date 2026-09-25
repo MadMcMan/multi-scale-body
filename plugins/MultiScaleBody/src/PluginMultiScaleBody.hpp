@@ -29,9 +29,11 @@ public:
         kParamBand8,kParamBand9,kParamBand10,kParamBand11,kParamBand12,kParamBand13,kParamBand14,kParamBand15,
         kParamRadiation,kParamAttack,kParamRelease,kParamLFORate,kParamLFODepth,
         kParamExciteMix,kParamVelStrike,kParamDetune,kParamGlide,kParamWet,kParamMono,kParamVolume,
-        // wave-2 features (inserted before kParamOutLevel so serializeParams —
-        // which iterates exactly kNumInputParams — saves them with zero extra
-        // work; every consumer names them by enum, never by literal index)
+        // wave-2 features (appended before the output block so the OUTPUT
+        // indices stay contiguous; serializeParams() picks them up for free
+        // because it ranges over kParameterCount and skips isOutputParameter,
+        // NOT because of kNumInputParams. Every consumer names params by
+        // enum, never by literal index.)
         kParamBow,            // bow/friction excitation pressure 0..1 (0 = mallet strikes)
         kParamDamper,         // felt damper depth 0..1 (frequency-dependent mute)
         kParamInharm,         // inharmonicity/spread 0..1 (partial stretch)

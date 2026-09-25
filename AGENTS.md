@@ -33,6 +33,18 @@ g++ -std=c++17 -O1 -DHOST_BINARY -I plugins/MultiScaleBody/src -I deps/DPF/distr
 
 - Preset regression requires the plugin built first (`build/libMultiScaleBody-dsp.a`) and compiles the *plugin header* with `-DHOST_BINARY`, which exposes the `test*()` hooks (`PluginMultiScaleBody.hpp:45`).
 
+### Golden bit-identity gate (run this after any DSP edit)
+
+```sh
+cmake --build build --target golden_check   # nonzero exit if the default render drifted
+```
+
+`tests/golden_default.bin` is the reference default-sound render. The gate was
+previously write-only — nothing read the blob, so "default sound unchanged" was
+unenforced. On an intended DSP change regenerate with
+`cmake --build build --target regen_golden` and report old+new md5. Scope and
+blind spots are documented in `BUILD.md` and the generator header.
+
 ## UI
 
 `src/PluginUI.cpp` is the whole interface ("STRIKE PLATE" design): TE-style spec-strip header, grouped cymbal knobs (BODY/RESONATE/EXCITER/SPACE), a playable circular strike disc (click = strike position + note-on), onset-triggered ripple rings, 16-band spectrum, decay scope, keyboard. Knob component lives untouched in `src/ui/UIWidgets.hpp` (exact cymbals copy); restyling happens only via colors/layout in `PluginUI.cpp`.
