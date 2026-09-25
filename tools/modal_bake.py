@@ -1,31 +1,59 @@
 #!/usr/bin/env python3
 import numpy as np
-import argparse, os
+import argparse, os, sys
+
+# Global excitation trim. Replacing the fake element with real B^T*D*B changed
+# the mass-normalized eigenvector magnitudes (and hence the modal excitation),
+# which dropped the rendered default ~5 dB (golden peak 0.363 -> 0.198). This
+# constant restores the pre-rebake reference loudness; it scales every shipped
+# gain uniformly, so relative body balance and the Sound Map are unchanged.
+kGainTrim = 1.70
 
 def hex_element_matrices(E, nu, rho, hx, hy, hz):
-    vol = hx*hy*hz
-    edges = [(0,1),(0,2),(0,4),(1,3),(1,5),(2,3),(2,6),(3,7),(4,5),(4,6),(5,7),(6,7)]
-    Kscalar = np.zeros((8,8))
-    for a,b in edges:
-        Kscalar[a,a]+=1; Kscalar[b,b]+=1
-        Kscalar[a,b]-=1; Kscalar[b,a]-=1
-    K0 = np.zeros((24,24))
-    for d in range(3):
-        for i in range(8):
-            for j in range(8):
-                K0[d*8+i, d*8+j] = Kscalar[i,j]
-    for i in range(8):
-        for d1 in range(3):
-            for d2 in range(3):
-                if d1!=d2:
-                    K0[d1*8+i, d2*8+i] += 0.15
-    h = (hx*hy*hz)**(1/3)
-    Ke = K0 * (E * h * 0.08)
+    """Standard 8-node trilinear hexahedral element (B^T*D*B, 2x2x2 Gauss).
+
+    DOF layout is component-major, [d*8+i] with d in {0,1,2} = (x,y,z) and
+    i the node, matching the assembly in build_grid(). A real element is
+    positive-semidefinite with EXACTLY 6 zero modes (the rigid-body motions);
+    the old graph-Laplacian heuristic was indefinite with only 2 null dims.
+    """
+    nat = np.array([[-1,-1,-1],[ 1,-1,-1],[-1, 1,-1],[ 1, 1,-1],
+                    [-1,-1, 1],[ 1,-1, 1],[-1, 1, 1],[ 1, 1, 1]], dtype=float)
+    lam = E*nu/((1.0+nu)*(1.0-2.0*nu))
+    mu  = E/(2.0*(1.0+nu))
+    D = np.zeros((6,6))
+    D[0:3,0:3] = lam
+    D[0,0]=D[1,1]=D[2,2] = lam+2.0*mu
+    D[3,3]=D[4,4]=D[5,5] = mu
+    a,b,c = hx/2.0, hy/2.0, hz/2.0
+    detJ = a*b*c
+    inv = (2.0/hx, 2.0/hy, 2.0/hz)
+    Ke = np.zeros((24,24))
     Me = np.zeros((24,24))
-    m_node = rho * vol / 8.0
-    for i in range(8):
-        for d in range(3):
-            Me[d*8+i, d*8+i] = m_node / 3.0
+    g = 1.0/np.sqrt(3.0)
+    for s1 in (-g,g):
+      for s2 in (-g,g):
+        for s3 in (-g,g):
+          xi,eta,zeta = s1,s2,s3
+          dN = np.empty((8,3))
+          for i in range(8):
+              xi_i, eta_i, zeta_i = nat[i]
+              t = 0.125
+              dN[i,0] = t*xi_i*(1.0+eta*eta_i)*(1.0+zeta*zeta_i)
+              dN[i,1] = t*eta_i*(1.0+xi*xi_i)*(1.0+zeta*zeta_i)
+              dN[i,2] = t*zeta_i*(1.0+xi*xi_i)*(1.0+eta*eta_i)
+          B = np.zeros((6,24))
+          for i in range(8):
+              dx,dy,dz = dN[i,0]*inv[0], dN[i,1]*inv[1], dN[i,2]*inv[2]
+              B[0,0*8+i]=dx; B[1,1*8+i]=dy; B[2,2*8+i]=dz
+              B[3,1*8+i]=dz; B[3,2*8+i]=dy
+              B[4,0*8+i]=dz; B[4,2*8+i]=dx
+              B[5,0*8+i]=dy; B[5,1*8+i]=dx
+          Ke += (B.T @ D @ B) * detJ
+          Nv = np.array([0.125*(1.0+xi*nat[i,0])*(1.0+eta*nat[i,1])*(1.0+zeta*nat[i,2]) for i in range(8)])
+          NN = np.outer(Nv,Nv) * (rho*detJ)
+          for d in range(3):
+              Me[d*8:(d+1)*8, d*8:(d+1)*8] += NN
     return Ke, Me
 
 def build_grid(g, preset):
@@ -312,6 +340,7 @@ def bake_one(preset, g=4, nmax=128):
         freq[i] *= stretch
     n = len(freq)
     gains = compute_gains_direct(vecs, K_idx, g, h, nn, n)
+    gains = gains * kGainTrim
     max_abs = float(np.max(np.abs(gains))) if gains.size else 0.0
     max_sum_debug = float(np.max([np.sum(np.abs(gains[:,y,x])) for y in range(16) for x in range(16)])) if gains.size else 0.0
     print(f"  gains max|g|={max_abs:.5f} max_sum={max_sum_debug:.5f}")
@@ -389,11 +418,190 @@ def emit_header(results, out_path):
         f.write("};\n}\n")
         print(f"Wrote {out_path}")
 
+# ================= paper-faithful multi-resolution reduction =================
+# Paper-47 (DAFx-09) cites Nesme, Payan & Faure, "Animating shapes at
+# arbitrary resolution with non-uniform stiffness" (VRIPHYS 2006) but omits
+# the coarse-cell weighting rule. That paper's sec. 5.3 supplies it exactly:
+#
+#     K_parent = sum_c L_c^T K_c L_c        (and likewise for M)
+#
+# where u_child = L_c u_parent is the trilinear constraint that pins each child
+# node to the parent's midpoints, and forces pop up through the transpose. This
+# is a Galerkin projection of the child energy onto the parent basis -- NOT a
+# scalar fill-fraction average. The eight 8x8 L_c are reconstructed below from
+# the trilinear hat basis (the paper's Appendix A, in closed form).
+
+def build_L_matrices():
+    mats = []
+    for c in range(8):                    # c = 4*cz + 2*cy + cx (node order)
+        cz = (c >> 2) & 1
+        cy = (c >> 1) & 1
+        cx = c & 1
+        L = np.zeros((8, 8))
+        for j in range(8):                # child corner (local bits)
+            bx = j & 1; by = (j >> 1) & 1; bz = (j >> 2) & 1
+            px = -1.0 + (bx + cx)         # corner position in parent natural coords
+            py = -1.0 + (by + cy)
+            pz = -1.0 + (bz + cz)
+            for i in range(8):            # parent corner (global order)
+                nx = 2.0 * (i & 1) - 1.0
+                ny = 2.0 * ((i >> 1) & 1) - 1.0
+                nz = 2.0 * ((i >> 2) & 1) - 1.0
+                L[j, i] = ((1.0 + nx * px) * 0.5) * ((1.0 + ny * py) * 0.5) * ((1.0 + nz * pz) * 0.5)
+        mats.append(L)
+    return mats
+
+def _dof_L(L):
+    Lam = np.zeros((24, 24))
+    for d in range(3):
+        Lam[d * 8:(d + 1) * 8, d * 8:(d + 1) * 8] = L
+    return Lam
+
+def assemble_reduced(fine_g, coarse_g, preset):
+    """Galerkin-reduce a fine_g^3 grid to coarse_g^3 (fine_g == 2*coarse_g)."""
+    if fine_g != 2 * coarse_g:
+        raise ValueError("fine_g must be 2*coarse_g for one reduction level")
+    E, nu, rho = preset['E'], preset['nu'], preset['rho']
+    Lphys = preset.get('L', 0.4)
+    hf = Lphys / fine_g
+    # fine occupancy is the shape source (the hand-authored grids in build_occ
+    # stand in for the paper's voxelized surface mesh)
+    occf = build_grid(fine_g, preset)[3]
+    Ld = [_dof_L(L) for L in build_L_matrices()]
+    nn = coarse_g + 1
+    ndof = nn * nn * nn * 3
+    K = np.zeros((ndof, ndof)); M = np.zeros((ndof, ndof))
+    def node_id(ix, iy, iz):
+        return iz * nn * nn + iy * nn + ix
+    for cx in range(coarse_g):
+        for cy in range(coarse_g):
+            for cz in range(coarse_g):
+                Kp = np.zeros((24, 24)); Mp = np.zeros((24, 24))
+                used = False
+                for c in range(8):
+                    fx = 2 * cx + (c & 1)
+                    fy = 2 * cy + ((c >> 1) & 1)
+                    fz = 2 * cz + ((c >> 2) & 1)
+                    w = occf[fx, fy, fz]
+                    if w <= 1e-6:
+                        continue
+                    Ke, Me = hex_element_matrices(E, nu, rho, hf, hf, hf)
+                    Ke *= w; Me *= w
+                    Lam = Ld[c]
+                    Kp += Lam.T @ Ke @ Lam
+                    Mp += Lam.T @ Me @ Lam
+                    used = True
+                if not used:
+                    continue
+                nodes = [(cx, cy, cz), (cx + 1, cy, cz), (cx, cy + 1, cz), (cx + 1, cy + 1, cz),
+                         (cx, cy, cz + 1), (cx + 1, cy, cz + 1), (cx, cy + 1, cz + 1), (cx + 1, cy + 1, cz + 1)]
+                for a in range(8):
+                    for b in range(8):
+                        for da in range(3):
+                            for db in range(3):
+                                ga = node_id(*nodes[a]) * 3 + da
+                                gb = node_id(*nodes[b]) * 3 + db
+                                K[ga, gb] += Kp[da * 8 + a, db * 8 + b]
+                                M[ga, gb] += Mp[da * 8 + a, db * 8 + b]
+    active = np.diag(M) > 1e-12
+    idx = np.where(active)[0]
+    return K[np.ix_(idx, idx)], M[np.ix_(idx, idx)], idx
+
+def _raw_freqs(K, M, nmax=128):
+    freq, _, _, _ = compute_modes(K, M, nmax)
+    return np.asarray(freq, dtype=float)
+
+def count_rigid(K, M, tol_rel=1e-10):
+    """Count free-free rigid-body (near-zero) eigenvalues. A correct free-free
+    hex FEM system has EXACTLY 6. Scale-relative so the split is independent of
+    absolute units and robust to solver noise on the zero cluster."""
+    from scipy import linalg
+    vals = np.maximum(linalg.eigvalsh(K, M), 0.0)
+    if not len(vals):
+        return 0, vals
+    return int(np.sum(vals < tol_rel * vals[-1])), vals
+
+VERIFY_NAMES = ['Bowl', 'Plate', 'Bell', 'Chime']  # solid / shell / bell / thin
+
+def _relerr(a, b):
+    n = min(len(a), len(b))
+    return float(np.mean(np.abs(a[:n] - b[:n]) / np.maximum(b[:n], 1e-12)))
+
+def verify_paper_method():
+    """Paper-fidelity checks for the real-hex-FEM pipeline.
+
+    GATED (must all pass):
+      - L_c operator: partition of unity (Nesme 2006 sec 5.3, App. A)
+      - single element: PSD and EXACTLY 6 rigid-body zero modes
+      - reduced K symmetric
+      - every sampled body: exactly 6 rigid modes, both on the direct 8^3 grid
+        and on the L_c-reduced 4^3 grid
+      - direct-bake convergence (paper Fig. 6): the 4^3-vs-8^3 pair agrees more
+        closely than the 2^3-vs-4^3 pair, i.e. frequencies stabilize as the
+        mesh refines
+    """
+    ok = True
+    # (1) L_c operator: a uniform parent displacement (translation) must pass
+    # through every L_c unchanged: L_c @ ones == ones, i.e. every ROW of L_c
+    # sums to 1. This is the orientation that makes K_parent = L_c^T K_c L_c
+    # preserve the rigid-body null space.
+    for c, L in enumerate(build_L_matrices()):
+        err = float(np.abs(L.sum(axis=1) - 1.0).max())
+        if err > 1e-12:
+            print(f"L operator FAIL: L_{c} row-sum err {err:.3e} (translation not preserved)")
+            ok = False
+    if ok:
+        print("L_c operator: 8 matrices, translation preserved OK (L_c @ ones == ones)")
+    # (2) single element: PSD + exactly 6 rigid-body zero modes.
+    Ke, _ = hex_element_matrices(1.0, 0.3, 1000.0, 1.0, 1.0, 1.0)
+    ew = np.linalg.eigvalsh(Ke)
+    ke_zero = int(np.sum(ew < 1e-10 * ew[-1]))
+    ke_psd = bool(ew[0] >= -1e-9 * ew[-1])
+    if ke_zero != 6 or not ke_psd:
+        print(f"element FAIL: zero modes={ke_zero} (expect 6), PSD={ke_psd}")
+        ok = False
+    else:
+        print(f"element: PSD, exactly {ke_zero} rigid modes (was 2 + indefinite)")
+    # (3) per-body rigid modes + direct-bake convergence.
+    print(f"{'body':<8} {'rigid8':>7} {'rigid4r':>8} {'2v4':>7} {'4v8':>7} {'conv':>5}")
+    c24, c48 = [], []
+    for p in PRESETS:
+        if p['name'] not in VERIFY_NAMES:
+            continue
+        K8, M8, _, _, _, _ = build_grid(8, p)
+        n8, _ = count_rigid(K8, M8)
+        K4r, M4r, _ = assemble_reduced(8, 4, p)
+        n4r, _ = count_rigid(K4r, M4r)
+        if n8 != 6 or n4r != 6:
+            print(f"  {p['name']}: rigid modes 8^3={n8} reduced-4^3={n4r} (expect 6)")
+            ok = False
+        sym = float(np.abs(K4r - K4r.T).max() / max(1.0, float(np.abs(K4r).max())))
+        if sym > 1e-9:
+            print(f"  {p['name']}: reduced K not symmetric ({sym:.2e})")
+            ok = False
+        f2 = _raw_freqs(*build_grid(2, p)[:2])
+        f4 = _raw_freqs(*build_grid(4, p)[:2])
+        f8 = _raw_freqs(K8, M8)
+        d24, d48 = _relerr(f2, f4), _relerr(f4, f8)
+        c24.append(d24); c48.append(d48)
+        print(f"{p['name']:<8} {n8:>7} {n4r:>8} {d24:>7.3f} {d48:>7.3f} {'YES' if d48 < d24 else 'no':>5}")
+    if c24:
+        m24, m48 = float(np.median(c24)), float(np.median(c48))
+        conv = m48 < m24
+        print(f"median direct-bake convergence: 2^3-vs-4^3 {m24:.3f}  4^3-vs-8^3 {m48:.3f}  -> {'CONVERGING' if conv else 'NOT converging'}")
+        if not conv:
+            print("convergence FAIL: refined pair does not agree more closely")
+            ok = False
+    return ok
+
 if __name__=="__main__":
     ap=argparse.ArgumentParser()
     ap.add_argument("-o","--out", default="plugins/MultiScaleBody/src/ModalData.hpp")
     ap.add_argument("-g","--grid", type=int, default=4)
+    ap.add_argument("--verify", action="store_true", help="run paper-method checks and exit")
     args=ap.parse_args()
+    if args.verify:
+        sys.exit(0 if verify_paper_method() else 1)
     results=[]
     for p in PRESETS:
         print(f"Baking {p['name']} g={args.grid} ...")

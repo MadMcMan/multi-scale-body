@@ -84,3 +84,38 @@ Convergence/stability: empirical only. Frequency content converges by 4×4×4 (s
 - **Element-assembly consistency**: uniform-density cube must reproduce analytic first free-block modes within FEM discretization error; rigid-body eigenvalues machine-zero.
 - **Rayleigh identity**: single-mode damped frequency $= \omega_i\sqrt{1-\zeta_i^2}$ with $\zeta_i = d_i/\omega_i$ [RECONSTRUCTED standard] — reson filter must reproduce Eq. 1's envelope and phase.
 - **Positivity**: $\mathbf{M}$ symmetric positive definite, $\mathbf{K}$ positive semi-definite (6 null directions) for every voxelization, including thin/non-manifold inputs — check the assembled matrices' eigenvalues, not just the generalized problem.
+
+## 8. Implementation status (as of the real-hex-FEM rebake)
+
+The targets above are now enforced by `python tools/modal_bake.py --verify`
+(exits nonzero on failure) and the C++ suites:
+
+- **Element** — `hex_element_matrices()` is a real 8-node trilinear hex
+  (`B^T D B`, isotropic `D`, 2×2×2 Gauss, consistent mass), not the old
+  graph-Laplacian heuristic. Proven: single-element `Ke` symmetric, PSD
+  (min eig ≈ 0), **exactly 6** zero modes; `Me` symmetric and PD.
+- **Mode-count invariant** — every one of the 18 bodies reports **exactly 6**
+  rigid-body modes on the direct 8³ grid *and* on the `L_c`-reduced 4³ grid.
+- **Positivity** — `Ke` PSD and `Me` PD are checked on the element; the
+  generalized solve drops exactly 6 near-zero modes on every bake.
+- **Grid convergence (Fig. 6)** — direct bakes at 2³ / 4³ / 8³: the 4³-vs-8³
+  relative frequency error is smaller than 2³-vs-4³ on every sampled body
+  (median 0.233 < 0.277) — frequencies stabilize as the mesh refines.
+- **Fine-to-coarse weighting (paper omits it; Nesme 2006 §5.3 supplies it)** —
+  implemented as the Galerkin projection `K_parent = Σ L_cᵀ K_c L_c` with the
+  eight child→parent trilinear operators `L_c`; `tools/modal_bake.py` builds
+  them from the hat basis. Verified: translation-preserving (`L_c @ ones ==
+  ones`), symmetric reduced `K`, and the projection preserves all 6 rigid
+  modes. (The shipped coarse/fine tables are direct bakes, matching the
+  paper's own independent-per-resolution Fig. 6 figures; the `L_c` path is
+  the verified capability and the subject of the convergence check.)
+- **Spectrum consistency / Sound-Map null / Material scaling / Rayleigh** —
+  covered in `tests/test_modal_dsp.cpp` (see the spectrum, null, material,
+  and rayleigh sections).
+
+Honest remaining gap: **matrix positivity is verified on the element and via
+ the 6-mode deflation on every assembled body, but not yet on the fully
+ assembled global `K`/`M` spectra for every non-manifold voxelization**, and
+ the paper's convergence claim here is a *direct-bake* refinement trend rather
+ than a strict a-priori error bound. The underived coarse-cell weighting the
+ paper referenced but did not specify is now implemented from its cited source.

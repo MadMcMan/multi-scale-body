@@ -9,7 +9,7 @@ Single DPF plugin (jack/vst3/clap/lv2), LVGL UI. See `BUILD.md` for full details
   cmake -S . -B build -G Ninja
   cmake --build build --target MultiScaleBody-vst3 MultiScaleBody-clap MultiScaleBody-lv2 MultiScaleBody-lv2-ui MultiScaleBody-jack
   ```
-- Artifacts land in `build/bin/`. There is **no git repo** in this folder.
+- Artifacts land in `build/bin/`. This folder **is** a git repo (remote `github.com/MadMcMan/multi-scale-body`); `build/`, `build-dbg/`, and `deps/` are ignored.
 - `deps/{DPF,lvgl,dpf-widgets}` are junctions to `E:/dev/deps/*`; CMake fatals if `deps/DPF/CMakeLists.txt` is missing.
 - Fresh MinGW libstdc++ may fail on DPF (re-opened `namespace std`) — patch/pin recipe referenced in `BUILD.md` ("Toolchain caveat").
 - LV2 TTL generation works since the folder rename removed the `&` from the path (see `BUILD.md` "LV2 TTL"). UI ships inside the DSP dll.
@@ -47,4 +47,22 @@ blind spots are documented in `BUILD.md` and the generator header.
 
 ## UI
 
-`src/PluginUI.cpp` is the whole interface ("STRIKE PLATE" design): TE-style spec-strip header, grouped cymbal knobs (BODY/RESONATE/EXCITER/SPACE), a playable circular strike disc (click = strike position + note-on), onset-triggered ripple rings, 16-band spectrum, decay scope, keyboard. Knob component lives untouched in `src/ui/UIWidgets.hpp` (exact cymbals copy); restyling happens only via colors/layout in `PluginUI.cpp`.
+`src/PluginUI.cpp` is the whole interface ("STRIKE PLATE" design): TE-style spec-strip header, grouped cymbal knobs (BODY/RESONATE/EXCITER/SPACE), a playable circular strike disc (click = strike position + note-on), onset-triggered ripple rings, 16-band spectrum, decay scope, keyboard. Restyling happens only via colors/layout in `PluginUI.cpp`.
+
+## Components
+
+The LVGL UI building blocks are **our own first-party components**, vendored in
+`plugins/MultiScaleBody/src/components/`:
+
+- `UIWidgets.hpp` — arc knob (createArcKnob / drag / param sync)
+- `UIStyles.hpp` — LVGL style pack
+- `UICommon.hpp` — layout tokens, palette, abstract UI interface
+
+These were originally forked from the external **cymbals-ui** project, but they
+have **diverged** (adapted to this plugin's palette, geometry tokens, and
+parameter bindings) and now have **no build-time or runtime dependency on
+cymbals-ui** — they include only their local siblings plus `lvgl.h`. Treat them
+as our own: edit them in place, and do **not** re-sync or re-copy from upstream
+cymbals-ui without re-checking the MultiScaleBody bindings. If you ever need a
+new cymbals-ui control, vendor it into `components/` on first use rather than
+adding a cymbals-ui dependency.

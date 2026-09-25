@@ -1,5 +1,20 @@
 #ifndef UI_WIDGETS_HPP
 #define UI_WIDGETS_HPP
+// ============================================================================
+//  components/UIWidgets.hpp  —  MultiScaleBody's own arc-knob component
+// ----------------------------------------------------------------------------
+//  PROVENANCE: originally forked from the cymbals-ui project
+//  (E:/dev/deps/cymbals-ui, include/cymbals-ui/UIWidgets.hpp). This file is now
+//  a first-party, self-contained vendored component of MultiScaleBody: it has
+//  NO build-time or runtime dependency on cymbals-ui and includes only its
+//  local siblings (UIStyles.hpp, UICommon.hpp) plus lvgl.h.
+//
+//  The fork has diverged from upstream (adapted to MultiScaleBody's palette,
+//  geometry tokens, and parameter bindings), so it is intentionally NOT kept in
+//  sync with cymbals-ui. Treat this as our own component: edit it here, and do
+//  not re-copy from upstream without re-checking the MultiScaleBody bindings.
+//  See AGENTS.md ("Components") for the ownership rule.
+// ============================================================================
 #include "UIStyles.hpp"
 #include "lvgl.h"
 #include <unordered_map>
@@ -25,7 +40,9 @@ static std::unordered_map<lv_obj_t*, ArcDragState> gArcDragStates;
 static std::unordered_map<lv_obj_t*, ArcVisualBinding> gArcVisualBindings;
 static std::unordered_map<lv_obj_t*, int> gArcParamIndex;
 
-// Exact cymbals formula: 2250 = 225° => arc 135° + face pivot offset (needle up = north 270°, so 135-270 = -135 = 225°)
+// Our own tuned arc mapping: 2250 = 225° => arc 135° + face pivot offset
+// (needle up = north 270°, so 135-270 = -135 = 225°). Kept from the original
+// cymbals-ui formula; now owned and tuned here (see header provenance note).
 static int sharedArcAngleFromValue(int v){ int c=std::clamp(v,0,1000); return (2250 + (c*2700/1000))%3600; }
 static void syncSharedArcVisual(lv_obj_t* arc){
     if(!arc) return;

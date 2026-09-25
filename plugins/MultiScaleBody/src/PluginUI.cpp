@@ -12,9 +12,9 @@
 #include "lvgl.h"
 #include "PluginMultiScaleBody.hpp"
 #include "ModalData.hpp"
-#include "ui/UIStyles.hpp"
-#include "ui/UIWidgets.hpp"
-#include "ui/UICommon.hpp"
+#include "components/UIStyles.hpp"
+#include "components/UIWidgets.hpp"
+#include "components/UICommon.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

@@ -1,5 +1,9 @@
 #ifndef UI_COMMON_HPP
 #define UI_COMMON_HPP
+// MultiScaleBody's own UI common header: layout tokens, palette, and the
+// abstract UI interface the components bind to. Forked from cymbals-ui
+// (include/cymbals-ui/UICommon.hpp) and adapted. First-party component: no
+// cymbals-ui dependency. See UIWidgets.hpp header and AGENTS.md ("Components").
 #include "DistrhoPlugin.hpp"
 #include "lvgl.h"
 #include "DistrhoPluginInfo.h"

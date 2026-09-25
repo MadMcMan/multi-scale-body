@@ -334,7 +334,7 @@ public:
     // mix to the Bowl reference so every body speaks under bow. The bow
     // force is quasi-static, so sustain loudness follows the signed mix
     // (measured: predicts the 150x Bowl:Glass spread); the unsigned sum
-    inline static constexpr float kBowRefMix = 0x1.5f6607990942cp-13f; // |signed static mix| of Bowl C4 vel1
+    inline static constexpr float kBowRefMix = 0x1.5486fa8b4f1edp-14f; // |signed static mix| of Bowl C4 vel1 (real-hex-FEM rebake)
     inline static constexpr float kBowScaleLo = 1.f;      // boost-only: never attenuate a speaking voice
     inline static constexpr float kBowScaleHi = 6.f;      // ...nor push one into stick-feedback suppression
     // pitch bend per MIDI channel (MPE)
