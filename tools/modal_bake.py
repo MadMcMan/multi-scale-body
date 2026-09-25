@@ -5,9 +5,11 @@ import argparse, os, sys
 # Global excitation trim. Replacing the fake element with real B^T*D*B changed
 # the mass-normalized eigenvector magnitudes (and hence the modal excitation),
 # which dropped the rendered default ~5 dB (golden peak 0.363 -> 0.198). This
-# constant restores the pre-rebake reference loudness; it scales every shipped
-# gain uniformly, so relative body balance and the Sound Map are unchanged.
-kGainTrim = 1.70
+# constant restores the pre-rebake reference loudness AND the reference strike
+# summit staging (~-6.8 dBFS target); it scales every shipped gain uniformly,
+# so relative body balance and the Sound Map are unchanged. Retuned to 1.85 for
+# the trilinear Sound Map (paper 3.2-3.3) gain distribution.
+kGainTrim = 1.85
 
 def hex_element_matrices(E, nu, rho, hx, hy, hz):
     """Standard 8-node trilinear hexahedral element (B^T*D*B, 2x2x2 Gauss).
@@ -55,6 +57,21 @@ def hex_element_matrices(E, nu, rho, hx, hy, hz):
           for d in range(3):
               Me[d*8:(d+1)*8, d*8:(d+1)*8] += NN
     return Ke, Me
+
+def voxel_occupancy(kind, g):
+    """Paper section 3.1 automatic voxelization: surface mesh -> (g,g,g)
+    occupancy in {0.0 outside, 0.5 boundary, 1.0 solid interior}.
+
+    `kind` selects a deterministic procedural mesh so the paper's pipeline can
+    be exercised without external assets: 'sphere', 'torus', 'plate', 'blades'
+    (the last reproduces the paper's thin-part / non-manifold Fig-3 case).
+    """
+    import voxelize as vz
+    gen = {'sphere': vz.make_sphere, 'torus': vz.make_torus,
+           'plate': vz.make_plate, 'blades': vz.make_blade_box}[kind]
+    verts, faces = gen()
+    return vz.voxelize_mesh(verts, faces, g=g)
+
 
 def build_grid(g, preset):
     E, nu, rho = preset['E'], preset['nu'], preset['rho']
@@ -192,6 +209,12 @@ def build_grid(g, preset):
                         occ[x,y,z] = 1.0 if m >= 0.45 else 0.0
                     else:
                         occ[x,y,z] = 0.4
+    # Paper section 3.1 path: a preset may carry mesh='sphere'|'torus'|'plate'|
+    # 'blades' to source its occupancy from automatic voxelization of a surface
+    # mesh instead of a hand-authored grid. Shipped bodies keep their tuned
+    # hand-authored occupancy; this is the paper method wired into the pipeline.
+    if preset.get('mesh'):
+        occ = voxel_occupancy(preset['mesh'], g)
     nn = g+1
     ndof = nn*nn*nn*3
     K = np.zeros((ndof, ndof))
@@ -253,59 +276,24 @@ def compute_modes(K, M, nmax=128):
     return freq, vecs, vals, nrigid
 
 def compute_gains_direct(vecs, K_idx, g, h, nn, n_modes):
-    sz=16
-    gains=np.zeros((n_modes, sz, sz))
-    f2a = {int(f):a for a,f in enumerate(K_idx)}
-    def z_dof(ix,iy,iz):
-        nid = (iz*nn*nn + iy*nn + ix)
-        return nid*3 + 2
-    # precompute active node ids for fast lookup (node id = dof//3)
+    """Paper section 3.2-3.3 Sound Map.
+
+    The modal gain for a strike is the mode shape trilinearly interpolated at
+    the actual 3-D surface point and projected onto the strike direction
+    (vertical mallet). We sample a 16x16 (x,y) grid laid out as gains[m][y][x]
+    to match the engine's modeGain(p,m,y,x) lookup, and normalize so the
+    strongest strike point sums to |gain|=1.
+    """
+    import soundmap as sm
+    sz = 16
     active_nodes = set(int(d)//3 for d in K_idx)
-    def node_id2(ix,iy,iz):
-        return (iz*nn*nn + iy*nn + ix)
-    # global fallback: topmost active z over all nodes
-    global_top = 0
-    for nid in active_nodes:
-        iz = nid // (nn*nn)
-        if iz > global_top:
-            global_top = iz
-    for gx in range(sz):
-        for gy in range(sz):
-            fx = gx/(sz-1)
-            fy = gy/(sz-1)
-            x = fx * g * h
-            y = fy * g * h
-            ix_f = x/h
-            iy_f = y/h
-            ix0 = int(np.floor(ix_f)); iy0 = int(np.floor(iy_f))
-            dx = ix_f - ix0; dy = iy_f - iy0
-            ix0 = int(np.clip(ix0,0,nn-2)); iy0=int(np.clip(iy0,0,nn-2))
-            ix1=ix0+1; iy1=iy0+1
-            # find topmost ACTIVE node layer per column (search from top down)
-            iz = global_top
-            for cand in range(nn-1, -1, -1):
-                if (node_id2(ix0,iy0,cand) in active_nodes or
-                    node_id2(ix1,iy0,cand) in active_nodes or
-                    node_id2(ix0,iy1,cand) in active_nodes or
-                    node_id2(ix1,iy1,cand) in active_nodes):
-                    iz = cand
-                    break
-            nodes = [(ix0,iy0,iz),(ix1,iy0,iz),(ix0,iy1,iz),(ix1,iy1,iz)]
-            w = [(1-dx)*(1-dy), dx*(1-dy), (1-dx)*dy, dx*dy]
-            for mode in range(n_modes):
-                v=0.0
-                for (ix,iy,iz2), wi in zip(nodes,w):
-                    full = z_dof(ix,iy,iz2)
-                    a = f2a.get(full, None)
-                    if a is not None:
-                        v += vecs[a, mode] * wi
-                gains[mode, gy, gx] = v
-    max_sum = 0
-    for gy in range(sz):
-        for gx in range(sz):
-            max_sum = max(max_sum, np.sum(np.abs(gains[:,gy,gx])))
-    if max_sum>1e-12:
-        gains /= max_sum
+    pts = sm.build_surface_grid(active_nodes, g, nn, h, sz)            # (sz,sz,3)
+    gains = sm.sample_gain_surface(vecs, K_idx, nn, h, g,
+                                   pts.reshape(-1, 3), (0.0, 0.0, 1.0))  # (n_modes, sz*sz)
+    gains = gains.reshape(n_modes, sz, sz)
+    max_sum = float(np.abs(gains).sum(axis=0).max()) if gains.size else 0.0
+    if max_sum > 1e-12:
+        gains = gains / max_sum
     return gains
 
 PRESETS = [
@@ -592,6 +580,25 @@ def verify_paper_method():
         if not conv:
             print("convergence FAIL: refined pair does not agree more closely")
             ok = False
+    # (4) automatic voxelization (paper 3.1) end-to-end on the real hex FEM:
+    # a voxelized surface mesh (including the thin-blade non-manifold case)
+    # must bake to a free-free system with exactly 6 rigid-body modes at both
+    # 4^3 and 8^3, proving the paper's voxel->element->eigen pipeline.
+    vox_bad = 0
+    for kind in ('sphere', 'torus', 'plate', 'blades'):
+        vp = {'name': 'Vox_' + kind, 'E': 69e9, 'nu': 0.33, 'rho': 2700,
+              'alpha1': 8, 'alpha2': 3e-7, 'L': 0.45, 'mesh': kind}
+        counts = []
+        for g in (4, 8):
+            Kv, Mv, *_ = build_grid(g, vp)
+            counts.append(count_rigid(Kv, Mv)[0])
+        if counts != [6, 6]:
+            print(f"voxelized {kind}: rigid modes {counts} (expect [6, 6])")
+            vox_bad += 1
+    if vox_bad:
+        ok = False
+    else:
+        print("voxelized meshes: sphere/torus/plate/blades all give 6 rigid modes (paper 3.1 pipeline OK)")
     return ok
 
 if __name__=="__main__":

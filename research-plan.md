@@ -112,10 +112,31 @@ The targets above are now enforced by `python tools/modal_bake.py --verify`
 - **Spectrum consistency / Sound-Map null / Material scaling / Rayleigh** —
   covered in `tests/test_modal_dsp.cpp` (see the spectrum, null, material,
   and rayleigh sections).
+- **Automatic voxelization (paper §3.1, the headline contribution)** — now
+  implemented in `tools/voxelize.py`: mesh → grid, rasterize triangles to
+  boundary (0.5) cells, flood-fill the outside from the padded border, label
+  the solid interior (1.0). Wired into the pipeline via
+  `voxel_occupancy()` / `build_grid(preset['mesh']=...)`; the `--verify` gate
+  bakes voxelized sphere / torus / plate / thin-blade (non-manifold) bodies and
+  asserts exactly 6 rigid modes at 4³ and 8³. (Shipped bodies keep their
+  hand-tuned occupancy so the validated sound is preserved; any preset can opt
+  into the automatic path with `mesh: 'sphere'|'torus'|'plate'|'blades'`.)
+- **Trilinear Sound Map (paper §3.2–3.3, "most importantly … preserves variety
+  in the Sound Map")** — `tools/soundmap.py` computes each modal gain as the
+  mode shape **trilinearly interpolated at the actual 3-D surface point**,
+  projected onto the strike direction, on a 16×16 (x,y) map laid out as
+  `gain[m][y][x]` to match the engine's `modeGain` lookup. This replaces the
+  old top-layer bilinear proxy. Verified: trilinear reproduces linear fields
+  exactly, samples grid nodes exactly, skips inactive DOFs, and handles oblique
+  strike directions.
+- **Compute / memory scaling (paper Table 1)** — `tools/scaling_table.py`
+  reproduces the table's structure (bake at 2³…9³, report wall-clock and
+  stored-modal-data bytes/mode) for a chosen body.
 
-Honest remaining gap: **matrix positivity is verified on the element and via
- the 6-mode deflation on every assembled body, but not yet on the fully
- assembled global `K`/`M` spectra for every non-manifold voxelization**, and
- the paper's convergence claim here is a *direct-bake* refinement trend rather
- than a strict a-priori error bound. The underived coarse-cell weighting the
- paper referenced but did not specify is now implemented from its cited source.
+Honest remaining gaps: **global assembled-matrix positivity is verified via
+the 6-mode deflation on every body but not as a full spectral check for every
+ non-manifold voxelization**; the convergence claim is a *direct-bake*
+ refinement trend, not an a-priori error bound; and the 18 shipped bodies use
+ hand-tuned occupancy rather than voxelized meshes (the automatic path is
+ implemented, gated, and available per-preset but not yet adopted for the
+ tuned library, to preserve the gauntlet-validated sound).
