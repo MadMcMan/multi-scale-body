@@ -298,7 +298,23 @@ public:
         if(i==PluginMultiScaleBody::kParamMorphTarget && fMorphDd)
             lv_dropdown_set_selected(fMorphDd,std::clamp((int)std::lround(v*(float)(modal::kNumPresets-1)),0,modal::kNumPresets-1));
     }
-    void editParameter(uint32_t i,bool s) override { if(i<PluginMultiScaleBody::kParameterCount) UI::editParameter(i,s); }
+    // Central edit-bracket bookkeeping. Every knob/drag opens a host
+    // beginEditParamChange bracket with editParameter(i,true) and closes it with
+    // editParameter(i,false) on release. If a rebuild (zoom/resize) happens
+    // mid-drag the widget is deleted and its release never fires, leaving the
+    // host with an open edit gesture. Track the open brackets here and close any
+    // that survive a rebuild in closeOpenEdits().
+    void editParameter(uint32_t i,bool s) override {
+        if(i>=PluginMultiScaleBody::kParameterCount) return;
+        if(s) fOpenEditMask |= (uint64_t)1<<i;
+        else   fOpenEditMask &= ~((uint64_t)1<<i);
+        UI::editParameter(i,s);
+    }
+    void closeOpenEdits(){
+        for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount && i<64;++i){
+            if(fOpenEditMask & ((uint64_t)1<<i)){ fOpenEditMask &= ~((uint64_t)1<<i); UI::editParameter(i,false); }
+        }
+    }
     // duplicate parameter widgets - macros + master arc replicate the same
     // param as a knob in the dial bank; the host->UI sync must update every
     // visible instance, not just the last-created one in widgets[]
@@ -572,6 +588,7 @@ public:
 private:
     // single owner of every lv_obj_t* member default; ctor and rebuildForScale share it
     void clearWidgetRefs(){
+        closeOpenEdits();   // a rebuild mid-drag must not leave a host edit bracket open
         for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount;++i){ widgets[i]=nullptr; paramCache[i]=0.5f; }
         // volume's default is 1.0 (unity), not the blanket 0.5 — a zoom
         // rebuild must not display a phantom -12 dB
@@ -1123,7 +1140,7 @@ private:
             case P::kParamInharm:    snprintf(buf,cap,"x%.2f",1.f+v); break;
             case P::kParamSlideMode: {
                 static const char* const kSlideNames[3]={"PITCH","MODE","BRIGHT"};
-                const int m=std::clamp((int)std::lround(v),0,2);
+                const int m=std::clamp((int)std::lround(v*2.f),0,2);
                 snprintf(buf,cap,"%s",kSlideNames[m]);
                 break; }
             case P::kParamSupport:   snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
@@ -1522,7 +1539,7 @@ private:
         set(PluginMultiScaleBody::kParamBow, (std::rand()%100)<30 ? rnd(0.3f,0.8f) : 0.f);
         set(PluginMultiScaleBody::kParamDamper, rnd(0.f,0.5f));
         set(PluginMultiScaleBody::kParamInharm, rnd(0.f,0.4f));
-        { static const float modes[3]={0.f,1.f,2.f}; set(PluginMultiScaleBody::kParamSlideMode, modes[std::rand()%3]); }
+        { static const float modes[3]={0.f,0.5f,1.f}; set(PluginMultiScaleBody::kParamSlideMode, modes[std::rand()%3]); }
         for(int b=0;b<16;++b)
             set(PluginMultiScaleBody::kParamBandDecay0+b, std::clamp(rnd(0.35f,0.65f),0.f,1.f));
         // wave-3: physical model (morphs/materials biased to off/DEFAULT so
@@ -3213,6 +3230,7 @@ private:
     // first rebuild is still constructing the new tree, the second pass can
     // lv_obj_clean mid-construction and leave the screen blank. Guard it.
     bool fRebuildInFlight=false;
+    uint64_t fOpenEditMask=0;   // bit per param with an open host edit bracket (kParameterCount < 64)
     lv_obj_t* widgets[PluginMultiScaleBody::kParameterCount]={};
     float paramCache[PluginMultiScaleBody::kParameterCount]={};
 

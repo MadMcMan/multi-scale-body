@@ -50,7 +50,7 @@ PluginMultiScaleBody::PluginMultiScaleBody() : Plugin(kNumParams, 0, 6) {
     engine_.setBow(paramBase_[kParamBow]);
     engine_.setDamper(paramBase_[kParamDamper]);
     engine_.setInharmSpread(paramBase_[kParamInharm]);
-    engine_.setSlideMode((int)std::lround(paramBase_[kParamSlideMode]));
+    engine_.setSlideMode((int)std::lround(paramBase_[kParamSlideMode]*2.f));
     for(int i=0;i<16;++i) engine_.setBandDecayTrim(i, bandDecayCurve(paramBase_[kParamBandDecay0+i]));
     engine_.setSupport(paramBase_[kParamSupport]);
     engine_.setHoldDamp(paramBase_[kParamHoldDamp]);
@@ -102,7 +102,12 @@ void PluginMultiScaleBody::initParameter(uint32_t index, Parameter& p){
         case kParamBow: p.name="Bow"; p.symbol="bow"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamDamper: p.name="Damper"; p.symbol="damper"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamInharm: p.name="Inharm"; p.symbol="inharm"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
-        case kParamSlideMode: p.name="Slide Mode"; p.symbol="slidemode"; p.hints|=kParameterIsInteger; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=2.f; break; // 3-way: 0 pitch / 1 mode-bend / 2 brightness
+        // 3-way selector expressed over a CONTINUOUS [0,1] range (0 / 0.5 / 1.0).
+        // Do NOT mark kParameterIsInteger: the host would quantize to 0/1 and
+        // the middle mode-bend state (0.5) would be unreachable. setParameterValue
+        // hard-clamps every input to [0,1], so the range must stay [0,1]; the
+        // dispatch snaps v*2 to the 0/1/2 engine state.
+        case kParamSlideMode: p.name="Slide Mode"; p.symbol="slidemode"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamSupport: p.name="Support"; p.symbol="support"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamHoldDamp: p.name="Hold Damp"; p.symbol="holddamp"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamResMorph: p.name="Resolution"; p.symbol="resmorph"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
@@ -174,11 +179,12 @@ void PluginMultiScaleBody::setParameterValue(uint32_t idx,float v){
         case kParamDamper: engine_.setDamper(v); break;
         case kParamInharm: engine_.setInharmSpread(v); break;
         case kParamSlideMode: {
-            // discrete 3-way over an integer [0,2] host range: 0 pitch /
-            // 1 mode-bend / 2 brightness. Snap so a host/automation fractional
-            // value lands on a clean step; paramBase_ stores the integer.
-            const int m=std::clamp((int)std::lround(v),0,2);
-            paramBase_[idx]=(float)m;
+            // discrete 3-way over the [0,1] knob range: 0 pitch / 0.5
+            // mode-bend / 1.0 brightness. DPF delivers normalized [0,1] here
+            // regardless of the declared range, so the middle state is 0.5.
+            // Snap the stored value so the UI echoes clean positions.
+            const int m=std::clamp((int)std::lround(v*2.f),0,2);
+            paramBase_[idx]=(float)m*0.5f;
             engine_.setSlideMode(m);
             break; }
         case kParamSupport: engine_.setSupport(v); break;
@@ -253,7 +259,7 @@ void PluginMultiScaleBody::sampleRateChanged(double sr){
     engine_.setBow(paramBase_[kParamBow]);
     engine_.setDamper(paramBase_[kParamDamper]);
     engine_.setInharmSpread(paramBase_[kParamInharm]);
-    engine_.setSlideMode((int)std::lround(paramBase_[kParamSlideMode]));
+    engine_.setSlideMode((int)std::lround(paramBase_[kParamSlideMode]*2.f));
     for(int i=0;i<16;++i) engine_.setBandDecayTrim(i, bandDecayCurve(paramBase_[kParamBandDecay0+i]));
     engine_.setSupport(paramBase_[kParamSupport]);
     engine_.setHoldDamp(paramBase_[kParamHoldDamp]);
