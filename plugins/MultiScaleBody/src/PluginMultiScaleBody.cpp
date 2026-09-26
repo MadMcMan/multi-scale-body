@@ -50,7 +50,7 @@ PluginMultiScaleBody::PluginMultiScaleBody() : Plugin(kNumParams, 0, 6) {
     engine_.setBow(paramBase_[kParamBow]);
     engine_.setDamper(paramBase_[kParamDamper]);
     engine_.setInharmSpread(paramBase_[kParamInharm]);
-    engine_.setSlideMode((int)std::lround(paramBase_[kParamSlideMode]*2.f));
+    engine_.setSlideMode((int)std::lround(paramBase_[kParamSlideMode]));
     for(int i=0;i<16;++i) engine_.setBandDecayTrim(i, bandDecayCurve(paramBase_[kParamBandDecay0+i]));
     engine_.setSupport(paramBase_[kParamSupport]);
     engine_.setHoldDamp(paramBase_[kParamHoldDamp]);
@@ -102,7 +102,7 @@ void PluginMultiScaleBody::initParameter(uint32_t index, Parameter& p){
         case kParamBow: p.name="Bow"; p.symbol="bow"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamDamper: p.name="Damper"; p.symbol="damper"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamInharm: p.name="Inharm"; p.symbol="inharm"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
-        case kParamSlideMode: p.name="Slide Mode"; p.symbol="slidemode"; p.hints|=kParameterIsInteger; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamSlideMode: p.name="Slide Mode"; p.symbol="slidemode"; p.hints|=kParameterIsInteger; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=2.f; break; // 3-way: 0 pitch / 1 mode-bend / 2 brightness
         case kParamSupport: p.name="Support"; p.symbol="support"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamHoldDamp: p.name="Hold Damp"; p.symbol="holddamp"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamResMorph: p.name="Resolution"; p.symbol="resmorph"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
@@ -174,10 +174,11 @@ void PluginMultiScaleBody::setParameterValue(uint32_t idx,float v){
         case kParamDamper: engine_.setDamper(v); break;
         case kParamInharm: engine_.setInharmSpread(v); break;
         case kParamSlideMode: {
-            // discrete 3-way: 0 pitch / 0.5 mode-bend / 1.0 brightness.
-            // Snap the stored value so the UI echoes clean positions.
-            const int m=std::clamp((int)std::lround(v*2.f),0,2);
-            paramBase_[idx]=(float)m*0.5f;
+            // discrete 3-way over an integer [0,2] host range: 0 pitch /
+            // 1 mode-bend / 2 brightness. Snap so a host/automation fractional
+            // value lands on a clean step; paramBase_ stores the integer.
+            const int m=std::clamp((int)std::lround(v),0,2);
+            paramBase_[idx]=(float)m;
             engine_.setSlideMode(m);
             break; }
         case kParamSupport: engine_.setSupport(v); break;
@@ -252,7 +253,7 @@ void PluginMultiScaleBody::sampleRateChanged(double sr){
     engine_.setBow(paramBase_[kParamBow]);
     engine_.setDamper(paramBase_[kParamDamper]);
     engine_.setInharmSpread(paramBase_[kParamInharm]);
-    engine_.setSlideMode((int)std::lround(paramBase_[kParamSlideMode]*2.f));
+    engine_.setSlideMode((int)std::lround(paramBase_[kParamSlideMode]));
     for(int i=0;i<16;++i) engine_.setBandDecayTrim(i, bandDecayCurve(paramBase_[kParamBandDecay0+i]));
     engine_.setSupport(paramBase_[kParamSupport]);
     engine_.setHoldDamp(paramBase_[kParamHoldDamp]);
@@ -302,10 +303,14 @@ void PluginMultiScaleBody::run(const float** inputs,float** outputs,uint32_t fra
             engine_.setPitchBend(ch,semis);
         }
         else if(st==0xB0){
-            // MIDI learn (idea 15) + learned-CC dispatch run on channel 0
-            // BEFORE the built-in CC semantics (a learned binding overrides
-            // the default behavior of that controller).
-            if(ch==0){
+            // MIDI learn (idea 15) + learned-CC dispatch run on channel 0,
+            // BEFORE the built-in CC semantics, but the host-safety CCs
+            // (sustain 64, panic 120/123) are RESERVED: they are never
+            // swallowed by the learn window and never permanently shadowed by
+            // a binding, so panic and the pedal can never be broken by (or
+            // stolen for) a learn assignment. See isReservedCC().
+            const bool reserved=isReservedCC(d1);
+            if(ch==0 && !reserved){
                 if(learnPending_>=0 && isInputParameter((uint32_t)learnPending_)){
                     ccToParam_[d1]=learnPending_;
                     learnPending_=-1;   // binding consumed; value untouched

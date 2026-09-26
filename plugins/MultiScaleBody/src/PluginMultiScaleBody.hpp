@@ -84,6 +84,11 @@ private:
     // the built-in CC dispatch (learned bindings override defaults). "learn"
     // state carries the pending param index while the UI waits for the next
     // CC on channel 0 (MIDI learn, idea 15).
+    // CCs whose built-in meaning is host-safety critical and must survive MIDI
+    // learn: sustain (64) and panic/all-notes-off (120/123). These are never
+    // consumed by the learn window and never shadowed by a learned binding, so
+    // the pedal and panic can always be reached.
+    static bool isReservedCC(int cc){ return cc==64 || cc==120 || cc==123; }
     int ccToParam_[128];            // initialized to -1 in ctor
     int learnPending_=-1;
     // Microtonal tuning (idea 13): the "scale" state key holds the raw .scl

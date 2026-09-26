@@ -66,19 +66,15 @@ static bool loadSclFileDialog(std::string& outText){
 #endif
 }
 START_NAMESPACE_DISTRHO
+// NOTE: scale is a per-UI value (see MultiScaleBodyUI::currentSurfaceScale and
+// fBuiltScale). LVGL's lv_screen_active()/lv_display_get_default() are PROCESS
+// globals that dpf-widgets rebinds to whichever editor's idle ran last, so every
+// screen/scale lookup must go through this instance's OWN display, never the
+// global. gUIScale (styles/Palette.hpp) remains the layout token `scaled()` reads
+// during a build; it is written from this instance's rebuild and latched
+// per-instance (fBuiltScale) so two instances cannot drive each other into a
+// rebuild loop.
 float gUIScale = 1.0f;
-// Scale from the ACTUAL LVGL surface, not DPF's size bookkeeping: the layout must
-// always match what will be drawn. If getSize() ever disagrees with the real window
-// (bridged UIs, hosts that clamp resize requests), a stale scale lays content out
-// past the visible area - clipped right/bottom edges, seemingly "empty" regions.
-static float currentSurfaceScale(){
-    lv_display_t* d=lv_display_get_default();
-    const float w = d ? (float)lv_display_get_horizontal_resolution(d) : (float)DISTRHO_UI_DEFAULT_WIDTH;
-    const float h = d ? (float)lv_display_get_vertical_resolution(d) : (float)DISTRHO_UI_DEFAULT_HEIGHT;
-    const float nsW=w/(float)DISTRHO_UI_DEFAULT_WIDTH;
-    const float nsH=h/(float)DISTRHO_UI_DEFAULT_HEIGHT;
-    return std::clamp(nsW<nsH?nsW:nsH,0.5f,2.5f);
-}
 class MultiScaleBodyUI;
 static float peakOf(const float* bins){
     float m=0.f; for(int b=0;b<16;++b) m=std::max(m,bins[b]); return m;
@@ -195,6 +191,30 @@ public:
         // alive lay out correctly (same path as the rebuildForScale rescale).
     }
     ~MultiScaleBodyUI() override { if(fSpectrumTimer){ lv_timer_del(fSpectrumTimer); fSpectrumTimer=nullptr; } delete fLVGL; }
+    // Per-instance display access. LVGL's lv_display_get_default() /
+    // lv_screen_active() are PROCESS globals; dpf-widgets rebinds the default
+    // to whichever editor's idle ran last, so with 2+ instances open the
+    // global can point at the OTHER instance's display. Always resolve this
+    // instance's own screen through its widget.
+    lv_display_t* myDisplay() const {
+        return fLVGL ? ((MultiScaleBodyLVGLWidget*)fLVGL)->getLVGLDisplay() : lv_display_get_default();
+    }
+    lv_obj_t* myScreen() const {
+        lv_display_t* d=myDisplay();
+        return d ? lv_display_get_screen_active(d) : nullptr;
+    }
+    // Scale from the ACTUAL LVGL surface of THIS instance, not DPF's size
+    // bookkeeping and not the process-global display. If getSize() ever
+    // disagrees with the real window (bridged UIs, hosts that clamp resize
+    // requests), a stale scale lays content out past the visible area.
+    float currentSurfaceScale() const {
+        lv_display_t* d=myDisplay();
+        const float w = d ? (float)lv_display_get_horizontal_resolution(d) : (float)DISTRHO_UI_DEFAULT_WIDTH;
+        const float h = d ? (float)lv_display_get_vertical_resolution(d) : (float)DISTRHO_UI_DEFAULT_HEIGHT;
+        const float nsW=w/(float)DISTRHO_UI_DEFAULT_WIDTH;
+        const float nsH=h/(float)DISTRHO_UI_DEFAULT_HEIGHT;
+        return std::clamp(nsW<nsH?nsW:nsH,0.5f,2.5f);
+    }
     std::string parameterName(uint32_t i) const override {
         using P=PluginMultiScaleBody;
         switch(i){
@@ -421,7 +441,12 @@ public:
         // an unbuilt tree, even at identical scale); otherwise rebuild only
         // when the surface scale actually moved.
         const float ns=currentSurfaceScale();
-        if(!fUIBuilt || std::abs(ns-::DISTRHO::gUIScale)>=0.01f) rebuildForScale(ns);
+        if(!fUIBuilt || std::abs(ns-fBuiltScale)>=0.01f) rebuildForScale(ns);
+        // Publish this instance's scale for scaled() during this idle's paint;
+        // fBuiltScale (not the shared gUIScale) is the "already built" latch so
+        // two instances at different zoom cannot drive each other into an
+        // endless rebuild loop.
+        ::DISTRHO::gUIScale=fBuiltScale;
         UI::uiIdle();
     }
     void uiReshape(uint w,uint h) override {
@@ -457,7 +482,8 @@ public:
         // and leave the screen blank - the "vanishes on resize" symptom.
         if(fRebuildInFlight) return;
         fRebuildInFlight=true;
-        ::DISTRHO::gUIScale=ns;
+        ::DISTRHO::gUIScale=ns;   // scaled() token source during THIS build
+        fBuiltScale=ns;           // per-instance "built at this scale" latch
         if(!fUIBuilt){
             // first build (constructor / first uiIdle): no existing tree
             styles.reset(); styles.init();
@@ -479,7 +505,7 @@ public:
             // existing tree stays visible during construction. Without
             // this, lv_obj_clean blanks the screen for the entire buildUI()
             // duration - the visible flash and vanish on every resize.
-            lv_obj_t* screen=lv_screen_active();
+            lv_obj_t* screen=myScreen();
             lv_obj_t* stash=screen ? lv_obj_create(screen) : nullptr;
             if(stash){
                 lv_obj_set_size(stash,lv_pct(100),lv_pct(100));
@@ -874,7 +900,11 @@ private:
             for(int gx=0;gx<GS;++gx){
                 float gxN=(gx+0.5f)/(float)GS;
                 float gyN=(gy+0.5f)/(float)GS;
-                float fx=gxN*14.f, fy=gyN*14.f;
+                // gy=0 is painted at the TOP of the disc (margin+gy*cell), and
+                // the engine/marker/pad all treat a HIGH gain y-index (strikeY=1)
+                // as the top. Sample the mirrored index so the heatmap dots the
+                // user aims at are the gain field the engine actually sounds.
+                float fx=gxN*14.f, fy=(1.f-gyN)*14.f;
                 int x0=std::clamp((int)fx,0,14), y0=std::clamp((int)fy,0,14);
                 int x1=x0+1, y1=y0+1; float dx=fx-x0, dy=fy-y0;
                 float w00=(1-dx)*(1-dy), w10=dx*(1-dy), w01=(1-dx)*dy, w11=dx*dy;
@@ -1093,7 +1123,7 @@ private:
             case P::kParamInharm:    snprintf(buf,cap,"x%.2f",1.f+v); break;
             case P::kParamSlideMode: {
                 static const char* const kSlideNames[3]={"PITCH","MODE","BRIGHT"};
-                const int m=std::clamp((int)std::lround(v*2.f),0,2);
+                const int m=std::clamp((int)std::lround(v),0,2);
                 snprintf(buf,cap,"%s",kSlideNames[m]);
                 break; }
             case P::kParamSupport:   snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
@@ -1492,7 +1522,7 @@ private:
         set(PluginMultiScaleBody::kParamBow, (std::rand()%100)<30 ? rnd(0.3f,0.8f) : 0.f);
         set(PluginMultiScaleBody::kParamDamper, rnd(0.f,0.5f));
         set(PluginMultiScaleBody::kParamInharm, rnd(0.f,0.4f));
-        { static const float modes[3]={0.f,0.5f,1.f}; set(PluginMultiScaleBody::kParamSlideMode, modes[std::rand()%3]); }
+        { static const float modes[3]={0.f,1.f,2.f}; set(PluginMultiScaleBody::kParamSlideMode, modes[std::rand()%3]); }
         for(int b=0;b<16;++b)
             set(PluginMultiScaleBody::kParamBandDecay0+b, std::clamp(rnd(0.35f,0.65f),0.f,1.f));
         // wave-3: physical model (morphs/materials biased to off/DEFAULT so
@@ -1522,7 +1552,7 @@ private:
     // decorative objects can't be mistaken for them. Right-click anywhere
     // else (or a second right-click) cancels.
     void handleRightClick(int wx,int wy){
-        lv_obj_t* scr=lv_screen_active();
+        lv_obj_t* scr=myScreen();
         if(!scr) return;
         lv_point_t pt={ (lv_coord_t)wx, (lv_coord_t)wy };
         lv_obj_t* o=lv_indev_search_obj(scr,&pt);
@@ -2045,8 +2075,7 @@ private:
     //   +-- KEYBOARD  (octave + keys + ARP + tuning selects + learn chip)
     // vertical budget @s=1: 32 + 72 + 24 + 610 + 202 + 128 = 1068 (exact).
     void buildUI(lv_obj_t* parent=nullptr){
-        lv_obj_t* surface=parent ? parent : lv_screen_active();
-        if(!surface){ lv_display_t* d=lv_display_get_default(); if(d) surface=lv_display_get_screen_active(d); }
+        lv_obj_t* surface=parent ? parent : myScreen();
         if(!surface) return;
         fUIBuilt=true; fMarkerPlaced=false;
 
@@ -2930,6 +2959,11 @@ private:
             }
             lv_chart_refresh(fScopeChart);
         }
+        // Latch the built state: the preview is now seeded, so the idle tick
+        // below advances the trace instead of rebuilding the whole 128-mode
+        // curve every 33 ms. Cleared only when a relevant param changes
+        // (see the fScopePreviewReady=false sites), forcing one rebuild then.
+        fScopePreviewReady=true;
     }
     // wave-6: B1..B16 legend restyle — the live map of "what is edited".
     // Colors mirror the floor tick strip (blue row = gain, green row =
@@ -3168,11 +3202,12 @@ private:
         // self-heal: per-frame meter/peak updates can re-dirty the layout and the
         // passive pass may re-settle at a stale fixed point; an explicit pass
         // converges the tree and is a no-op when nothing is dirty
-        lv_obj_update_layout(lv_screen_active());
+        lv_obj_update_layout(myScreen());
     }
     DGL_NAMESPACE::LVGLTopLevelWidget* fLVGL=nullptr;
     UIStyles styles;
     bool fUIBuilt=false;   // tracks whether buildUI() has populated the tree
+    float fBuiltScale=1.0f;   // per-instance scale the current tree was built at (multi-instance safe)
     // fRebuildInFlight: true while rebuildForScale() is mid-rebuild. uiReshape
     // and uiIdle both call rebuildForScale; if a resize re-enters while the
     // first rebuild is still constructing the new tree, the second pass can

@@ -311,6 +311,25 @@ public:
     float getSupY() const { return supY_; }
     float getStrikeW() const { return strikeW_; }
     float getScrape() const { return scrape_; }
+    // Engine-side getters for the continuous controls, so the routing guard in
+    // tests/test_preset_regression.cpp can verify a setParameterValue call
+    // actually REACHED the engine (not just the plugin's paramBase_ mirror).
+    // These make the "knob wired to the wrong engine setter" bug detectable.
+    float getBrightness() const { return brightness_; }
+    float getDecayScale() const { return decayScale_; }
+    float getWidth() const { return width_; }
+    float getHoldDamp() const { return holdDamp_; }
+    float getStrikeX() const { return strikeX_; }
+    float getStrikeY() const { return strikeY_; }
+    float getRadiationMix() const { return radiationMix_; }
+    float getReverbWet() const { return reverbWet_; }   // target (wetCur_ is the smoothed per-sample value)
+    float getVolume() const { return volumeNorm_; }   // target (volCur_ is the smoothed per-sample value)
+    float getDetuneSpread() const { return detuneSpread_; }
+    float getGlideNorm() const { return glideNorm_; }
+    float getExciteMix() const { return exciteMix_; }
+    float getVelStrike() const { return velStrike_; }
+    bool  getMonoMode() const { return monoMode_; }
+    float getEcoBudget() const { return ecoBudgetNorm_; }
     // wave-3 shared body-table helpers (used by noteOn and the IR bake so the
     // reverb send tracks the current physical model)
     float bodyFreq(const modal::PresetData& p, int i, int n) const;

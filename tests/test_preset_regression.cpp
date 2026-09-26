@@ -32,6 +32,47 @@ int main(){
     require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamRayleighB))<1e-6f,"rayleighB default 0");
     require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamEcoMode))<1e-6f,"ecomode default 0");
     require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamEcoBudget)-0.5f)<1e-6f,"ecobudget default 0.5");
+    // --- golden-critical defaults (coupling fence) ------------------------
+    // tests/gen_golden_volume.cpp renders the "default sound" by HARD-CODING
+    // the ctor's parameter block (it links the engine, not the plugin). This
+    // fence pins the exact defaults the golden depends on, so changing any of
+    // them in the ctor FAILS here (flagging the golden for regeneration)
+    // instead of silently letting the gate certify a stale config.
+    {
+        struct Def { int p; float v; const char* n; };
+        const Def defs[] = {
+            {PluginMultiScaleBody::kParamPitch, 0.5f, "Pitch"},
+            {PluginMultiScaleBody::kParamDecay, 0.5f, "Decay"},
+            {PluginMultiScaleBody::kParamBrightness, 0.65f, "Brightness"},
+            {PluginMultiScaleBody::kParamStrikeX, 0.5f, "StrikeX"},
+            {PluginMultiScaleBody::kParamStrikeY, 0.5f, "StrikeY"},
+            {PluginMultiScaleBody::kParamModeCount, 0.60f, "ModeCount"},
+            {PluginMultiScaleBody::kParamWidth, 0.30f, "Width"},
+            {PluginMultiScaleBody::kParamRadiation, 0.45f, "Radiation"},
+            {PluginMultiScaleBody::kParamAttack, 0.15f, "Attack"},
+            {PluginMultiScaleBody::kParamRelease, 0.45f, "Release"},
+            {PluginMultiScaleBody::kParamLFORate, 0.30f, "LFORate"},
+            {PluginMultiScaleBody::kParamLFODepth, 0.0f, "LFODepth"},
+            {PluginMultiScaleBody::kParamExciteMix, 0.0f, "ExciteMix"},
+            {PluginMultiScaleBody::kParamVelStrike, 0.35f, "VelStrike"},
+            {PluginMultiScaleBody::kParamDetune, 0.15f, "Detune"},
+            {PluginMultiScaleBody::kParamGlide, 0.15f, "Glide"},
+            {PluginMultiScaleBody::kParamWet, 0.0f, "Wet"},
+            {PluginMultiScaleBody::kParamVolume, 1.0f, "Volume"},
+        };
+        for (const Def& d : defs) {
+            const float got = plug.testGetParameterValue((uint32_t)d.p);
+            if (std::fabs(got - d.v) > 1e-6f) {
+                printf("FAIL: golden-coupling param %s default %.4f, golden assumes %.4f"
+                       " -> regenerate golden if intentional\n", d.n, got, d.v);
+                require(false, "ctor default drifted from the golden generator config");
+            }
+        }
+        // band gain trims default 0.5 (curve -> unity)
+        for (int b = 0; b < 16; ++b)
+            require(std::fabs(plug.testGetParameterValue(PluginMultiScaleBody::kParamBand0 + b) - 0.5f) < 1e-6f,
+                    "band gain trim default 0.5");
+    }
     plug.testSetParameterValue(PluginMultiScaleBody::kParamPreset, 0.0f);
     float v=plug.testGetParameterValue(PluginMultiScaleBody::kParamPreset);
     require(std::abs(v-0.0f)<0.01f,"preset round-trip 0.0");
@@ -173,20 +214,22 @@ int main(){
         require(std::fabs(p.testEngine().getRayleighB()-eB)<1e-6f,"engine follows Rayl B snap");
         printf("material rayleigh snap PASS (A=%.2f B=%.2f)\n",eA,eB);
     }
-    // --- routing guard: every input param stores distinctly ----------------
-    // Regression fence for "changing a knob broke the routing": if a knob is
-    // ever wired to the wrong param, or two knobs share an index, this fails.
-    // For every input param, write a unique probe and require it round-trips
-    // exactly; near-equal neighbours (0 vs 1e-9) are exercised so a knob that
-    // routes to a *nearby* param (not a distinct one) is caught too.
+    // --- routing guard: every input param reaches the ENGINE ---------------
+    // Regression fence for "changing a knob broke the routing". For every
+    // input param we (1) write a unique probe and require the plugin's
+    // paramBase_ mirror to round-trip, AND (2) where the engine exposes a
+    // getter, verify the value actually REACHED the engine — so a param wired
+    // to the wrong engine setter (e.g. Detune -> setGlide) is now caught,
+    // which the old paramBase_-only check could not see.
     {
         PluginMultiScaleBody p;
         p.testSampleRate2(44100); p.testActivate();
+        auto& e=p.testEngine();
         const uint32_t ni=PluginMultiScaleBody::kNumInputParams;
         for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount;++i){
             if(!PluginMultiScaleBody::isInputParameter(i)) continue;
-            // enum-snapped params (Preset/MorphTarget/Material/SlideMode/Eco/
-            // Mono) round-trip to the nearest STEP by design — handled below.
+            // enum/snapped params (Preset/MorphTarget/Material/SlideMode/Eco/
+            // ModelMode/Mono) round-trip to the nearest STEP by design.
             if(i==PluginMultiScaleBody::kParamPreset
                || i==PluginMultiScaleBody::kParamMorphTarget
                || i==PluginMultiScaleBody::kParamMaterial
@@ -201,6 +244,55 @@ int main(){
                 printf("FAIL: input %u probe %.5f stored %.5f\n",i,probe,got);
                 require(false,"routing: param stores its own probe");
             }
+            // (2) engine receipt, curve-agnostic. Many setters apply a knob
+            // curve (Pitch is a +-24 ST exponential; Decay/Attack are
+            // remapped), so the engine value is NOT equal to the raw probe.
+            // Instead drive the SAME param with two distinct probes and
+            // require the engine getter to MOVE. A param wired to the wrong
+            // engine setter leaves the real getter pinned at its default for
+            // both probes (equal -> fail), which is exactly the
+            // "Detune -> setGlide" regression this now catches.
+            float ea=NAN, eb=NAN; const char* ename=nullptr;
+            auto readEngine=[&](uint32_t idx)->float{
+                switch(idx){
+                    case PluginMultiScaleBody::kParamPitch:      return e.getPitchScale();
+                    case PluginMultiScaleBody::kParamDecay:      return e.getDecayScale();
+                    case PluginMultiScaleBody::kParamBrightness: return e.getBrightness();
+                    case PluginMultiScaleBody::kParamWidth:      return e.getWidth();
+                    case PluginMultiScaleBody::kParamStrikeX:    return e.getStrikeX();
+                    case PluginMultiScaleBody::kParamStrikeY:    return e.getStrikeY();
+                    case PluginMultiScaleBody::kParamRadiation:  return e.getRadiationMix();
+                    case PluginMultiScaleBody::kParamWet:        return e.getReverbWet();
+                    case PluginMultiScaleBody::kParamVolume:     return e.getVolume();
+                    case PluginMultiScaleBody::kParamDetune:     return e.getDetuneSpread();
+                    case PluginMultiScaleBody::kParamGlide:      return e.getGlideNorm();
+                    case PluginMultiScaleBody::kParamExciteMix:  return e.getExciteMix();
+                    case PluginMultiScaleBody::kParamVelStrike:  return e.getVelStrike();
+                    case PluginMultiScaleBody::kParamBow:        return e.getBow();
+                    case PluginMultiScaleBody::kParamDamper:     return e.getDamper();
+                    case PluginMultiScaleBody::kParamInharm:     return e.getInharmSpread();
+                    case PluginMultiScaleBody::kParamSupport:    return e.getSupport();
+                    case PluginMultiScaleBody::kParamHoldDamp:   return e.getHoldDamp();
+                    case PluginMultiScaleBody::kParamResMorph:   return e.getResMorph();
+                    case PluginMultiScaleBody::kParamMorphAmt:   return e.getMorphAmt();
+                    case PluginMultiScaleBody::kParamRayleighA:  return e.getRayleighA();
+                    case PluginMultiScaleBody::kParamRayleighB:  return e.getRayleighB();
+                    case PluginMultiScaleBody::kParamSupX:       return e.getSupX();
+                    case PluginMultiScaleBody::kParamSupY:       return e.getSupY();
+                    case PluginMultiScaleBody::kParamStrikeW:    return e.getStrikeW();
+                    case PluginMultiScaleBody::kParamScrape:     return e.getScrape();
+                    default: return NAN;
+                }
+            };
+            ea=readEngine(i);
+            if(std::isfinite(ea)){
+                p.testSetParameterValue(i, 0.83f);
+                eb=readEngine(i);
+                if(!(std::fabs(ea-eb)>1e-6f)){
+                    printf("FAIL: param %u engine getter did not move (%.5f vs %.5f) - misrouted write\n",i,ea,eb);
+                    require(false,"routing: param reached the engine");
+                }
+            }
         }
         // snapped params must be idempotent: y=snap(x) then set(y) reads y.
         const uint32_t snapped[6]={PluginMultiScaleBody::kParamPreset,
@@ -214,7 +306,7 @@ int main(){
             require(std::fabs(p.testGetParameterValue(pi)-y)<1e-6f,
                     "routing: snapped param is idempotent");
         }
-        printf("routing: all %u input params route + discrete snap PASS\n",ni);
+        printf("routing: all %u input params route to the engine + discrete snap PASS\n",ni);
     }
     // --- routing guard: output params are write-protected -------------------
     // kParamOutLevel..kParamOutBand15 are DSP metering only; a knob wired to

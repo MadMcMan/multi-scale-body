@@ -37,11 +37,19 @@ def fine_bake(preset, g=8, nmax=128):
     alpha1, alpha2 = preset['alpha1'], preset['alpha2']
     decays = 0.5*(alpha1 + alpha2 * (freq**2))
     decays = np.maximum(decays, 0.6)
+    # Per-body decay shaping. MUST match modal_bake.py's shaping exactly
+    # (bake_one), or the coarse and fine halves of the shipped header disagree
+    # about the sign of the mode-index->decay trend. The formula is
+    #   factor = a + b*(t**p)          when sub=True   (rising: high modes decay slower)
+    #   factor = a + b*((1-t)**p)      when sub=False  (falling: high modes decay faster)
+    # For a RISING body modal_bake uses (a - b*t^p); encode that by making b
+    # negative here so the single formula reproduces the minus sign. Do NOT use
+    # a positive b for these: it inverts the trend vs the coarse table.
     sh = {'Plate': (0.7,0.3,1,False), 'WoodBlock': (1.0,0.6,1,True), 'Membrane': (1.0,0.4,1,True),
           'Blade': (0.8,0.2,1,False), 'Bell': (0.65,0.35,0.7,False), 'Glass': (0.55,0.45,0.8,False),
           'Chime': (0.5,0.5,1,False), 'Gong': (0.72,0.28,1,False), 'Handpan': (0.72,0.28,1,False),
-          'LogDrum': (1.08,0.38,1,True), 'Marimba': (1.15,0.65,0.8,True),
-          'Kalimba': (1.0,0.3,1,True), 'Celesta': (0.6,0.4,1,False)}
+          'LogDrum': (1.08,-0.38,1,True), 'Marimba': (1.15,-0.65,0.8,True),
+          'Kalimba': (1.0,-0.3,1,True), 'Celesta': (0.6,0.4,1,False)}
     if preset['name'] in sh:
         a,b,p,sub = sh[preset['name']]
         t = np.linspace(0,1,len(decays))

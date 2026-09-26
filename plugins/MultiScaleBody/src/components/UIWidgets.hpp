@@ -59,7 +59,15 @@ static void sharedArcVisualEventCb(lv_event_t* e){
         if(it!=gArcVisualBindings.end() && it->second.valueLabel){ char buf[32]; snprintf(buf,sizeof(buf),"%.2f",lv_arc_get_value(arc)/1000.f); lv_label_set_text(it->second.valueLabel,buf); }
         return;
     }
-    if(code==LV_EVENT_DELETE){ gArcVisualBindings.erase(arc); gArcDragStates.erase(arc); gArcParamIndex.erase(arc); }
+}
+// DELETE gets its OWN callback: syncFromParam() removes sharedArcVisualEventCb
+// to re-arm it, and lv_obj_remove_event_cb strips EVERY descriptor with a
+// matching cb -- so a shared handler would lose the cleanup and leak
+// gArcVisualBindings/gArcDragStates/gArcParamIndex entries (with dangling
+// face/valueLabel pointers) on every rebuild.
+static void sharedArcDeleteCb(lv_event_t* e){
+    lv_obj_t* arc=(lv_obj_t*)lv_event_get_target(e);
+    if(lv_event_get_code(e)==LV_EVENT_DELETE){ gArcVisualBindings.erase(arc); gArcDragStates.erase(arc); gArcParamIndex.erase(arc); }
 }
 static void allowChildOverflow(lv_obj_t* obj){
     lv_obj_add_flag(obj, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
@@ -146,7 +154,7 @@ struct UIWidgets {
         gArcParamIndex[arc]=paramIndex;
         lv_obj_add_event_cb(arc,arcDragCb,LV_EVENT_ALL,ui);
         lv_obj_add_event_cb(arc,sharedArcVisualEventCb,LV_EVENT_VALUE_CHANGED,nullptr);
-        lv_obj_add_event_cb(arc,sharedArcVisualEventCb,LV_EVENT_DELETE,nullptr);
+        lv_obj_add_event_cb(arc,sharedArcDeleteCb,LV_EVENT_DELETE,nullptr);
         // Cap / rim / ticks / face / needle — exact cymbals sizes, cap is CHILD OF ARC so it overlays correctly (flex would stack if child of cont)
         const int capSize=std::max(spec.arcSize-spec.capInset,8);
         lv_obj_t* cap=lv_obj_create(arc);

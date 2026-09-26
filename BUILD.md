@@ -5,10 +5,19 @@
 Path contains `&` and spaces (`.../Synthesis & Sound Generation/...`). **Use Ninja, not MinGW Makefiles.**
 MinGW Makefiles runs through `cmd.exe` where `&` splits commands → `cc.exe: no input files` on LVGL. Ninja passes args as array.
 
+
+## Build type: optimized by default (required)
+
+With no `CMAKE_BUILD_TYPE`, CMake compiles every edge at **`-O0` with `assert()` live**. That is not a safe shipping config for this plugin:
+
+- **Real-time:** the engine is a per-voice bank of up to 128 biquad resonators. Measured (clean run, 8 voices + reverb at wet=1.0): **~96% of realtime** at `-O0` — right at the dropout threshold — vs **~228%** at `-O2`. The `-O0` build could not sustain the heaviest case in a DAW.
+- **Crash surface:** 319 `assert()`s live in DPF/dgl; a failed assert calls `abort()` and takes the host down.
+
+`CMakeLists.txt` therefore defaults to **`RelWithDebInfo`** when no build type is given. Override deliberately with `-DCMAKE_BUILD_TYPE=Debug`. `tests/golden_default.bin` is bit-identical across `-O0`/`-O2` (verified), so the golden gate is build-type independent.
 ## Command
 
 ```sh
-cmake -S . -B build -G Ninja
+cmake -S . -B build -G Ninja          # defaults to RelWithDebInfo; see "Build type" below
 cmake --build build --target MultiScaleBody-vst3 MultiScaleBody-clap MultiScaleBody-lv2 MultiScaleBody-lv2-ui MultiScaleBody-jack
 
 # `MultiScaleBody-lv2` only pulls in the DSP dll. The UI dll is a SEPARATE

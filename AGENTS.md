@@ -6,7 +6,7 @@ Single DPF plugin (jack/vst3/clap/lv2), LVGL UI. See `BUILD.md` for full details
 
 - **Ninja is required.** Path contains `&` and spaces; MinGW Makefiles routes through `cmd.exe` where `&` splits commands (`cc.exe: no input files`). Always `-G Ninja`.
   ```sh
-  cmake -S . -B build -G Ninja
+  cmake -S . -B build -G Ninja          # defaults to RelWithDebInfo (optimized + NDEBUG)
   cmake --build build --target MultiScaleBody-vst3 MultiScaleBody-clap MultiScaleBody-lv2 MultiScaleBody-lv2-ui MultiScaleBody-jack
   ```
 - Artifacts land in `build/bin/`. This folder **is** a git repo (remote `github.com/MadMcMan/multi-scale-body`); `build/`, `build-dbg/`, and `deps/` are ignored.
