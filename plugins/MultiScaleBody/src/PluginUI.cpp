@@ -12,9 +12,10 @@
 #include "lvgl.h"
 #include "PluginMultiScaleBody.hpp"
 #include "ModalData.hpp"
-#include "components/UIStyles.hpp"
-#include "components/UIWidgets.hpp"
-#include "components/UICommon.hpp"
+#include "styles/Palette.hpp"    // design tokens (colors, lay::, scaled(), fonts)
+#include "styles/UIStyles.hpp"   // LVGL style pack
+#include "components/UICommon.hpp"  // abstract UI contract
+#include "components/UIWidgets.hpp" // arc-knob component
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

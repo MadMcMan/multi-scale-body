@@ -6,8 +6,9 @@
 //  PROVENANCE: originally forked from the cymbals-ui project
 //  (E:/dev/deps/cymbals-ui, include/cymbals-ui/UIWidgets.hpp). This file is now
 //  a first-party, self-contained vendored component of MultiScaleBody: it has
-//  NO build-time or runtime dependency on cymbals-ui and includes only its
-//  local siblings (UIStyles.hpp, UICommon.hpp) plus lvgl.h.
+//  NO build-time or runtime dependency on cymbals-ui. It reads the design
+//  tokens (styles/Palette.hpp) and LVGL style pack (styles/UIStyles.hpp) and
+//  binds to the abstract UI contract (components/UICommon.hpp).
 //
 //  The fork has diverged from upstream (adapted to MultiScaleBody's palette,
 //  geometry tokens, and parameter bindings), so it is intentionally NOT kept in
@@ -15,12 +16,13 @@
 //  not re-copy from upstream without re-checking the MultiScaleBody bindings.
 //  See AGENTS.md ("Components") for the ownership rule.
 // ============================================================================
-#include "UIStyles.hpp"
+#include "UICommon.hpp"        // abstract UI contract (components/UICommon.hpp)
+#include "styles/Palette.hpp"   // design tokens: colors, lay::, scaled(), fonts
+#include "styles/UIStyles.hpp"  // LVGL style pack
 #include "lvgl.h"
 #include <unordered_map>
 #include <cstdio>
 #include <algorithm>
-#include "UICommon.hpp"
 START_NAMESPACE_DISTRHO
 
 // === Geometry (kept for PluginUI compatibility) ===

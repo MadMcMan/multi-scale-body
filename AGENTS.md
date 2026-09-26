@@ -47,21 +47,55 @@ blind spots are documented in `BUILD.md` and the generator header.
 
 ## UI
 
-`src/PluginUI.cpp` is the whole interface ("STRIKE PLATE" design): TE-style spec-strip header, grouped cymbal knobs (BODY/RESONATE/EXCITER/SPACE), a playable circular strike disc (click = strike position + note-on), onset-triggered ripple rings, 16-band spectrum, decay scope, keyboard. Restyling happens only via colors/layout in `PluginUI.cpp`.
+`src/PluginUI.cpp` composes the screen ("STRIKE PLATE" design): TE-style
+spec-strip header, grouped cymbal knobs (BODY/RESONATE/EXCITER/SPACE), a
+playable circular strike disc (click = strike position + note-on), onset-
+triggered ripple rings, 16-band spectrum, decay scope, keyboard. Restyling
+happens only via the design tokens in `styles/Palette.hpp` and colors/layout in
+`PluginUI.cpp`.
 
-## Components
+## UI architecture (components & styles)
 
-The LVGL UI building blocks are **our own first-party components**, vendored in
-`plugins/MultiScaleBody/src/components/`:
+The LVGL UI is organized as a small, strictly-layered design system. Two
+sibling folders keep **all components together** and **all styles together**,
+with a one-way dependency direction (bottom layer first):
 
-- `UIWidgets.hpp` — arc knob (createArcKnob / drag / param sync)
-- `UIStyles.hpp` — LVGL style pack
-- `UICommon.hpp` — layout tokens, palette, abstract UI interface
+```
+plugins/MultiScaleBody/src/
+  styles/
+    Palette.hpp    # design tokens — the SINGLE SOURCE OF TRUTH
+    UIStyles.hpp   # LVGL style pack (UIStyles struct)
+  components/
+    UICommon.hpp   # abstract UI interface (the component contract)
+    UIWidgets.hpp  # the arc-knob component (createArcKnob / drag / sync)
+  PluginUI.cpp     # the screen: composes styles + components
+```
 
-These were originally forked from the external **cymbals-ui** project, but they
-have **diverged** (adapted to this plugin's palette, geometry tokens, and
+- **`styles/Palette.hpp` (tokens).** Every design decision lives here and only
+  here: the color palette (`COL_*`, `PLATE_*`, `MAT_*`, `SEC_*`), the chassis
+  layout arithmetic (`namespace lay`), the UI scale (`gUIScale`, `scaled()`),
+  and the typography helpers (`getScaledFont`, `getDisplayFont`, …). Never
+  hardcode a color, a spacing/padding value, or a font size at a use site —
+  consume or add a token here so the whole UI stays consistent.
+- **`styles/UIStyles.hpp` (styles).** The `lv_style_t` pack; consumes tokens
+  from `Palette.hpp` and knows nothing about the component contract or the
+  screen. All shared control chrome (arcs, buttons, labels, knob parts, meter)
+  is styled here.
+- **`components/UICommon.hpp` (contract).** Only the `AbstractMultiScaleBodyUI`
+  interface the components bind to — no tokens, no styles.
+- **`components/UIWidgets.hpp` (components).** The reusable arc-knob control.
+  Reads tokens + styles and binds to the contract; owns no magic values.
+
+Layering rule: `Palette` → `UIStyles` → `UICommon`/`UIWidgets` → `PluginUI`.
+Lower layers never include higher ones. `src/` is on the include path, so
+cross-layer includes are written `styles/…` and `components/…`; a file includes
+only what it directly uses. New components go in `components/`; new shared
+styling or tokens go in `styles/`.
+
+All four were originally forked from the external **cymbals-ui** project, but
+they have **diverged** (adapted to this plugin's palette, geometry tokens, and
 parameter bindings) and now have **no build-time or runtime dependency on
-cymbals-ui** — they include only their local siblings plus `lvgl.h`. Treat them
+cymbals-ui** — they include only local siblings plus `lvgl.h`/DPF. Treat them
 as our own: edit them in place, and do **not** re-sync or re-copy from upstream
 cymbals-ui without re-checking the MultiScaleBody bindings. If you ever need a
 new cymbals-ui control, vendor it into `components/` on first use rather than

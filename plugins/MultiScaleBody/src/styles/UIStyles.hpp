@@ -1,11 +1,15 @@
 #ifndef UI_STYLES_HPP
 #define UI_STYLES_HPP
-// MultiScaleBody's own LVGL style pack, forked from cymbals-ui
-// (include/cymbals-ui/UIStyles.hpp) and adapted to this plugin's palette.
-// First-party component: no cymbals-ui dependency. See UIWidgets.hpp header
-// and AGENTS.md ("Components") for the ownership rule.
-
-#include "UICommon.hpp"
+// ============================================================================
+//  styles/UIStyles.hpp  —  MultiScaleBody's LVGL style pack
+// ----------------------------------------------------------------------------
+//  PROVENANCE: forked from cymbals-ui (include/cymbals-ui/UIStyles.hpp) and
+//  adapted to this plugin's palette. First-party: no cymbals-ui dependency.
+//  This is the style layer: it consumes design tokens from styles/Palette.hpp
+//  and knows nothing about the component contract or the screen. See
+//  UIWidgets.hpp header and AGENTS.md ("Components") for the ownership rule.
+// ============================================================================
+#include "styles/Palette.hpp"
 
 START_NAMESPACE_DISTRHO
 

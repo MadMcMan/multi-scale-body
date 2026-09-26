@@ -15,7 +15,8 @@
 #include "../deps/lvgl/src/core/lv_obj_private.h"   // _lv_obj_t struct (class_p etc.)
 #include "../deps/lvgl/src/core/lv_obj_class_private.h"  // _lv_obj_class_t struct
 #include "PluginMultiScaleBody.hpp"
-#include "ui/UICommon.hpp"
+#include "styles/Palette.hpp"        // design tokens (colors, lay::, scaled(), fonts)
+#include "components/UICommon.hpp"  // abstract UI contract
 #include <windows.h>
 #include <functional>
 
