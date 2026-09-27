@@ -595,7 +595,7 @@ private:
         paramCache[PluginMultiScaleBody::kParamVolume]=1.f;
         extraWidgetCount=0; for(uint32_t i=0;i<kMaxExtraWidgets;++i) extraWidgets[i]={0,nullptr};
         strikeDisc=strikeDot=strikeCoordLabel=presetDropdown=bodySubLabel=nullptr;
-        discEnergyRing=nullptr; fDiscEnergy=0.f;
+        discEnergyRing=nullptr; fDiscEnergy=0.f; fBandAvgPreset=-1;
         // piece-6: preset browser prev/next arrows
         presetPrevBtn=presetNextBtn=nullptr;
         bodyPreview=lfoDot=strikeLastMark=nullptr;
@@ -886,6 +886,88 @@ private:
                 else                      snprintf(vbuf,sizeof(vbuf),"%.2f s",bandT60[b]);
             }
             lv_label_set_text(fDampVals[b],vbuf);
+        }
+    }
+    // Build (or refresh) the per-band average mode-shape grid for the current
+    // preset: fBandAvg[b][gy][gx] = mean surface displacement of the modes in
+    // band b at each 16x16 cell. The baked sound map gain[m][y][x] IS each
+    // mode's z-displacement over the surface, so this is the standing-wave
+    // shape the body rings with. Rebuilt only when the preset changes.
+    void ensureBandAvg(){
+        using namespace modal;
+        const int mx=kNumPresets-1;
+        const int preset=std::clamp((int)std::lround(paramCache[PluginMultiScaleBody::kParamPreset]*(float)mx),0,mx);
+        if(preset==fBandAvgPreset) return;
+        fBandAvgPreset=preset;
+        const auto& pr=kPresets[preset];
+        const int n=pr.n;
+        for(int b=0;b<16;++b) for(int y=0;y<16;++y) for(int x=0;x<16;++x) fBandAvg[b][y][x]=0.f;
+        int cnt[16]={};
+        for(int m=0;m<n;++m){
+            const int b=std::clamp((m*16)/std::max(1,n),0,15);
+            ++cnt[b];
+            for(int y=0;y<16;++y) for(int x=0;x<16;++x) fBandAvg[b][y][x]+=pr.gain[m][y][x];
+        }
+        for(int b=0;b<16;++b){
+            if(cnt[b]<=0) continue;
+            float mx2=0.f;
+            for(int y=0;y<16;++y) for(int x=0;x<16;++x){ fBandAvg[b][y][x]/=(float)cnt[b]; mx2=std::max(mx2,std::fabs(fBandAvg[b][y][x])); }
+            // normalise each band's shape to unit max so the live field
+            // (energy x shape) lands in a readable 0..1 range regardless of
+            // the bake's absolute gain scale
+            if(mx2>1e-6f){ const float inv=1.f/mx2;
+                for(int y=0;y<16;++y) for(int x=0;x<16;++x) fBandAvg[b][y][x]*=inv; }
+        }
+    }
+    // Live RESONANT SURFACE drawn on the disc in DRAW_POST_END: for each surface
+    // cell, the instantaneous displacement = sum over bands of (live band
+    // energy) * (that band's mode shape). Cells where the body is currently
+    // moving glow accent (crest) or dim blue (trough); the pattern is the
+    // standing-wave field, and it rings down with the modes' decay. Only drawn
+    // while audio is live, so the idle disc stays clean.
+    static void resonanceDrawCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* disc=(lv_obj_t*)lv_event_get_target(e);
+        if(!ui||!disc||!ui->fShowSurface) return;
+        if(!(ui->fGotLiveViz && ui->fLiveAge<45)) return;
+        ui->ensureBandAvg();
+        float eMax=0.f; for(int b=0;b<16;++b) eMax=std::max(eMax,ui->fVizBins[b]);
+        if(eMax<=1e-4f) return;
+        const float k=1.f/eMax;
+        lv_area_t cc; lv_obj_get_coords(disc,&cc);
+        const lv_coord_t D=cc.x2-cc.x1+1;
+        if(D<=8) return;
+        lv_layer_t* layer=lv_event_get_layer(e);
+        const int GRID=8;                        // cells per axis (bigger = a readable surface)
+        const lv_coord_t cell=(lv_coord_t)(D/GRID);
+        if(cell<2) return;
+        const float cx=(float)D*0.5f, cy=(float)D*0.5f, rad2=(float)D*D*0.25f;
+        for(int gy=0;gy<GRID;++gy){
+            for(int gx=0;gx<GRID;++gx){
+                // sample the field at this cell centre (map to the 16x16 grid)
+                const int sy=std::clamp((int)(gy*16.f/GRID),0,15);
+                const int sx=std::clamp((int)(gx*16.f/GRID),0,15);
+                float v=0.f;
+                for(int b=0;b<16;++b) v+=ui->fVizBins[b]*k*ui->fBandAvg[b][sy][sx];
+                const float av=std::fabs(v);
+                if(av<0.04f) continue;            // dead floor: idle stays clean
+                // keep only cells inside the disc
+                const float px=(float)(gx*cell)+cell*0.5f, py=(float)(gy*cell)+cell*0.5f;
+                const float dx=px-cx, dy=py-cy;
+                if(dx*dx+dy*dy>rad2) continue;
+                lv_draw_rect_dsc_t d; lv_draw_rect_dsc_init(&d);
+                d.bg_color = v>=0.f ? COL_HIGHLIGHT : PLATE_AMBER_DIM; // crest vs trough
+                d.bg_opa  = (lv_opa_t)std::clamp((int)(40.f+av*200.f),0,235);
+                d.radius  = LV_RADIUS_CIRCLE;                          // soft round surface patch
+                d.border_width=0;
+                d.shadow_width=(lv_coord_t)(cell*0.35f);                // glow into neighbours
+                d.shadow_color=d.bg_color;
+                d.shadow_opa=(lv_opa_t)std::clamp((int)(av*140.f),0,150);
+                lv_area_t a;
+                a.x1=cc.x1+(lv_coord_t)(gx*cell); a.x2=a.x1+cell-1;
+                a.y1=cc.y1+(lv_coord_t)(gy*cell); a.y2=a.y1+cell-1;
+                lv_draw_rect(layer,&d,&a);
+            }
         }
     }
     // wave-3 (idea 5): disc heatmap painter. Dots are tracked in fHeatDots
@@ -2438,6 +2520,12 @@ private:
         lv_obj_add_event_cb(strikeDisc,padPressCb,LV_EVENT_PRESSING,this);
         lv_obj_add_event_cb(strikeDisc,padPressCb,LV_EVENT_RELEASED,this);
         lv_obj_add_event_cb(strikeDisc,padPressCb,LV_EVENT_PRESS_LOST,this);
+        // Live resonant-surface overlay: painted in DRAW_POST_END (after the
+        // disc's own fill/border) so the standing-wave field reads on top of the
+        // well. It only appears while audio is live and animates with the
+        // modes' decay. Runs on the same 30 Hz redraw the per-tick disc border
+        // update already triggers, so it costs no extra timer.
+        lv_obj_add_event_cb(strikeDisc,resonanceDrawCb,LV_EVENT_DRAW_POST_END,this);
         // inner well: a smaller circle (80% of disc) with reversed gradient -
         // cheap radial depth (machined dish) without LVGL complex gradients
         lv_coord_t wd=(lv_coord_t)(D*0.80f);
@@ -3124,6 +3212,17 @@ private:
             lv_obj_set_style_shadow_color(discEnergyRing,COL_HIGHLIGHT,0);
             lv_obj_set_style_shadow_opa(discEnergyRing,(lv_opa_t)(fDiscEnergy*70.f),0);
         }
+        // While the resonant-surface field is LIVE, fade out the static
+        // hit-aim dots so the disc reads as ONE surface that is ringing,
+        // rather than two overlapping grids. Idle (aim mode) shows the dots.
+        if(fShowSurface){
+            const bool fieldLive=live && peakOf(fVizBins)>0.02f;
+            for(int i=0;i<fHeatCount;++i){
+                if(!fHeatDots[i]||!lv_obj_is_valid(fHeatDots[i])) continue;
+                if(fieldLive) lv_obj_add_flag(fHeatDots[i],LV_OBJ_FLAG_HIDDEN);
+                else         lv_obj_clear_flag(fHeatDots[i],LV_OBJ_FLAG_HIDDEN);
+            }
+        }
         // ROUND-6: MODE MAP bars (hero column). Per-mode strike gains from the
         // bilinear sound-map (baked ModalData + current preset / strike X/Y /
         // Modes / band trims from paramCache). Recomputed only when one of
@@ -3298,6 +3397,14 @@ private:
     lv_obj_t* strikeDot=nullptr;
     lv_obj_t* discEnergyRing=nullptr;   // level-reactive outer ring (audio driven)
     float fDiscEnergy=0.f;              // smoothed live level driving the ring
+    // Resonant SURFACE overlay: the live standing-wave field drawn on the disc.
+    // fBandAvg[b][gy][gx] = mean mode-shape (surface displacement) of the modes
+    // in band b at each 16x16 surface cell (built from the baked sound map);
+    // multiplied by the live per-band energy it yields the instantaneous
+    // surface motion, so the disc visibly rings and decays with the body.
+    float fBandAvg[16][16][16]={};
+    int fBandAvgPreset=-1;              // preset the cache was built for (-1 = stale)
+    bool fShowSurface=true;             // surface overlay visibility toggle
     lv_obj_t* strikeCoordLabel=nullptr;
     lv_obj_t* presetDropdown=nullptr;
     // piece-6: preset browser prev/next mini arrows flanking the dropdown
