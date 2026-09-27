@@ -477,7 +477,13 @@ void MultiScaleBodyEngine::applyFeltRemap(){
     for(auto& v:voices_) if(v.active) recomputeVoiceCoeffs(v);
 }
 void MultiScaleBodyEngine::setDamper(float v){
-    damperKnob_=std::clamp(v,0.f,1.f);
+    // (R-user) logarithmic-feel damper knob: felt depth = v^2 so the first
+    // ~30% of the knob travel covers the fine low-end damping range (linear
+    // spent 70% of the travel on audible over-damping). Default 0 stays an
+    // exact identity (0^2=0) so the golden/default render is unchanged, and the
+    // curve is a pure remap of the knob, leaving the sustain half-pedal path
+    // (which adds to this depth) intact.
+    damperKnob_=std::pow(std::clamp(v,0.f,1.f),2.f);
     applyFeltRemap();
     irDirty_=true; // the reverb IR mirrors the same damping
 }

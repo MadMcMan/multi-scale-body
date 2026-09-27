@@ -231,6 +231,7 @@ public:
             case P::kParamSupX: return "Sup X";        case P::kParamSupY: return "Sup Y";
             case P::kParamStrikeW: return "Head";      case P::kParamScrape: return "Scrape";
             case P::kParamContactNoise: return "Contact";
+            case P::kParamDetune: return "Imperfection";  case P::kParamGlide: return "Glide";
             case P::kParamResMorph: return "Resolution"; case P::kParamMorphAmt: return "Morph";
             case P::kParamMorphTarget: return "Morph Tgt"; case P::kParamMaterial: return "Material";
             case P::kParamRayleighA: return "Rayl A";   case P::kParamRayleighB: return "Rayl B";
@@ -295,6 +296,15 @@ public:
         }
         if(i==PluginMultiScaleBody::kParamMaterial && fMaterialDd)
             lv_dropdown_set_selected(fMaterialDd,std::clamp((int)std::lround(v*10.f),0,10));
+        // (R-user) changing the physical model (Material override / Elastic
+        // mode) must visibly change the body, not just the dropdown. The
+        // body-info line, preview jewel and damping map are derived from the
+        // preset + material, so refresh them the same way a preset change does.
+        if(i==PluginMultiScaleBody::kParamMaterial || i==PluginMultiScaleBody::kParamModelMode){
+            if(bodySubLabel) updateBodyInfo();
+            updateBodyPreview();
+            updateDampingDisplay();
+        }
         if(i==PluginMultiScaleBody::kParamMorphTarget && fMorphDd)
             lv_dropdown_set_selected(fMorphDd,std::clamp((int)std::lround(v*(float)(modal::kNumPresets-1)),0,modal::kNumPresets-1));
     }
@@ -766,6 +776,44 @@ private:
         f*=std::pow(2.f,(paramCache[P::kParamPitch]-0.5f)*4.f); // Tune knob mirror
         return f/(2.f*3.141593f);
     }
+    // (R-user) Characteristic ring time of the current body, in seconds: the
+    // decay of the LOUDEST (max-gain) mode at the current strike point, using the
+    // same effective-rate mirror the decay scope uses. The strike ripple/mallet
+    // animation fades over this so the visual shockwave rings down in step with
+    // the audible decay (and the scope) instead of a fixed 700 ms. Clamped to a
+    // musical 0.25..3.0 s so it never vanishes or drags.
+    float bodyRingSec() const {
+        using P=PluginMultiScaleBody;
+        using namespace modal;
+        int mx = kNumPresets - 1;
+        int idx = std::clamp((int)std::lround(paramCache[P::kParamPreset]*(float)mx),0,mx);
+        const auto& pr = kPresets[idx];
+        const int n = std::clamp((int)(8+paramCache[P::kParamModeCount]*120.f),8,pr.n);
+        // slowest baked rate -> shaping anchor -> Decay-knob mirror (scope math)
+        float dmn=pr.decay[0];
+        for(int i=1;i<pr.n;++i) if(pr.decay[i]<dmn) dmn=pr.decay[i];
+        const float ref=dmn/6.f;
+        const float dScale=0.1f*std::pow(100.f,1.f-paramCache[P::kParamDecay]);
+        // dominant (max |gain|) mode at the current strike point
+        float sx=paramCache[P::kParamStrikeX], sy=paramCache[P::kParamStrikeY];
+        const float fx=sx*15.f, fy=sy*15.f;
+        int x0=std::clamp((int)fx,0,14), y0=std::clamp((int)fy,0,14);
+        int x1=x0+1, y1=y0+1; float dx=fx-x0, dy=fy-y0;
+        const float w00=(1-dx)*(1-dy), w10=dx*(1-dy), w01=(1-dx)*dy, w11=dx*dy;
+        int best=0; float bg=0.f;
+        for(int m=0;m<n;++m){
+            const float g=std::fabs(pr.gain[m][y0][x0]*w00+pr.gain[m][y0][x1]*w10
+                                   +pr.gain[m][y1][x0]*w01+pr.gain[m][y1][x1]*w11);
+            if(g>bg){ bg=g; best=m; }
+        }
+        float dm=pr.decay[best];
+        const float rm=paramCache[P::kParamResMorph];
+        if(rm>1e-4f) dm=dm+(pr.fineDecay[best]-dm)*rm;
+        float rate=std::pow(std::max(0.2f,dm),0.55f)*std::pow(ref,0.45f)*dScale;
+        if(rate<0.2f) rate=0.2f;
+        // time to ~-30 dB: ln(1000)/rate
+        return std::clamp(6.9078f/rate,0.25f,3.0f);
+    }
     // n=88, bands 8..15) render with 0 fill and "-" label.
     void updateDampingDisplay(){
         if(!fDampBars[0]) return;
@@ -1131,10 +1179,17 @@ private:
             lv_label_set_text(strikeCoordLabel, buf);
         }
     }
-    void spawnRipple(float energy){
+    void spawnRipple(float energy,float ringSec){
         energy=std::clamp(energy,0.f,1.f);
         // stronger hits throw a bigger, brighter, longer ring set: 1..4 rings
         // and the end diameter/opacity scale with the onset energy.
+        // (R-user) ringSec = the body's decay time: the shockwave's OPACITY fade
+        // (and the trailing ring stagger) ride it, so the visual rings down in
+        // step with the decay scope / audible tail instead of a fixed 760 ms.
+        // The size expansion stays snappy (it's the impact), only the fade is
+        // decay-locked.
+        const int fadeMs=std::clamp((int)(ringSec*1000.f),260,3000);
+        const int staggerMs=std::clamp(fadeMs/5,60,240);
         if(!strikeDisc || !strikeDot) return;
         lv_coord_t dw = lv_obj_get_width(strikeDisc);
         lv_coord_t dh = lv_obj_get_height(strikeDisc);
@@ -1169,7 +1224,7 @@ private:
             lv_anim_set_var(&aO,ring);
             lv_anim_set_exec_cb(&aO,(lv_anim_exec_xcb_t)rippleOpaCb);
             lv_anim_set_values(&aO,(lv_opa_t)std::clamp(baseOpa,20,255),LV_OPA_0);
-            lv_anim_set_time(&aO,760+k*120); lv_anim_set_delay(&aO,k*140);
+            lv_anim_set_time(&aO,fadeMs+k*staggerMs); lv_anim_set_delay(&aO,k*staggerMs);
             lv_anim_set_path_cb(&aO,lv_anim_path_linear);
             lv_anim_set_ready_cb(&aO,rippleDelCb);
             lv_anim_start(&aO);
@@ -1941,10 +1996,25 @@ private:
         lv_obj_center(l);
         return b;
     }
-    // piece-6: preset browser prev/next mini arrow. 1.2em amber chevron in a
-    // flat well button. Returns a clickable btn whose user_data carries +1/-1
-    // (consumed by presetArrowCb). The dir arg is also passed back as user_data
-    // for handler dispatch.
+    // piece-6: preset browser prev/next mini arrow. A filled chevron/triangle
+    // DRAWN in DRAW_POST_END instead of a font glyph: the baked Montserrat
+    // subset has no U+2039/U+203A (they rendered as tofu boxes), so we paint
+    // the arrow ourselves and it can never depend on glyph coverage. Returns a
+    // clickable btn whose user_data carries +1/-1 (consumed by presetArrowCb).
+    static void presetArrowDrawCb(lv_event_t* e){
+        auto* b=(lv_obj_t*)lv_event_get_target(e);
+        if(!b) return;
+        const int dir=(int)(intptr_t)lv_obj_get_user_data(b);
+        lv_area_t cc; lv_obj_get_coords(b,&cc);
+        const lv_coord_t w=cc.x2-cc.x1+1, h=cc.y2-cc.y1+1;
+        const lv_coord_t s=std::min(w,h)/3;                 // half-extent
+        const lv_coord_t cx=(lv_coord_t)(cc.x1+w/2), cy=(lv_coord_t)(cc.y1+h/2);
+        lv_draw_triangle_dsc_t d; lv_draw_triangle_dsc_init(&d);
+        d.color=PLATE_AMBER_DIM; d.opa=LV_OPA_COVER;
+        if(dir<0){ d.p[0].x=cx-s; d.p[0].y=cy-s; d.p[1].x=cx+s; d.p[1].y=cy; d.p[2].x=cx-s; d.p[2].y=cy+s; }
+        else     { d.p[0].x=cx+s; d.p[0].y=cy-s; d.p[1].x=cx-s; d.p[1].y=cy; d.p[2].x=cx+s; d.p[2].y=cy+s; }
+        lv_draw_triangle(lv_event_get_layer(e),&d);
+    }
     lv_obj_t* addPresetArrowBtn(lv_obj_t* parent,int dir){
         lv_obj_t* b=lv_btn_create(parent);
         // 24x24 mini button, same height as the dropdown's 22px well
@@ -1961,14 +2031,10 @@ private:
         lv_obj_set_style_bg_color(b,PLATE_BTN_PRESS,LV_STATE_PRESSED);
         lv_obj_set_style_translate_y(b,1,LV_STATE_PRESSED);
         lv_obj_set_style_pad_all(b,0,0);
-        // 1.2em amber chevron - U+2039 / U+203A SINGLE LEFT/RIGHT-POINTING
-        // ANGLE QUOTATION MARK. Dim-amber to keep the one-accent discipline
-        // (only the indicator arc + mallet use full amber).
-        const char* sym=(dir<0)?"\u2039":"\u203A";
-        lv_obj_t* l=addLabel(b,sym,getScaledSmallFont(),PLATE_AMBER_DIM,0);
-        lv_obj_set_style_text_letter_space(l,0,0);
-        lv_obj_center(l);
+        // the arrow itself is a drawn triangle (see presetArrowDrawCb) so it
+        // never depends on the font containing the chevron glyph.
         lv_obj_set_user_data(b,(void*)(intptr_t)dir);
+        lv_obj_add_event_cb(b,presetArrowDrawCb,LV_EVENT_DRAW_POST_END,nullptr);
         return b;
     }
 
@@ -2689,10 +2755,11 @@ private:
         // below - this is the r1->r2 anchor shift that puts the disc in
         // dialog with the body it represents, not stacked over a cramped 3-label
         // caption row. Also hosts the coord readout.
-        // section header
-        lv_obj_t* infoHead=makeRow(infoCol,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_START);
-        addLabel(infoHead,"BODY",getScaledSmallFont(),PLATE_LABEL_ACCENT,2);
-        addLabel(infoHead,"PRESET / MATERIAL / MODES",getScaledMicroFont(),PLATE_TEXT_DIM,2);
+        // (R-user) the "BODY / PRESET / MATERIAL / MODES" section caption
+        // above this column was redundant with the spec strip below and the
+        // preset browser in the top bar, and read as label soup. Removed; the
+        // column now opens on the live coordinate readout, and the flex spacer
+        // below absorbs the freed 22px so the damping card stays pinned.
         // coordinate readout (the live "X 0.50  Y 0.50" line - now prominent)
         lv_obj_t* coordWrap=makeRow(infoCol,lv_pct(100),scaled(lay::COORD_H),0);
         strikeCoordLabel=addLabel(coordWrap,"X 0.50  -  Y 0.50",getScaledSmallFont(),PLATE_AMBER,1);
@@ -3310,7 +3377,7 @@ private:
         if(fRippleCooldown>0) --fRippleCooldown;
         bool onset=(totalE>fPrevEnergy+std::max(0.02f,fPrevEnergy*1.1f)) && totalE>0.04f;
         fPrevEnergy=std::max(totalE,fPrevEnergy*0.90f);
-        if(onset && fRippleCooldown==0 && live){ spawnRipple(std::clamp(totalE*1.5f,0.f,1.f)); fRippleCooldown=9; }
+        if(onset && fRippleCooldown==0 && live){ spawnRipple(std::clamp(totalE*1.5f,0.f,1.f), bodyRingSec()); fRippleCooldown=9; }
         // round-2: fade out the persistent last-strike marker after ~0.5s.
         // The timer fires every 33ms; 15 ticks ~= 500ms.
         if(strikeLastMark && fLastStrikeAgeMs>=0){
@@ -3328,13 +3395,13 @@ private:
         // + exponential tail computed from ModalData). This is the "scope
         // does something" fix: the right column stops reading as dead.
         if(fScopeChart && fScopeSeries && !live){
+            // (R-user) the idle preview used to re-append the baked envelope
+            // every tick, so with no keys pressed the scope showed the default
+            // decay looping forever - reading as a stuck/fake meter. buildScopePreview
+            // already seeds the full curve once; do NOT scroll it. When idle the
+            // scope simply holds the last real decay (or the seeded preview
+            // before any note) instead of cycling.
             if(!fScopePreviewReady) buildScopePreview();
-            if(fScopePreviewReady){
-                int idx=fScopePreviewIdx;
-                int32_t v=(int32_t)(fScopePreview[idx]*980.f);
-                lv_chart_set_next_value(fScopeChart,(lv_chart_series_t*)fScopeSeries,v);
-                fScopePreviewIdx=(fScopePreviewIdx+1)&127;
-            }
         }
         gScopeMax=std::max(std::max(totalE,gScopeMax*0.995f),0.03f);
         fLevelEnv+=(totalE-fLevelEnv)*(totalE>fLevelEnv?0.55f:0.12f);
