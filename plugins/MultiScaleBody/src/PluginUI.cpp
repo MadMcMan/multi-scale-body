@@ -176,6 +176,8 @@ public:
         // wave-5 defaults: clamp centre, nominal head (SupX/SupY/StrikeW ride
         // the blanket 0.5 wipe; Scrape needs an explicit zero)
         paramCache[PluginMultiScaleBody::kParamScrape]=0.f;
+        // baseline for knob double-click reset (before any widget exists)
+        capturePresetDefaults();
         setSize(DISTRHO_UI_DEFAULT_WIDTH, DISTRHO_UI_DEFAULT_HEIGHT);
         fLVGL = new MultiScaleBodyLVGLWidget(getWindow());
         // Right-click routing (DPF's LVGL indev only feeds the left button):
@@ -384,7 +386,7 @@ public:
         }
         if(i<PluginMultiScaleBody::kParameterCount){ paramCache[i]=v; syncParamWidget(i,v);
             if(i==PluginMultiScaleBody::kParamStrikeX || i==PluginMultiScaleBody::kParamStrikeY) updateStrikeMarker();
-            if(i==PluginMultiScaleBody::kParamPreset){ syncPresetDropdown(v); if(bodySubLabel) updateBodyInfo(); updateBodyPreview(); }
+            if(i==PluginMultiScaleBody::kParamPreset){ syncPresetDropdown(v); if(bodySubLabel) updateBodyInfo(); updateBodyPreview(); capturePresetDefaults(); }
             // R5: Decay knob drives the DAMPING panel's live rescale (and
             // preset changes always re-bake it). Gate by fDampPresetCache/
             // fDampDecayCache inside updateDampingDisplay so other params
@@ -486,8 +488,12 @@ public:
     bool onScroll(const Widget::ScrollEvent& e) override {
         // (R-user) route the wheel to whichever list is OPEN, clamped to its
         // first/last row, and never touch a closed dropdown.
+        // DGL's ScrollEvent.delta is the raw Windows wheel: wheel-DOWN is a
+        // NEGATIVE y. LVGL's relative scroll (lv_obj_scroll_by_bounded) uses a
+        // negative-down convention, so wheel-down must pass a NEGATIVE step to
+        // increase scroll_y and reveal later rows.
         const float dy=e.delta.getY();
-        if(dy>0.f||dy<0.f) return scrollOpenList(dy>0.f?1:-1);
+        if(dy>0.f||dy<0.f) return scrollOpenList(dy<0.f?-1:1);
         return false;
     }
     // ---- dropdown mutual exclusion + clamped scrolling --------------------
@@ -501,8 +507,11 @@ public:
             if(d && d!=keep && lv_dropdown_is_open(d)) lv_dropdown_close(d);
         }
     }
-    // clamp a list's scroll to its content and consume the wheel, but only for
-    // the dropdown that is actually open (never touch a closed one).
+    // Scroll the OPEN list by one row, clamped to its natural scroll range
+    // (never past the first/last element), and consume the wheel. Only the
+    // dropdown that is actually open is touched - never a closed one.
+    // lv_obj_scroll_by_bounded() runs lv_obj_update_layout() itself and clamps
+    // via lv_obj_get_scroll_top/bottom, so it is correct before the first scroll.
     bool scrollOpenList(int dir){
         lv_obj_t* all[4]={presetDropdown, fMaterialDd, fMorphDd, fEdoDropdown};
         for(int i=0;i<4;++i){
@@ -510,11 +519,7 @@ public:
             if(!d||!lv_dropdown_is_open(d)) continue;
             lv_obj_t* list=lv_dropdown_get_list(d);
             if(!list) return false;
-            const lv_coord_t step=scaled(lay::DROPDOWN_ROW_H);
-            const lv_coord_t maxY=std::max((lv_coord_t)0, lv_obj_get_content_height(list)-lv_obj_get_height(list));
-            lv_coord_t y=lv_obj_get_scroll_y(list);
-            const lv_coord_t ny=std::clamp(y+(lv_coord_t)dir*step,(lv_coord_t)0,maxY);
-            if(ny!=y) lv_obj_scroll_to_y(list,ny,LV_ANIM_OFF);
+            lv_obj_scroll_by_bounded(list,0,(lv_coord_t)(dir*scaled(lay::DROPDOWN_ROW_H)),LV_ANIM_OFF);
             return true;   // consume so nothing else scrolls
         }
         return false;
@@ -1499,6 +1504,24 @@ private:
             {P::kParamEcoMode,0.f},{P::kParamEcoBudget,0.5f},
         };
         for(const auto& d : def) setParamValue((uint32_t)d.p, d.v);
+        // a user preset change just landed: this IS the new double-click baseline
+        capturePresetDefaults();
+    }
+    // Snapshot the current paramCache as "the values this preset loaded with",
+    // so a knob double-click can restore them. Called after the factory-default
+    // block in the constructor and at the end of every user preset change.
+    void capturePresetDefaults(){
+        for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount;++i) presetDefaultCache[i]=paramCache[i];
+    }
+    // Double-click a knob -> restore the value the current preset loaded it
+    // with (bracket the write so hosts capture it as a gesture).
+    void onKnobDoubleClick(uint32_t index) override {
+        if(index>=PluginMultiScaleBody::kParameterCount) return;
+        const float target=presetDefaultCache[index];
+        if(target==paramCache[index]) return;               // already at baseline
+        editParameter(index,true);
+        setParamValue(index,target);
+        editParameter(index,false);
     }
     static void dropdownCb(lv_event_t* e){
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
@@ -3571,6 +3594,10 @@ private:
     uint64_t fOpenEditMask=0;   // bit per param with an open host edit bracket (kParameterCount < 64)
     lv_obj_t* widgets[PluginMultiScaleBody::kParameterCount]={};
     float paramCache[PluginMultiScaleBody::kParameterCount]={};
+    // Values the currently-loaded preset established; a knob double-click
+    // restores its param from here. (physical-model params are hardcoded-reset
+    // on preset change and re-captured in resetPhysicalModel)
+    float presetDefaultCache[PluginMultiScaleBody::kParameterCount]={};
 
     // master knob value label (re-uses the widget's own label, but the chip in
     // the dial bank's Wet knob is the canonical one - master just inherits it)

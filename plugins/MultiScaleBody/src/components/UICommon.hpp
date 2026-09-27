@@ -24,6 +24,10 @@ public:
     virtual void editParameter(uint32_t index, bool start) = 0;
     virtual void syncParamWidget(uint32_t index, float value) = 0;
     virtual std::string parameterName(uint32_t index) const = 0;
+    // Double-click a knob to restore the value the current preset loaded it
+    // with. The component layer detects the gesture and calls this; the
+    // plugin UI owns the per-preset defaults and performs the reset.
+    virtual void onKnobDoubleClick(uint32_t index) = 0;
 };
 END_NAMESPACE_DISTRHO
 #endif

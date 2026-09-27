@@ -36,7 +36,8 @@ inline ArcVisualSpec normalArcSpec() noexcept {
 }
 
 namespace {
-struct ArcDragState{ lv_point_t startPoint{0,0}; int startValue=0; bool active=false; };
+struct ArcDragState{ lv_point_t startPoint{0,0}; int startValue=0; bool active=false;
+                     uint32_t lastPressMs=0; bool movedSincePress=false; bool isDoubleClick=false; };
 struct ArcVisualBinding{ lv_obj_t* face=nullptr; lv_obj_t* valueLabel=nullptr; };
 static std::unordered_map<lv_obj_t*, ArcDragState> gArcDragStates;
 static std::unordered_map<lv_obj_t*, ArcVisualBinding> gArcVisualBindings;
@@ -86,6 +87,11 @@ static void arcDragCb(lv_event_t* e){
     if(code==LV_EVENT_PRESSED){
         lv_point_t p; lv_indev_get_point(indev,&p);
         ArcDragState& st=gArcDragStates[arc]; st.startPoint=p; st.startValue=lv_arc_get_value(arc);
+        const uint32_t now=lv_tick_get();
+        // double-click = a second press within 400ms of the previous one and
+        // no drag since. Recorded here; acted on in RELEASED.
+        st.isDoubleClick=(st.active==false && st.lastPressMs!=0 && (now-st.lastPressMs)<=400 && !st.movedSincePress);
+        st.lastPressMs=now; st.movedSincePress=false;
         AbstractMultiScaleBodyUI* ui=(AbstractMultiScaleBodyUI*)lv_event_get_user_data(e);
         if(ui && !st.active){
             int paramIndex=(int)(intptr_t)lv_obj_get_user_data(arc);
@@ -97,6 +103,7 @@ static void arcDragCb(lv_event_t* e){
         auto it=gArcDragStates.find(arc); if(it==gArcDragStates.end()||!it->second.active) return;
         lv_point_t p; lv_indev_get_point(indev,&p);
         float travel=(float)(p.x - it->second.startPoint.x) - (float)(p.y - it->second.startPoint.y);
+        if(travel*travel>1.f) it->second.movedSincePress=true;
         int next=std::clamp((int)std::lround((float)it->second.startValue + travel*3.5f),0,1000);
         if(next!=lv_arc_get_value(arc)){
             lv_arc_set_value(arc,next);
@@ -113,11 +120,16 @@ static void arcDragCb(lv_event_t* e){
         lv_event_stop_bubbling(e); return;
     }
     if(code==LV_EVENT_RELEASED){
-        auto it=gArcDragStates.find(arc); if(it!=gArcDragStates.end()) it->second.active=false;
+        auto it=gArcDragStates.find(arc);
+        bool wasDouble = (it!=gArcDragStates.end()) && it->second.isDoubleClick;
+        if(it!=gArcDragStates.end()){ it->second.active=false; it->second.isDoubleClick=false; }
         AbstractMultiScaleBodyUI* ui=(AbstractMultiScaleBodyUI*)lv_event_get_user_data(e);
         if(ui){
             int paramIndex=(int)(intptr_t)lv_obj_get_user_data(arc);
-            ui->editParameter((uint32_t)paramIndex,false);
+            if(wasDouble) ui->onKnobDoubleClick((uint32_t)paramIndex);
+            else ui->editParameter((uint32_t)paramIndex,false);
+            // a double-click consumed the edit bracket opened at PRESSED
+            if(wasDouble) ui->editParameter((uint32_t)paramIndex,false);
         }
     }
 }

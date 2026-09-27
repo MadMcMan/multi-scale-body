@@ -425,6 +425,49 @@ static void contactPointerRead(lv_indev_t*,lv_indev_data_t* data){
     data->point=contactPointer;
     data->state=contactPressed?LV_INDEV_STATE_PRESSED:LV_INDEV_STATE_RELEASED;
 }
+// ---- double-click knob reset self-test -----------------------------------
+// (R-user) Double-clicking a knob must restore the value the current preset
+// loaded it with. Drive it through a synthetic pointer indev: two quick
+// press/release pairs on the arc with no drag, then assert the host-visible
+// param is back at the preset baseline.
+static void doubleClickResetProof(DISTRHO::UIExporter* exp,HWND hwnd){
+    // Pick a knob with a distinct preset default. Volume is unity(1.0) and is
+    // re-captured on every preset change; use Decay (preset default 0.5).
+    const auto pi=PluginMultiScaleBody::kParamDecay;
+    bool first=true;
+    resizeWindow(hwnd,exp,1440,1068,first);
+    lv_obj_update_layout(lv_screen_active());
+    lv_obj_t* arc=findParamArc(lv_screen_active(),pi);
+    EXPECT(arc!=nullptr,"DblClick: Decay arc present");
+    if(!arc) return;
+    // establish the baseline: preset 0 loaded -> capturePresetDefaults() ran.
+    exp->parameterChanged(PluginMultiScaleBody::kParamPreset,0.f);
+    exp->parameterChanged(pi,0.5f);            // the preset default for Decay
+    idleFrames(exp,4);
+    // move the knob AWAY from baseline via the host, then check the arc synced
+    exp->parameterChanged(pi,0.9f);
+    idleFrames(exp,4);
+    EXPECT(lv_arc_get_value(arc)==900,"DblClick: knob moved off baseline");
+    // two quick clicks, no drag, well within the 400ms double-click window
+    lv_area_t a; lv_obj_get_coords(arc,&a);
+    contactPointer={(lv_coord_t)((a.x1+a.x2)/2),(lv_coord_t)((a.y1+a.y2)/2)};
+    lv_indev_t* pointer=lv_indev_create();
+    lv_indev_set_type(pointer,LV_INDEV_TYPE_POINTER);
+    lv_indev_set_display(pointer,lv_display_get_default());
+    lv_indev_set_read_cb(pointer,contactPointerRead);
+    for(int click=0;click<2;++click){
+        contactPressed=true;  lv_indev_read(pointer); idleFrames(exp,2);
+        contactPressed=false; lv_indev_read(pointer); idleFrames(exp,2);
+    }
+    contactPressed=false; lv_indev_delete(pointer);
+    idleFrames(exp,8);
+    // the reset writes through setParamValue -> the plugin's stubSetParam, and
+    // syncs the arc back. Assert the arc landed on the preset baseline (500).
+    LOGF("[dblclick] arc value after 2 clicks = %d (expect 500)\n",lv_arc_get_value(arc));
+    EXPECT(lv_arc_get_value(arc)==500,"DblClick: knob reset to preset default");
+    checkLayout("dblclick");
+    EXPECT(gBoundFails==0 && gOverlapFails==0,"DblClick layout inside surface");
+}
 static void contactProof(DISTRHO::UIExporter* exp,HWND hwnd){
     const auto pi=PluginMultiScaleBody::kParamContactNoise;
     bool first=true;
@@ -486,7 +529,8 @@ int main(int argc,char** argv)
      presentKick(hwnd,exp);
     if(argc>1 && std::strcmp(argv[1],"--selftest")==0){
         contactProof(exp,hwnd);
-        LOGF("CONTACT RESULT failures=%d\n",gTestFails);
+        doubleClickResetProof(exp,hwnd);
+        LOGF("SELFTEST RESULT failures=%d\n",gTestFails);
         exp->quit(); delete exp;
         if(gLog) fclose(gLog);
         return gTestFails?1:0;
@@ -654,6 +698,14 @@ int main(int argc,char** argv)
             const long s3=lv_obj_get_scroll_y(list);
             LOGF("[more-down] %ld ; [wheel-up] %ld -> %ld\n",s2,s2,s3);
             EXPECT(s3<s2,"wheel-up-scrolls-back");
+            // (R-user) "no scroll past the first/last element": keep wheeling
+            // DOWN far past the end - scroll_y must stop exactly at the list's
+            // natural bottom (scroll_top+scroll_bottom), never overscroll.
+            for(int i=0;i<40;++i){ wheelAt(hwnd,cx,cy,-1.0); pumpMsgs(); idleFrames(exp,6); pumpMsgs(); }
+            const long sEnd=lv_obj_get_scroll_y(list);
+            const long maxY=lv_obj_get_scroll_top(list)+lv_obj_get_scroll_bottom(list);
+            LOGF("[wheel-clamp] after 40 more notches scrollY=%ld naturalMax=%ld\n",sEnd,maxY);
+            EXPECT(sEnd<=maxY+1,"wheel-clamped-at-last-element");
             lv_dropdown_close(dd);
             idleFrames(exp,20);
         }
