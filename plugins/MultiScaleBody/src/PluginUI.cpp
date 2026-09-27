@@ -595,6 +595,7 @@ private:
         paramCache[PluginMultiScaleBody::kParamVolume]=1.f;
         extraWidgetCount=0; for(uint32_t i=0;i<kMaxExtraWidgets;++i) extraWidgets[i]={0,nullptr};
         strikeDisc=strikeDot=strikeCoordLabel=presetDropdown=bodySubLabel=nullptr;
+        discEnergyRing=nullptr; fDiscEnergy=0.f;
         // piece-6: preset browser prev/next arrows
         presetPrevBtn=presetNextBtn=nullptr;
         bodyPreview=lfoDot=strikeLastMark=nullptr;
@@ -1048,14 +1049,19 @@ private:
             lv_label_set_text(strikeCoordLabel, buf);
         }
     }
-    void spawnRipple(){
+    void spawnRipple(float energy){
+        energy=std::clamp(energy,0.f,1.f);
+        // stronger hits throw a bigger, brighter, longer ring set: 1..4 rings
+        // and the end diameter/opacity scale with the onset energy.
         if(!strikeDisc || !strikeDot) return;
         lv_coord_t dw = lv_obj_get_width(strikeDisc);
         lv_coord_t dh = lv_obj_get_height(strikeDisc);
         if(dw<=0||dh<=0) return;
         int cx = lv_obj_get_x(strikeDot) + lv_obj_get_width(strikeDot)/2;
         int cy = lv_obj_get_y(strikeDot) + lv_obj_get_height(strikeDot)/2;
-        for(int k=0;k<3;++k){
+        const int nRings=1+(int)std::lround(energy*3.f);   // 1..4 rings by hit strength
+        const float endScale=0.72f+0.28f*energy;            // bigger end radius when harder
+        for(int k=0;k<nRings;++k){
             lv_obj_t* ring=lv_obj_create(strikeDisc);
             lv_obj_remove_style_all(ring);
             int d0=scaled(lay::DOT+6);
@@ -1064,11 +1070,12 @@ private:
             lv_obj_set_style_radius(ring,LV_RADIUS_CIRCLE,0);
             lv_obj_set_style_bg_opa(ring,LV_OPA_TRANSP,0);
             lv_obj_set_style_border_color(ring,COL_HIGHLIGHT,0);
-            lv_obj_set_style_border_width(ring,k==0?2:1,0);
-            lv_obj_set_style_border_opa(ring,(lv_opa_t)(220-k*60),0);
+            lv_obj_set_style_border_width(ring,(k==0&&energy>0.5f)?3:1,0);
+            const int baseOpa=(int)((120.f+140.f*energy)-k*40);  // harder hit = brighter
+            lv_obj_set_style_border_opa(ring,(lv_opa_t)std::clamp(baseOpa,20,255),0);
             lv_obj_clear_flag(ring,LV_OBJ_FLAG_CLICKABLE);
             lv_obj_clear_flag(ring,LV_OBJ_FLAG_SCROLLABLE);
-            int endD=(int)((float)(dw>dh?dw:dh)*0.92f);
+            int endD=(int)((float)(dw>dh?dw:dh)*endScale);
             lv_anim_t aS; lv_anim_init(&aS);
             lv_anim_set_var(&aS,ring);
             lv_anim_set_exec_cb(&aS,(lv_anim_exec_xcb_t)rippleSizeCb);
@@ -1079,26 +1086,30 @@ private:
             lv_anim_t aO; lv_anim_init(&aO);
             lv_anim_set_var(&aO,ring);
             lv_anim_set_exec_cb(&aO,(lv_anim_exec_xcb_t)rippleOpaCb);
-            lv_anim_set_values(&aO,(lv_opa_t)(220-k*60),LV_OPA_0);
+            lv_anim_set_values(&aO,(lv_opa_t)std::clamp(baseOpa,20,255),LV_OPA_0);
             lv_anim_set_time(&aO,760+k*120); lv_anim_set_delay(&aO,k*140);
             lv_anim_set_path_cb(&aO,lv_anim_path_linear);
             lv_anim_set_ready_cb(&aO,rippleDelCb);
             lv_anim_start(&aO);
         }
     }
-    // mallet marker pop on hit: zoom 256(=1.0) -> ~1.4x -> rest, shadow blooms
-    void spawnMalletPulse(){
+    // mallet marker pop on hit: zoom 256(=1.0) -> pop -> rest, shadow blooms.
+    // `intensity` (0.15..1) scales the pop so a rim strike (harder) pops more
+    // than a centre strike, matching the audio's edge=brighter law.
+    void spawnMalletPulse(float intensity=1.f){
         if(!strikeDot) return;
+        intensity=std::clamp(intensity,0.15f,1.f);
+        const int zPeak=(int)(256+102.f*intensity);
         lv_anim_t aZ; lv_anim_init(&aZ);
         lv_anim_set_var(&aZ,strikeDot);
         lv_anim_set_exec_cb(&aZ,(lv_anim_exec_xcb_t)pulseZoomCb);
-        lv_anim_set_values(&aZ,256,358);
+        lv_anim_set_values(&aZ,256,zPeak);
         lv_anim_set_time(&aZ,90); lv_anim_set_path_cb(&aZ,lv_anim_path_ease_out);
         lv_anim_start(&aZ);
         lv_anim_t aZ2; lv_anim_init(&aZ2);
         lv_anim_set_var(&aZ2,strikeDot);
         lv_anim_set_exec_cb(&aZ2,(lv_anim_exec_xcb_t)pulseZoomCb);
-        lv_anim_set_values(&aZ2,358,256);
+        lv_anim_set_values(&aZ2,zPeak,256);
         lv_anim_set_time(&aZ2,220); lv_anim_set_delay(&aZ2,95); lv_anim_set_path_cb(&aZ2,lv_anim_path_ease_in_out);
         lv_anim_start(&aZ2);
         lv_anim_t aG; lv_anim_init(&aG);
@@ -1342,7 +1353,11 @@ private:
             if(code==LV_EVENT_PRESSED){
                 ui->editParameter(PluginMultiScaleBody::kParamStrikeX,true);
                 ui->editParameter(PluginMultiScaleBody::kParamStrikeY,true);
-                ui->spawnMalletPulse();   // visual hit confirmation
+                // rim-ness (radial distance from disc centre) drives the pop
+                // strength so a harder edge strike reads as a bigger hit,
+                // matching the engine's edge=brighter strike law.
+                const float rimness=std::min(1.f,2.f*std::sqrt((fx-0.5f)*(fx-0.5f)+(fy-0.5f)*(fy-0.5f)));
+                ui->spawnMalletPulse(0.35f+0.65f*rimness);   // visual hit confirmation
                 // round-2 audit trail: a small amber dot persists at the
                 // strike point for ~0.5s, fading out via the spectrum timer
                 ui->placeLastStrike(p.x - coords.x1, p.y - coords.y1);
@@ -2472,6 +2487,23 @@ private:
                 lv_obj_clear_flag(ring,LV_OBJ_FLAG_CLICKABLE); lv_obj_clear_flag(ring,LV_OBJ_FLAG_SCROLLABLE);
             }
         }
+        // Audio-reactive ENERGY RING: the disc's outer edge brightens and
+        // thickens with the live output level (fVizLevel) and decays back, so
+        // the hero plate visibly breathes with the instrument instead of
+        // sitting inert. Updated in updateSpectrumDisplay() (the 30 Hz tick).
+        // Sized just inside the outer witness ring; non-clickable.
+        {
+            lv_obj_t* er=makeBox(strikeDisc,(lv_coord_t)(D*0.86f),(lv_coord_t)(D*0.86f));
+            lv_obj_align(er,LV_ALIGN_CENTER,0,0);
+            lv_obj_set_style_radius(er,LV_RADIUS_CIRCLE,0);
+            lv_obj_set_style_bg_opa(er,LV_OPA_TRANSP,0);
+            lv_obj_set_style_border_color(er,COL_HIGHLIGHT,0);
+            lv_obj_set_style_border_width(er,1,0);
+            lv_obj_set_style_border_opa(er,LV_OPA_0,0);
+            lv_obj_set_style_pad_all(er,0,0);
+            lv_obj_clear_flag(er,LV_OBJ_FLAG_CLICKABLE); lv_obj_clear_flag(er,LV_OBJ_FLAG_SCROLLABLE);
+            discEnergyRing=er;
+        }
         // crosshair (kept - it was already there and is a real "playable
         // surface" affordance)
         lv_obj_t* chH=makeBox(strikeDisc,D,1); lv_obj_set_pos(chH,0,D/2);
@@ -3077,6 +3109,21 @@ private:
             if(env[b]>fSpecPeaks[b]){ fSpecPeaks[b]=env[b]; fSpecHoldAge[b]=0; }
             else if(++fSpecHoldAge[b]>21) fSpecPeaks[b]=std::max(0.f,std::max(env[b],fSpecPeaks[b]-0.006f));
         }
+        // === audio-reactive polish ========================================
+        // Disc ENERGY RING: smooth the live level (fast attack, slow release)
+        // and drive ring opacity + width so the hero disc breathes with the
+        // instrument. Idle (no live meter) settles back to invisible.
+        if(discEnergyRing){
+            const float tgt=live?std::clamp(totalE*1.6f,0.f,1.f):0.f;
+            fDiscEnergy += (tgt-fDiscEnergy)*(tgt>fDiscEnergy?0.45f:0.10f);
+            const int eo=(int)(fDiscEnergy*150.f);
+            const int ew=1+(fDiscEnergy>0.5f?1:0);
+            lv_obj_set_style_border_opa(discEnergyRing,(lv_opa_t)eo,0);
+            lv_obj_set_style_border_width(discEnergyRing,ew,0);
+            lv_obj_set_style_shadow_width(discEnergyRing,(lv_coord_t)(scaled(4.0f+10.0f*fDiscEnergy)),0);
+            lv_obj_set_style_shadow_color(discEnergyRing,COL_HIGHLIGHT,0);
+            lv_obj_set_style_shadow_opa(discEnergyRing,(lv_opa_t)(fDiscEnergy*70.f),0);
+        }
         // ROUND-6: MODE MAP bars (hero column). Per-mode strike gains from the
         // bilinear sound-map (baked ModalData + current preset / strike X/Y /
         // Modes / band trims from paramCache). Recomputed only when one of
@@ -3164,7 +3211,7 @@ private:
         if(fRippleCooldown>0) --fRippleCooldown;
         bool onset=(totalE>fPrevEnergy+std::max(0.02f,fPrevEnergy*1.1f)) && totalE>0.04f;
         fPrevEnergy=std::max(totalE,fPrevEnergy*0.90f);
-        if(onset && fRippleCooldown==0 && live){ spawnRipple(); fRippleCooldown=9; }
+        if(onset && fRippleCooldown==0 && live){ spawnRipple(std::clamp(totalE*1.5f,0.f,1.f)); fRippleCooldown=9; }
         // round-2: fade out the persistent last-strike marker after ~0.5s.
         // The timer fires every 33ms; 15 ticks ~= 500ms.
         if(strikeLastMark && fLastStrikeAgeMs>=0){
@@ -3208,6 +3255,11 @@ private:
             lv_bar_set_value(fLevelBar,(int)(fMeterEnv*1000.f),LV_ANIM_OFF);
             lv_color_t zone=fMeterEnv>=0.85f?COL_METER_HOT:(fMeterEnv>=0.60f?COL_HIGHLIGHT:COL_METER_SAFE);
             lv_obj_set_style_bg_color(fLevelBar,zone,LV_PART_INDICATOR);
+            // level-reactive bloom: the meter track glows with signal so the
+            // output reads as "hot" at a glance without reading numbers.
+            lv_obj_set_style_shadow_width(fLevelBar,(lv_coord_t)(2.f+9.f*fMeterEnv),0);
+            lv_obj_set_style_shadow_color(fLevelBar,zone,0);
+            lv_obj_set_style_shadow_opa(fLevelBar,(lv_opa_t)(20+70.f*fMeterEnv),0);
             if(fLevelPeak){
                 lv_coord_t bw=lv_obj_get_width(fLevelBar);
                 if(bw>4){
@@ -3244,6 +3296,8 @@ private:
     lv_obj_t* fSpectrumChart=nullptr;
     lv_obj_t* strikeDisc=nullptr;
     lv_obj_t* strikeDot=nullptr;
+    lv_obj_t* discEnergyRing=nullptr;   // level-reactive outer ring (audio driven)
+    float fDiscEnergy=0.f;              // smoothed live level driving the ring
     lv_obj_t* strikeCoordLabel=nullptr;
     lv_obj_t* presetDropdown=nullptr;
     // piece-6: preset browser prev/next mini arrows flanking the dropdown
