@@ -209,6 +209,41 @@ def build_grid(g, preset):
                         occ[x,y,z] = 1.0 if m >= 0.45 else 0.0
                     else:
                         occ[x,y,z] = 0.4
+    elif name=='Cymbal':
+        # suspended cymbal: a wide disc with a raised centre bell
+        occ[:,:,:]=0.0
+        for x in range(g):
+            for y in range(g):
+                dx, dy = x-g/2+0.5, y-g/2+0.5
+                r = np.hypot(dx,dy)
+                if r < 0.22*g: occ[x,y,g-1]=1.0            # centre bell
+                elif r < 0.30*g: occ[x,y,g-1]=0.8
+                elif r < 0.48*g: occ[x,y,g-2]=0.5          # plate
+                elif r < 0.58*g: occ[x,y,g-2]=0.3
+    elif name=='Bottle':
+        # glass bottle: a solid resonant column (tall body) -> high ring
+        occ[:,:,:]=0.0
+        for z in range(g):
+            rad = 0.30*g if z < g-1 else 0.18*g            # body, slight shoulder
+            for x in range(g):
+                for y in range(g):
+                    dx, dy = x-g/2+0.5, y-g/2+0.5
+                    if np.hypot(dx,dy) < rad: occ[x,y,z]=1.0
+    elif name=='Can':
+        # tin can: squat solid cylinder, bright and short
+        occ[:,:,:]=0.0
+        for x in range(g):
+            for y in range(g):
+                dx, dy = x-g/2+0.5, y-g/2+0.5
+                if np.hypot(dx,dy) < 0.34*g:
+                    for z in range(int(0.1*g), g-1): occ[x,y,z]=1.0
+    elif name=='Xylo':
+        # xylophone bar: a tuned wooden bar, 2 cells thick
+        occ[:,:,:]=0.0
+        zc=int(g/2)
+        for x in range(g):
+            for z in (zc-1 if zc>=1 else zc, zc):
+                occ[x, :, z]=1.0
     # Paper section 3.1 path: a preset may carry mesh='sphere'|'torus'|'plate'|
     # 'blades' to source its occupancy from automatic voxelization of a surface
     # mesh instead of a hand-authored grid. Shipped bodies keep their tuned
@@ -315,6 +350,10 @@ PRESETS = [
     {'name':'Cowbell','E':105e9,'nu':0.34,'rho':8700,'alpha1':4.5,'alpha2':5e-7,'L':0.62},
     {'name':'Kalimba','E':200e9,'nu':0.30,'rho':7850,'alpha1':5,'alpha2':3e-6,'L':0.43},
     {'name':'Celesta','E':200e9,'nu':0.30,'rho':7850,'alpha1':1.4,'alpha2':5e-8,'L':0.29},
+    {'name':'Cymbal','E':72e9,'nu':0.34,'rho':8100,'alpha1':2.0,'alpha2':1.2e-7,'L':0.90},
+    {'name':'Bottle','E':73e9,'nu':0.22,'rho':2500,'alpha1':2.4,'alpha2':8e-8,'L':0.55},
+    {'name':'Can','E':190e9,'nu':0.30,'rho':7800,'alpha1':3.5,'alpha2':1.4e-7,'L':0.24},
+    {'name':'Xylo','E':16e9,'nu':0.30,'rho':750,'alpha1':7.0,'alpha2':7e-7,'L':0.40},
 ]
 
 def bake_one(preset, g=4, nmax=128):

@@ -652,6 +652,10 @@ private:
         else if(n=="Bowl" || n=="Blade") mat="Aluminium";
         else if(n=="LogDrum") mat="Mahogany";
         else if(n=="Marimba") mat="Rosewood";
+        else if(n=="Cymbal") mat="Bronze Cymbal";
+        else if(n=="Bottle") mat="Glass Bottle";
+        else if(n=="Can") mat="Steel Can";
+        else if(n=="Xylo") mat="Rosewood Bar";
         snprintf(buf,sizeof(buf),"%s  -  %s  -  %d modes  -  %.0f Hz", pr.name, mat, pr.n, pr.freq[0]/(2*3.14159f));
         lv_label_set_text(bodySubLabel, buf);
         if(hdrBodyVal){ char b[32]; snprintf(b,sizeof(b),"%s",pr.name); lv_label_set_text(hdrBodyVal,b); }
@@ -688,6 +692,11 @@ private:
                     static const float kCowbell[16]={.10f,.20f,.20f,.10f, .90f,.35f,.35f,.90f, .90f,.35f,.35f,.90f, .10f,.20f,.20f,.10f};
                     static const float kKalimba[16]={0.f,.50f,1.f,.50f, 0.f,.55f,1.f,.55f, 0.f,.45f,.85f,.45f, 0.f,.35f,.65f,.35f};
                     static const float kCelesta[16]={0.f,.20f,.20f,0.f, .35f,.75f,1.f,.75f, .35f,.75f,1.f,.75f, 0.f,.20f,.20f,0.f};
+                    // v3 bodies: Cymbal (disc+bell), Bottle (narrow column), Can (squat block), Xylo (bar)
+                    static const float kCymbal[16]={.20f,.20f,.20f,.20f, .55f,.80f,1.f,.80f, .80f,1.f,1.f,1.f, .20f,.20f,.20f,.20f};
+                    static const float kBottle[16]={0.f,0.f,0.f,0.f, .20f,.70f,.70f,.20f, .20f,.70f,.70f,.20f, 0.f,0.f,0.f,0.f};
+                    static const float kCan[16]={0.f,0.f,0.f,0.f, .40f,1.f,1.f,.40f, .40f,1.f,1.f,.40f, 0.f,0.f,0.f,0.f};
+                    static const float kXylo[16]={.20f,1.f,1.f,.20f, 0.f,0.f,0.f,0.f, 0.f,0.f,0.f,0.f, 0.f,0.f,0.f,0.f};
                     const float* t=nullptr;
                     if(name=="Handpan") t=kHandpan;
                     else if(name=="LogDrum") t=kLogDrum;
@@ -695,6 +704,10 @@ private:
                     else if(name=="Cowbell") t=kCowbell;
                     else if(name=="Kalimba") t=kKalimba;
                     else if(name=="Celesta") t=kCelesta;
+                    else if(name=="Cymbal") t=kCymbal;
+                    else if(name=="Bottle") t=kBottle;
+                    else if(name=="Can") t=kCan;
+                    else if(name=="Xylo") t=kXylo;
                     if(t) occ=t[y*4+x];
                 }
                 occ = std::clamp(occ,0.f,1.f);
@@ -726,6 +739,10 @@ private:
                     else if(name=="Cowbell") base = MAT_COWBELL;
                     else if(name=="Kalimba") base = MAT_KALIMBA;
                     else if(name=="Celesta") base = MAT_CELESTA;
+                    else if(name=="Cymbal") base = MAT_STEEL;      // bronze cymbal reads as bright metal
+                    else if(name=="Bottle") base = MAT_GLASS;      // glass bottle
+                    else if(name=="Can") base = MAT_STEEL;         // tin can
+                    else if(name=="Xylo") base = MAT_WOOD;         // rosewood bar
                     lv_obj_set_style_bg_color(cellObj,base,0);
                     lv_obj_set_style_bg_opa(cellObj, (lv_opa_t)(LV_OPA_30 + occ*0.7f*255),0);
                     lv_obj_set_style_shadow_width(cellObj, occ>0.9f?scaled(4):0,0);
@@ -1619,7 +1636,12 @@ private:
         auto code=lv_event_get_code(e);
         bool isBlack=isBlackMidiNote(note);
         if(code==LV_EVENT_PRESSED){
-            ui->sendNote(0,(uint8_t)note,100); ui->kbHeldNote=note;
+            ui->kbHeldNote=note;
+            // (R-user) during playback a keyboard note ADVANCES the recorded
+            // strike (plays the next recorded position at this note's pitch)
+            // instead of sounding a plain note; otherwise normal note.
+            if(ui->fRecPlaying) ui->noteTriggered((uint8_t)note);
+            else ui->sendNote(0,(uint8_t)note,100);
             lv_obj_set_style_bg_color(key,COL_HIGHLIGHT,0); lv_obj_set_style_bg_opa(key,LV_OPA_COVER,0);
             if(!isBlack) lv_obj_set_style_text_color(key,COL_BG,0);
         } else if(code==LV_EVENT_RELEASED || code==LV_EVENT_PRESS_LOST || code==LV_EVENT_LEAVE){
@@ -1884,18 +1906,20 @@ private:
         if(ui->fRecBtn) lv_obj_clear_state(ui->fRecBtn,LV_STATE_CHECKED);
     }
     void stopPlayback(){
-        if(fPlayHeld){ sendNote((uint8_t)fPlayChannel,(uint8_t)fStrikeNote,0); fPlayHeld=false; }
+        if(fPlayHeld){ sendNote((uint8_t)fPlayChannel,fLastPlayNote,0); fPlayHeld=false; }
         fRecPlaying=false;
         editParameter(PluginMultiScaleBody::kParamStrikeX,false);
         editParameter(PluginMultiScaleBody::kParamStrikeY,false);
         if(fPlayBtn) lv_obj_clear_state(fPlayBtn,LV_STATE_CHECKED);
     }
-    // one playback step per 33 ms tick: strike the next recorded point with
-    // velocity from the gesture speed between consecutive points.
-    void playbackTick(){
+    // (R-user) playback is NOTE-TRIGGERED: each played note advances to the
+    // next recorded strike position (velocity from the gesture speed between
+    // consecutive points). The 33 ms timer no longer free-runs the recording;
+    // it only does the end-check / note-release bookkeeping.
+    void noteTriggered(uint8_t note){
         if(!fRecPlaying) return;
         if(fRecCursor>=fRecN){ stopPlayback(); return; }
-        if(fPlayHeld){ sendNote((uint8_t)fPlayChannel,(uint8_t)fStrikeNote,0); fPlayHeld=false; }
+        if(fPlayHeld){ sendNote((uint8_t)fPlayChannel,fLastPlayNote,0); fPlayHeld=false; }
         float px=fRecX[fRecCursor], py=fRecY[fRecCursor];
         float vel=100.f;
         if(fRecCursor>0){
@@ -1907,9 +1931,14 @@ private:
         setParamValue(PluginMultiScaleBody::kParamStrikeY,py);
         fPlayChannel=fNextStrikeChannel;
         fNextStrikeChannel=(fNextStrikeChannel%15)+1;
-        sendNote((uint8_t)fPlayChannel,(uint8_t)fStrikeNote,(uint8_t)vel);
+        sendNote((uint8_t)fPlayChannel,note,(uint8_t)vel);
+        fLastPlayNote=note;
         fPlayHeld=true;
         ++fRecCursor;
+    }
+    void playbackTick(){
+        if(!fRecPlaying) return;
+        if(fRecCursor>=fRecN && !fPlayHeld) stopPlayback();
     }
     // ---- small builder helpers (all sizes flow through scaled()) ----------
     static lv_obj_t* makeBox(lv_obj_t* parent,lv_coord_t w,lv_coord_t h){
@@ -3610,6 +3639,7 @@ private:
     int fRecN=0;
     int fRecCursor=0;
     int fPlayChannel=0;
+    uint8_t fLastPlayNote=60;     // last note sounded by playback (for a matching note-off)
     bool fPlayHeld=false;
     // wave-4: MODEL strip controls (persistent full-width card, no modal)
     lv_obj_t* fModeTypeBtn=nullptr;

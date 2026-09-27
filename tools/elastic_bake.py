@@ -157,7 +157,8 @@ def gains(V,active,g,field):
 # calibrated, 44.1k, 24000 frames), audited under commit 2a3d063. Classic bank
 # untouched (golden md5 unchanged); only elastic gains carry this scale.
 GAIN_CAL = [7.1841,8.5952,4.1660,15.4803,11.2872,3.8970,5.2738,3.7559,
-            5.0155,7.5557,4.9341,3.9318,1.9235,3.6008,4.9460,6.4131,8.7939,7.9340]
+            5.0155,7.5557,4.9341,3.9318,1.9235,3.6008,4.9460,6.4131,8.7939,7.9340,
+            3.9755,11.7578,74.2337,20.3724];  # Cymbal,Bottle,Can,Xylo (measured via build/measure_cal.cpp)
 
 
 def bake(p):
