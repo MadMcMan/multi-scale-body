@@ -483,17 +483,48 @@ public:
     // also queues it as an ENCODER diff (which can only move group focus, never
     // scroll). While the preset list is open we scroll the LIST here and consume
     // the event; otherwise we decline it so nothing is swallowed.
-    bool onScroll(const Widget::ScrollEvent& ev) override {
-        if(presetDropdown && lv_dropdown_is_open(presetDropdown)){
-            lv_obj_t* list=lv_dropdown_get_list(presetDropdown);
-            if(list){
-                const float dy=ev.delta.getY();
-                if(dy>0.f||dy<0.f)
-                    lv_obj_scroll_by(list,0,(lv_coord_t)((dy>0.f?1:-1)*scaled(lay::DROPDOWN_ROW_H)),LV_ANIM_OFF);
-                return true;
-            }
+    bool onScroll(const Widget::ScrollEvent& e) override {
+        // (R-user) route the wheel to whichever list is OPEN, clamped to its
+        // first/last row, and never touch a closed dropdown.
+        const float dy=e.delta.getY();
+        if(dy>0.f||dy<0.f) return scrollOpenList(dy>0.f?1:-1);
+        return false;
+    }
+    // ---- dropdown mutual exclusion + clamped scrolling --------------------
+    // (R-user) Only one dropdown may be open at a time, and a list never
+    // scrolls past its first/last row. closeOtherDropdowns() is invoked by each
+    // dropdown's own open so the previously-open list collapses first.
+    void closeOtherDropdowns(lv_obj_t* keep){
+        lv_obj_t* all[4]={presetDropdown, fMaterialDd, fMorphDd, fEdoDropdown};
+        for(int i=0;i<4;++i){
+            lv_obj_t* d=all[i];
+            if(d && d!=keep && lv_dropdown_is_open(d)) lv_dropdown_close(d);
+        }
+    }
+    // clamp a list's scroll to its content and consume the wheel, but only for
+    // the dropdown that is actually open (never touch a closed one).
+    bool scrollOpenList(int dir){
+        lv_obj_t* all[4]={presetDropdown, fMaterialDd, fMorphDd, fEdoDropdown};
+        for(int i=0;i<4;++i){
+            lv_obj_t* d=all[i];
+            if(!d||!lv_dropdown_is_open(d)) continue;
+            lv_obj_t* list=lv_dropdown_get_list(d);
+            if(!list) return false;
+            const lv_coord_t step=scaled(lay::DROPDOWN_ROW_H);
+            const lv_coord_t maxY=std::max((lv_coord_t)0, lv_obj_get_content_height(list)-lv_obj_get_height(list));
+            lv_coord_t y=lv_obj_get_scroll_y(list);
+            const lv_coord_t ny=std::clamp(y+(lv_coord_t)dir*step,(lv_coord_t)0,maxY);
+            if(ny!=y) lv_obj_scroll_to_y(list,ny,LV_ANIM_OFF);
+            return true;   // consume so nothing else scrolls
         }
         return false;
+    }
+    static void dropdownExclusiveCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* d=(lv_obj_t*)lv_event_get_target(e);
+        if(!ui||!d) return;
+        // fires on release AFTER this list opened -> keep this one, close the rest
+        if(lv_dropdown_is_open(d)) ui->closeOtherDropdowns(d);
     }
     void rebuildForScale(float ns){
         // Early-return only if a built tree exists at this scale. A bare
@@ -607,7 +638,7 @@ private:
         strikeDisc=strikeDot=strikeCoordLabel=presetDropdown=bodySubLabel=nullptr;
         discEnergyRing=nullptr; fDiscEnergy=0.f; fBandAvgPreset=-1;
         // piece-6: preset browser prev/next arrows
-        presetPrevBtn=presetNextBtn=nullptr;
+        presetPrevBtn=presetNextBtn=fDiceBtn=nullptr;
         bodyPreview=lfoDot=strikeLastMark=nullptr;
         hdrBodyVal=hdrMatVal=hdrModeVal=hdrF0Val=nullptr;
         fSpectrumChart=fScopeChart=fLevelBar=fLevelPeak=zoneWarnMark=zoneHotMark=nullptr;
@@ -1455,13 +1486,27 @@ private:
         lv_obj_set_x(zoneWarnMark,(lv_coord_t)(bw*60/100));
         lv_obj_set_x(zoneHotMark,(lv_coord_t)(bw*85/100));
     }
+    // (R-user) Changing preset resets the PHYSICAL MODEL knobs so a new body
+    // doesn't inherit the previous body's material/elastic/morph/damping
+    // settings. Called only from the user-initiated preset paths (dropdown +
+    // arrows), NOT from raw host automation, to avoid feedback loops.
+    void resetPhysicalModel(){
+        using P=PluginMultiScaleBody;
+        const struct { int p; float v; } def[] = {
+            {P::kParamSupport,0.f},{P::kParamHoldDamp,0.f},{P::kParamResMorph,0.f},
+            {P::kParamMorphTarget,0.f},{P::kParamMorphAmt,0.f},{P::kParamMaterial,0.f},
+            {P::kParamRayleighA,0.f},{P::kParamRayleighB,0.f},{P::kParamModelMode,0.f},
+            {P::kParamEcoMode,0.f},{P::kParamEcoBudget,0.5f},
+        };
+        for(const auto& d : def) setParamValue((uint32_t)d.p, d.v);
+    }
     static void dropdownCb(lv_event_t* e){
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
         lv_obj_t* dd=(lv_obj_t*)lv_event_get_target(e);
         int sel=lv_dropdown_get_selected(dd);
         int mx = modal::kNumPresets - 1;
         float v = mx ? (float)sel/(float)mx : 0.f;
-        if(ui){ ui->editParameter(PluginMultiScaleBody::kParamPreset,true); ui->setParamValue(PluginMultiScaleBody::kParamPreset, v); ui->editParameter(PluginMultiScaleBody::kParamPreset,false); }
+        if(ui){ ui->editParameter(PluginMultiScaleBody::kParamPreset,true); ui->setParamValue(PluginMultiScaleBody::kParamPreset, v); ui->editParameter(PluginMultiScaleBody::kParamPreset,false); ui->resetPhysicalModel(); }
     }
     // piece-6: preset browser prev/next arrow click. Cycles the selected
     // preset by +/-1 (with wrap) and writes through setParamValue so the
@@ -1482,6 +1527,7 @@ private:
         ui->editParameter(PluginMultiScaleBody::kParamPreset,true);
         ui->setParamValue(PluginMultiScaleBody::kParamPreset, v);
         ui->editParameter(PluginMultiScaleBody::kParamPreset,false);
+        ui->resetPhysicalModel();
     }
     static void padPressCb(lv_event_t* e){
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
@@ -2040,8 +2086,8 @@ private:
         const lv_coord_t cx=(lv_coord_t)(cc.x1+w/2), cy=(lv_coord_t)(cc.y1+h/2);
         lv_draw_triangle_dsc_t d; lv_draw_triangle_dsc_init(&d);
         d.color=PLATE_AMBER_DIM; d.opa=LV_OPA_COVER;
-        if(dir<0){ d.p[0].x=cx-s; d.p[0].y=cy-s; d.p[1].x=cx+s; d.p[1].y=cy; d.p[2].x=cx-s; d.p[2].y=cy+s; }
-        else     { d.p[0].x=cx+s; d.p[0].y=cy-s; d.p[1].x=cx-s; d.p[1].y=cy; d.p[2].x=cx+s; d.p[2].y=cy+s; }
+        if(dir<0){ d.p[0].x=cx+s; d.p[0].y=cy-s; d.p[1].x=cx-s; d.p[1].y=cy; d.p[2].x=cx+s; d.p[2].y=cy+s; }  // prev: apex LEFT  (<)
+        else     { d.p[0].x=cx-s; d.p[0].y=cy-s; d.p[1].x=cx+s; d.p[1].y=cy; d.p[2].x=cx-s; d.p[2].y=cy+s; }  // next: apex RIGHT (>)
         lv_draw_triangle(lv_event_get_layer(e),&d);
     }
     lv_obj_t* addPresetArrowBtn(lv_obj_t* parent,int dir){
@@ -2064,6 +2110,45 @@ private:
         // never depends on the font containing the chevron glyph.
         lv_obj_set_user_data(b,(void*)(intptr_t)dir);
         lv_obj_add_event_cb(b,presetArrowDrawCb,LV_EVENT_DRAW_POST_END,nullptr);
+        return b;
+    }
+    // dice icon (RANDOMIZE) drawn in DRAW_POST_END: a rounded square with five
+    // pips. Drawn rather than a glyph so it never depends on font coverage.
+    static void diceDrawCb(lv_event_t* e){
+        auto* b=(lv_obj_t*)lv_event_get_target(e);
+        if(!b) return;
+        lv_area_t cc; lv_obj_get_coords(b,&cc);
+        const lv_coord_t w=cc.x2-cc.x1+1, h=cc.y2-cc.y1+1;
+        const lv_coord_t s=std::min(w,h)/3;         // half-extent of the die
+        const lv_coord_t cx=(lv_coord_t)(cc.x1+w/2), cy=(lv_coord_t)(cc.y1+h/2);
+        lv_draw_rect_dsc_t body; lv_draw_rect_dsc_init(&body);
+        body.bg_color=COL_HIGHLIGHT; body.bg_opa=LV_OPA_TRANSP;
+        body.border_color=COL_HIGHLIGHT; body.border_width=1;
+        body.border_opa=LV_OPA_COVER; body.radius=s/2;
+        lv_area_t r={cx-s,cy-s,cx+s,cy+s};
+        lv_draw_rect(lv_event_get_layer(e),&body,&r);
+        const lv_coord_t o=s/2, p=s/6;
+        const lv_coord_t px[5]={cx-o, cx, cx+o, cx-o, cx+o};
+        const lv_coord_t py[5]={cy-o, cy, cy-o, cy+o, cy+o};
+        lv_draw_rect_dsc_t pip; lv_draw_rect_dsc_init(&pip);
+        pip.bg_color=COL_HIGHLIGHT; pip.bg_opa=LV_OPA_COVER; pip.radius=p;
+        for(int i=0;i<5;++i){ lv_area_t a={px[i]-p,py[i]-p,px[i]+p,py[i]+p}; lv_draw_rect(lv_event_get_layer(e),&pip,&a); }
+    }
+    lv_obj_t* addDiceBtn(lv_obj_t* parent){
+        lv_obj_t* b=lv_btn_create(parent);
+        const int w=24,h=24;
+        lv_obj_set_size(b,scaled(w),scaled(h));
+        lv_obj_set_style_bg_color(b,PLATE_WELL,0);
+        lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);
+        lv_obj_set_style_border_color(b,PLATE_EDGE,0);
+        lv_obj_set_style_border_width(b,1,0);
+        lv_obj_set_style_radius(b,scaled(lay::RADIUS_SM),0);
+        lv_obj_set_style_shadow_width(b,0,0);
+        lv_obj_set_style_bg_color(b,PLATE_WELL_HI,LV_STATE_HOVERED);
+        lv_obj_set_style_bg_color(b,PLATE_BTN_PRESS,LV_STATE_PRESSED);
+        lv_obj_set_style_translate_y(b,1,LV_STATE_PRESSED);
+        lv_obj_set_style_pad_all(b,0,0);
+        lv_obj_add_event_cb(b,diceDrawCb,LV_EVENT_DRAW_POST_END,nullptr);
         return b;
     }
 
@@ -2094,6 +2179,7 @@ private:
         // a .scl file, CLEAR restores 12-EDO (same handlers as the old menu)
         lv_obj_t* selCluster=makeRow(kbHead,scaled(lay::KB_SEL_W),scaled(lay::BTN_H),scaled(8),LV_FLEX_ALIGN_CENTER);
         fEdoDropdown=lv_dropdown_create(selCluster);
+        lv_obj_add_event_cb(fEdoDropdown,dropdownExclusiveCb,LV_EVENT_RELEASED,this);
         lv_dropdown_set_options(fEdoDropdown,"5\n7\n10\n12\n15\n17\n19\n22\n24\n31\n41\n53\n72");
         lv_dropdown_set_selected(fEdoDropdown,3); // 12-EDO default
         lv_obj_set_width(fEdoDropdown,scaled(lay::MODEL_EDO_W));
@@ -2252,6 +2338,7 @@ private:
         lv_obj_set_height(fMaterialDd,scaled(25));   // EDO-dropdown height: 15 text + 8 pad_ver + 2 border
         lv_obj_set_style_translate_y(fMaterialDd,scaled(26),0);
         lv_obj_add_event_cb(fMaterialDd,materialDdCb,LV_EVENT_VALUE_CHANGED,this);
+        lv_obj_add_event_cb(fMaterialDd,dropdownExclusiveCb,LV_EVENT_RELEASED,this);
         // Morph-target select cell (adjacent to its Morph knob).
         lv_obj_t* morphCell=makeCol(row,scaled(lay::MODEL_SEL_W),scaled(lay::KNOB_H_N),scaled(2),LV_FLEX_ALIGN_START);
         addLabel(morphCell,"Morph Tgt",getScaledSmallFont(),PLATE_LABEL_ACCENT,0);
@@ -2263,6 +2350,7 @@ private:
         lv_obj_set_height(fMorphDd,scaled(25));     // (LV_SIZE_CONTENT self-size measures 2 lines here; EDO's natural 25 is the convention)
         lv_obj_set_style_translate_y(fMorphDd,scaled(26),0);
         lv_obj_add_event_cb(fMorphDd,morphDdCb,LV_EVENT_VALUE_CHANGED,this);
+        lv_obj_add_event_cb(fMorphDd,dropdownExclusiveCb,LV_EVENT_RELEASED,this);
         // elastic FEM mode switch: 0 = Classic baked bodies (default, bit-identity),
         // 1 = physically-derived Elastic FEM bank. Placed with the other mode
         // switch (ECO) in the head row so body-type selection reads top-down.
@@ -2421,6 +2509,9 @@ private:
         }
         // next arrow
         presetNextBtn=addPresetArrowBtn(ddRow,+1);
+        // (R-user) RANDOMIZE lives here as a dice icon, right of the arrows.
+        fDiceBtn=addDiceBtn(ddRow);
+        lv_obj_add_event_cb(fDiceBtn,rndBtnCb,LV_EVENT_CLICKED,this);
         // piece-6: dropdown group/keyboard handling. Dropdown must NOT be in
         // the group (wheel = encoder; group focus defocuses + closes).
         lv_group_remove_obj(presetDropdown);
@@ -2904,13 +2995,13 @@ private:
         lv_obj_t* spectrumCard=makeCard(right,lv_pct(100),scaled(lay::SPECTRUM_CARD_H),scaled(8));
         lv_obj_t* specHead=makeRow(spectrumCard,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         addLabel(specHead,"MODE SPECTRUM",getScaledSmallFont(),COL_HIGHLIGHT,2);
-        lv_obj_t* specBtns=makeRow(specHead,scaled(2*96+6),scaled(lay::BTN_H),scaled(6));
+        lv_obj_t* specBtns=makeRow(specHead,scaled(lay::RND_W),scaled(lay::BTN_H),scaled(6));
         // idea 2: scrub target toggle — drag writes per-band GAIN (default)
         // or per-band DECAY trim (drag levels the tail time).
         fScrubToggle=addButton(specBtns,lay::RND_W,lay::BTN_H,"GAIN",PLATE_TEXT_MID);
         lv_obj_add_event_cb(fScrubToggle,scrubToggleCb,LV_EVENT_CLICKED,this);
-        lv_obj_t* rndBtn=addButton(specBtns,lay::RND_W,lay::BTN_H,"RANDOMIZE",COL_HIGHLIGHT);
-        lv_obj_add_event_cb(rndBtn,rndBtnCb,LV_EVENT_CLICKED,this);
+        // (R-user) RANDOMIZE moved out of the spectrum head to a dice icon
+        // beside the preset arrows in the top bar.
         lv_obj_t* chart=lv_chart_create(spectrumCard);
         lv_obj_set_size(chart,lv_pct(100),scaled(lay::CHART_H));
         lv_chart_set_type(chart,LV_CHART_TYPE_BAR); lv_chart_set_point_count(chart,16); lv_chart_set_range(chart,LV_CHART_AXIS_PRIMARY_Y,0,1000);
@@ -3506,6 +3597,7 @@ private:
     // piece-6: preset browser prev/next mini arrows flanking the dropdown
     lv_obj_t* presetPrevBtn=nullptr;
     lv_obj_t* presetNextBtn=nullptr;
+    lv_obj_t* fDiceBtn=nullptr;          // RANDOMIZE dice icon (top bar, right of preset arrows)
     lv_obj_t* bodySubLabel=nullptr;
     lv_obj_t* bodyPreview=nullptr;
     lv_obj_t* lfoDot=nullptr;
