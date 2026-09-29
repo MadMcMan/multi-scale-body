@@ -2299,6 +2299,9 @@ private:
         // physical-model strip is its own subsystem -> its own steel-indigo
         // identity on every knob arc, so it reads as one band, not more cyan.
         lv_obj_set_style_arc_color(arc,SEC_MODEL,LV_PART_INDICATOR);
+        // secondary-detail band: dim the arc so the full-width PHYSICAL MODEL
+        // strip reads as detail and the left rack's sound-shaping knobs lead.
+        lv_obj_set_style_arc_opa(arc,LV_OPA_70,LV_PART_INDICATOR);
         lv_obj_add_event_cb(arc,valueFormatCb,LV_EVENT_ALL,this);
         widgets[pi]=arc;
         lv_obj_t* cont=lv_obj_get_parent(arc);
@@ -2314,8 +2317,23 @@ private:
                 char b[24];
                 formatParamValue(pi,paramCache[pi],b,sizeof(b));
                 lv_label_set_text(valueLbl,b);
+                lv_obj_set_style_text_color(valueLbl,SEC_MODEL,0);
             }
         }
+    }
+    // thin vertical separator between PHYSICAL MODEL subgroups (clamp |
+    // contact | damping | rayleigh | eco | selects). Zero height cost - it
+    // lives inside the existing row - and it breaks the "14 same-weight knobs
+    // in one unbroken line" the R3 critic named.
+    void stripDivider(lv_obj_t* row){
+        lv_obj_t* d=makeBox(row,scaled(1),scaled(lay::KNOB_H_N*3/4));
+        lv_obj_set_style_bg_color(d,PLATE_LINE,0);
+        lv_obj_set_style_bg_opa(d,LV_OPA_50,0);
+        lv_obj_set_style_border_width(d,0,0);
+        lv_obj_set_style_radius(d,0,0);
+        lv_obj_set_style_pad_all(d,0,0);
+        lv_obj_align(d,LV_ALIGN_CENTER,0,0);
+        lv_obj_clear_flag(d,LV_OBJ_FLAG_CLICKABLE); lv_obj_clear_flag(d,LV_OBJ_FLAG_SCROLLABLE);
     }
     static void styleModelDropdown(MultiScaleBodyUI* ui,lv_obj_t* dd){
         lv_obj_add_style(dd,&ui->styles.compactSelectMain,0);
@@ -2336,14 +2354,18 @@ private:
         stripKnob(row,P::kParamSupport);
         stripKnob(row,P::kParamSupX);
         stripKnob(row,P::kParamSupY);
+        stripDivider(row);   // clamp | contact
         stripKnob(row,P::kParamStrikeW);
         stripKnob(row,P::kParamContactNoise);
         stripKnob(row,P::kParamScrape);
+        stripDivider(row);   // contact | damping
         stripKnob(row,P::kParamHoldDamp);
         stripKnob(row,P::kParamResMorph);
         stripKnob(row,P::kParamMorphAmt);
+        stripDivider(row);   // damping | rayleigh
         stripKnob(row,P::kParamRayleighA);
         stripKnob(row,P::kParamRayleighB);
+        stripDivider(row);   // rayleigh | eco
         // ECO is a mode switch rather than a continuous physical control.
         lv_obj_t* ecoCell=makeRow(head,scaled(lay::MODEL_ECO_W),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_START);
         fEcoBtn=lv_btn_create(ecoCell);
@@ -2354,6 +2376,7 @@ private:
         lv_obj_t* elbl=lv_label_create(fEcoBtn); lv_label_set_text(elbl,"ECO"); lv_obj_center(elbl);
         // Eco Budget knob pairs with the ECO toggle it feeds.
         stripKnob(row,P::kParamEcoBudget);
+        stripDivider(row);   // eco | selects
         // Material select cell (same grammar as a knob cell: title over control).
         lv_obj_t* matCell=makeCol(row,scaled(lay::MODEL_SEL_W),scaled(lay::KNOB_H_N),scaled(2),LV_FLEX_ALIGN_START);
         addLabel(matCell,"Material",getScaledSmallFont(),PLATE_LABEL_ACCENT,0);
@@ -2690,6 +2713,9 @@ private:
                         char b[24];
                         formatParamValue(groupParams[g][k],paramCache[groupParams[g][k]],b,sizeof(b));
                         lv_label_set_text(lbl,b);
+                        // value readout carries the section hue too, so a knob
+                        // and its number are the same color family.
+                        lv_obj_set_style_text_color(lbl,secColors[g],0);
                     }
                 }
             }
@@ -2721,7 +2747,9 @@ private:
         fPlayBtn=addButton(cHead,40,lay::BTN_H,"PLAY",PLATE_TEXT_MID);
         styles.applyToggleButton(fPlayBtn,false);
         lv_obj_add_event_cb(fPlayBtn,playBtnCb,LV_EVENT_CLICKED,this);
-        lv_obj_t* recClearBtn=addButton(cHead,28,lay::BTN_H,"X",PLATE_TEXT_MID);
+        // (R-user) a bare "X" read as a close/dismiss button and collided with
+        // the "X 0.50" coordinate readout; label it CLR so the action is clear.
+        lv_obj_t* recClearBtn=addButton(cHead,34,lay::BTN_H,"CLR",PLATE_TEXT_MID);
         lv_obj_add_event_cb(recClearBtn,recClearCb,LV_EVENT_CLICKED,this);
         addLabel(cHead,"CLICK",getScaledMicroFont(),PLATE_TEXT_DIM,1);
         // The disc - top view of the resonant body (hero element)
