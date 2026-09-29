@@ -2296,6 +2296,9 @@ private:
         ArcVisualSpec spec=normalArcSpec();
         spec.containerW=scaled(lay::KNOB_W_C);
         lv_obj_t* arc=UIWidgets::createArcKnob(row,pi,this,styles,spec);
+        // physical-model strip is its own subsystem -> its own steel-indigo
+        // identity on every knob arc, so it reads as one band, not more cyan.
+        lv_obj_set_style_arc_color(arc,SEC_MODEL,LV_PART_INDICATOR);
         lv_obj_add_event_cb(arc,valueFormatCb,LV_EVENT_ALL,this);
         widgets[pi]=arc;
         lv_obj_t* cont=lv_obj_get_parent(arc);
@@ -2327,7 +2330,7 @@ private:
         using P=PluginMultiScaleBody;
         lv_obj_t* strip=makeCard(root,lv_pct(100),scaled(lay::MODEL_STRIP_H),scaled(6),LV_FLEX_ALIGN_START);
         lv_obj_t* head=makeRow(strip,lv_pct(100),scaled(lay::HEAD_H),scaled(12),LV_FLEX_ALIGN_START);
-        addLabel(head,"PHYSICAL MODEL",getScaledSmallFont(),COL_HIGHLIGHT,2);
+        addLabel(head,"PHYSICAL MODEL",getScaledSmallFont(),SEC_MODEL,2);
         // Read left to right: clamp, contact, damping, body, material.
         lv_obj_t* row=makeRow(strip,lv_pct(100),scaled(lay::MODEL_ROW_H),scaled(4),LV_FLEX_ALIGN_START);
         stripKnob(row,P::kParamSupport);
@@ -2634,7 +2637,7 @@ private:
             // fix that defined SEC_* was lost in a revert cycle (macros
             // existed but were never applied) - the R3 critic read the left
             // bank as "single cyan accent across every section".
-            static const lv_color_t secColors[5]={SEC_BODY,SEC_RESONATE,SEC_EXCITER,SEC_SPACE,SEC_EXCITER};
+            static const lv_color_t secColors[5]={SEC_BODY,SEC_RESONATE,SEC_EXCITER,SEC_SPACE,SEC_FEEL};
             lv_obj_t* secLabelRow=makeRow(sec,lv_pct(100),scaled(lay::SEC_LABEL_H),scaled(6),LV_FLEX_ALIGN_START);
             lv_obj_t* secRule=makeBox(secLabelRow,scaled(3),scaled(lay::SEC_LABEL_H));
             lv_obj_set_style_bg_color(secRule,secColors[g],0);
@@ -2661,6 +2664,10 @@ private:
             else { groupSpec.containerW=scaled(lay::KNOB_W_N); groupSpec.containerH=scaled(lay::KNOB_H_C); groupSpec.arcSize=scaled(lay::KNOB_ARC_C); }
             for(int k=0;k<4;++k){
                 lv_obj_t* arc=UIWidgets::createArcKnob(grid,groupParams[g][k],this,styles,groupSpec);
+                // semantic color: the arc's value fill carries the section hue,
+                // so a knob's color tells you which subsystem it belongs to
+                // (the critic read the bank as "single cyan everywhere").
+                lv_obj_set_style_arc_color(arc,secColors[g],LV_PART_INDICATOR);
                 // runs AFTER UIWidgets' own handlers (insertion order) so the
                 // contextual unit formatting wins over their raw %.2f writes
                 lv_obj_add_event_cb(arc,valueFormatCb,LV_EVENT_ALL,this);
@@ -3089,10 +3096,10 @@ private:
         lv_obj_t* scopeHead=makeRow(scopeCard,lv_pct(100),scaled(lay::HEAD_H),scaled(8));
         lfoDot=makeBox(scopeHead,scaled(lay::DOT),scaled(lay::DOT));
         lv_obj_set_style_radius(lfoDot,LV_RADIUS_CIRCLE,0);
-        lv_obj_set_style_bg_color(lfoDot,COL_HIGHLIGHT,0); lv_obj_set_style_bg_opa(lfoDot,LV_OPA_40,0);
-        lv_obj_set_style_shadow_width(lfoDot,scaled(8),0); lv_obj_set_style_shadow_color(lfoDot,COL_HIGHLIGHT,0); lv_obj_set_style_shadow_opa(lfoDot,LV_OPA_40,0);
+        lv_obj_set_style_bg_color(lfoDot,COL_LIVE,0); lv_obj_set_style_bg_opa(lfoDot,LV_OPA_40,0);
+        lv_obj_set_style_shadow_width(lfoDot,scaled(8),0); lv_obj_set_style_shadow_color(lfoDot,COL_LIVE,0); lv_obj_set_style_shadow_opa(lfoDot,LV_OPA_40,0);
         lv_obj_t* scopeTitleWrap=makeRow(scopeHead,scaled(150),scaled(lay::HEAD_H),scaled(8));
-        addLabel(scopeTitleWrap,"DECAY SCOPE",getScaledSmallFont(),PLATE_TEXT,2);
+        addLabel(scopeTitleWrap,"DECAY SCOPE",getScaledSmallFont(),COL_LIVE,2);
         lv_obj_set_flex_grow(scopeHead,0);
         lv_obj_t* scopeHint=addLabel(scopeHead,"LIVE ENGINE OUTPUT",getScaledMicroFont(),PLATE_TEXT_DIM,1);
         lv_obj_set_flex_grow(scopeHint,0);
@@ -3137,20 +3144,20 @@ private:
         lv_obj_set_style_line_width(scope,1,LV_PART_MAIN);
         lv_obj_set_style_line_opa(scope,LV_OPA_30,LV_PART_MAIN);
         lv_obj_set_style_line_width(scope,scaled(2),LV_PART_ITEMS);
-        lv_obj_set_style_line_color(scope,COL_HIGHLIGHT,LV_PART_ITEMS);
+        lv_obj_set_style_line_color(scope,COL_LIVE,LV_PART_ITEMS);
         lv_obj_set_style_line_opa(scope,LV_OPA_COVER,LV_PART_ITEMS);
         // round-7: simpler fix - just make the line thicker + add a dim area
         // fill via a second series that mirrors the line. Both seeded.
         // (area series is added first so it paints behind the line)
-        lv_chart_series_t* ssArea=lv_chart_add_series(scope,PLATE_AMBER_DIM,LV_CHART_AXIS_PRIMARY_Y);
-        lv_obj_set_style_line_color(scope,PLATE_AMBER_DIM,LV_PART_ITEMS);
+        lv_chart_series_t* ssArea=lv_chart_add_series(scope,COL_LIVE_DIM,LV_CHART_AXIS_PRIMARY_Y);
+        lv_obj_set_style_line_color(scope,COL_LIVE_DIM,LV_PART_ITEMS);
         lv_obj_set_style_line_opa(scope,LV_OPA_50,LV_PART_ITEMS);
         lv_obj_set_style_line_width(scope,scaled(1),LV_PART_ITEMS);
         // widen the line a hair
         // round-7: main (bright) line series — declared first so it paints over
         // the dim-amber area series
-        lv_chart_series_t* ss=lv_chart_add_series(scope,COL_HIGHLIGHT,LV_CHART_AXIS_PRIMARY_Y);
-        lv_obj_set_style_line_color(scope,COL_HIGHLIGHT,LV_PART_ITEMS);
+        lv_chart_series_t* ss=lv_chart_add_series(scope,COL_LIVE,LV_CHART_AXIS_PRIMARY_Y);
+        lv_obj_set_style_line_color(scope,COL_LIVE,LV_PART_ITEMS);
         lv_obj_set_style_line_opa(scope,LV_OPA_COVER,LV_PART_ITEMS);
         lv_obj_set_style_line_width(scope,scaled(2),LV_PART_ITEMS);
         lv_obj_set_style_size(scope,0,0,LV_PART_INDICATOR);

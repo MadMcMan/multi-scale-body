@@ -85,6 +85,13 @@ START_NAMESPACE_DISTRHO
 #define SEC_RESONATE      lv_color_hex(0x4FC1A1)  // teal (resonant shaping)
 #define SEC_EXCITER       lv_color_hex(0xF0A050)  // warm orange (excitation)
 #define SEC_SPACE         lv_color_hex(0x9F7AD3)  // cool purple (space)
+#define SEC_FEEL          lv_color_hex(0xE8B93C)  // gold (bow/damper/intharm/slide feel row)
+#define SEC_MODEL         lv_color_hex(0x6E8CB8)  // steel indigo (PHYSICAL MODEL strip identity)
+// Reserved "live" accent - ONLY the primary live readout (DECAY SCOPE, engine
+// output) uses this, so the eye knows which display is the one to watch. Every
+// other accent means "subsystem", never "this is live".
+#define COL_LIVE          lv_color_hex(0x58D68D)  // green (live output / watch-this)
+#define COL_LIVE_DIM      lv_color_hex(0x2E7D52)  // dimmer green (live area fill under the scope line)
 
 // === LAYOUT TOKENS — chassis arithmetic (base units @ 1440x990, pre-scale) ===
 
