@@ -121,7 +121,11 @@ static void arcDragCb(lv_event_t* e){
     }
     if(code==LV_EVENT_RELEASED){
         auto it=gArcDragStates.find(arc);
-        bool wasDouble = (it!=gArcDragStates.end()) && it->second.isDoubleClick;
+        // a double-click only counts if the SECOND press also didn't drag:
+        // isDoubleClick was armed in PRESSED from the previous press, but a
+        // drag during this press (movedSincePress set in PRESSING) must
+        // cancel the reset so the drag is honoured instead of being undone.
+        bool wasDouble = (it!=gArcDragStates.end()) && it->second.isDoubleClick && !it->second.movedSincePress;
         if(it!=gArcDragStates.end()){ it->second.active=false; it->second.isDoubleClick=false; }
         AbstractMultiScaleBodyUI* ui=(AbstractMultiScaleBodyUI*)lv_event_get_user_data(e);
         if(ui){

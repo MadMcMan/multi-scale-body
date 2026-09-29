@@ -465,6 +465,25 @@ static void doubleClickResetProof(DISTRHO::UIExporter* exp,HWND hwnd){
     // syncs the arc back. Assert the arc landed on the preset baseline (500).
     LOGF("[dblclick] arc value after 2 clicks = %d (expect 500)\n",lv_arc_get_value(arc));
     EXPECT(lv_arc_get_value(arc)==500,"DblClick: knob reset to preset default");
+    // drag-cancel guard: a second click that DRAGS must NOT count as a
+    // double-click reset (the drag is honoured instead of being undone).
+    exp->parameterChanged(pi,0.9f); idleFrames(exp,4);
+    // click 1 clean, then click 2 with a small drag within the double-click window
+    contactPointer={(lv_coord_t)((a.x1+a.x2)/2),(lv_coord_t)((a.y1+a.y2)/2)};
+    lv_indev_t* p2=lv_indev_create();
+    lv_indev_set_type(p2,LV_INDEV_TYPE_POINTER);
+    lv_indev_set_display(p2,lv_display_get_default());
+    lv_indev_set_read_cb(p2,contactPointerRead);
+    contactPressed=true;  lv_indev_read(p2); idleFrames(exp,2);   // press 1
+    contactPressed=false; lv_indev_read(p2); idleFrames(exp,2);   // release 1
+    contactPressed=true;  lv_indev_read(p2); idleFrames(exp,2);   // press 2
+    contactPointer.y-=4; lv_indev_read(p2); idleFrames(exp,2);     // small drag during press 2
+    contactPressed=false; lv_indev_read(p2); idleFrames(exp,2);   // release 2
+    contactPointer.y+=4; contactPressed=false; lv_indev_delete(p2);
+    idleFrames(exp,8);
+    const int afterDrag=lv_arc_get_value(arc);
+    LOGF("[dblclick-drag] arc value after click+drag = %d (must NOT be 500)\n",afterDrag);
+    EXPECT(afterDrag!=500,"DblClick: drag on 2nd click cancels reset");
     checkLayout("dblclick");
     EXPECT(gBoundFails==0 && gOverlapFails==0,"DblClick layout inside surface");
 }
