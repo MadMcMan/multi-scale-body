@@ -2358,23 +2358,32 @@ private:
         lv_obj_t* matCell=makeCol(row,scaled(lay::MODEL_SEL_W),scaled(lay::KNOB_H_N),scaled(2),LV_FLEX_ALIGN_START);
         addLabel(matCell,"Material",getScaledSmallFont(),PLATE_LABEL_ACCENT,0);
         lv_obj_set_style_translate_y(matCell,scaled(2),0);
+        // pin the select to the VALUE slot (bottom), like every knob's value
+        // text - the old translate_y(26) floated it at knob-centre height and
+        // broke the label-over-value rhythm the other 12 columns keep. The
+        // spacer must be created BEFORE the dropdown so flex order is
+        // [label, spacer, dropdown] and the select lands on the cell bottom.
+        { lv_obj_t* sp=makeBox(matCell,1,1); lv_obj_set_flex_grow(sp,1);
+          lv_obj_set_style_bg_opa(sp,LV_OPA_TRANSP,0); lv_obj_clear_flag(sp,LV_OBJ_FLAG_CLICKABLE); }
         fMaterialDd=lv_dropdown_create(matCell);
         lv_dropdown_set_options(fMaterialDd,"DEFAULT\nALUMINIUM\nSTEEL\nBRONZE\nPINE\nROSEWOOD\nMAHOGANY\nGLASS\nBRASS\nTITANIUM\nCARBON");
         lv_obj_set_width(fMaterialDd,scaled(lay::MODEL_SEL_W));
         lv_obj_set_height(fMaterialDd,scaled(25));   // EDO-dropdown height: 15 text + 8 pad_ver + 2 border
-        lv_obj_set_style_translate_y(fMaterialDd,scaled(26),0);
+        // (no translate: the flex spacer above pins it to the cell bottom)
         lv_obj_add_event_cb(fMaterialDd,materialDdCb,LV_EVENT_VALUE_CHANGED,this);
         lv_obj_add_event_cb(fMaterialDd,dropdownExclusiveCb,LV_EVENT_RELEASED,this);
         // Morph-target select cell (adjacent to its Morph knob).
         lv_obj_t* morphCell=makeCol(row,scaled(lay::MODEL_SEL_W),scaled(lay::KNOB_H_N),scaled(2),LV_FLEX_ALIGN_START);
         addLabel(morphCell,"Morph Tgt",getScaledSmallFont(),PLATE_LABEL_ACCENT,0);
         lv_obj_set_style_translate_y(morphCell,scaled(2),0);
+        { lv_obj_t* sp=makeBox(morphCell,1,1); lv_obj_set_flex_grow(sp,1);
+          lv_obj_set_style_bg_opa(sp,LV_OPA_TRANSP,0); lv_obj_clear_flag(sp,LV_OBJ_FLAG_CLICKABLE); }
         fMorphDd=lv_dropdown_create(morphCell);
         { std::string opts; for(int i=0;i<modal::kNumPresets;++i){ if(i) opts+="\n"; opts+=modal::kPresets[i].name; }
           lv_dropdown_set_options(fMorphDd,opts.c_str()); }
         lv_obj_set_width(fMorphDd,scaled(lay::MODEL_SEL_W));
         lv_obj_set_height(fMorphDd,scaled(25));     // (LV_SIZE_CONTENT self-size measures 2 lines here; EDO's natural 25 is the convention)
-        lv_obj_set_style_translate_y(fMorphDd,scaled(26),0);
+        // (no translate: pinned to the cell bottom, matching Material)
         lv_obj_add_event_cb(fMorphDd,morphDdCb,LV_EVENT_VALUE_CHANGED,this);
         lv_obj_add_event_cb(fMorphDd,dropdownExclusiveCb,LV_EVENT_RELEASED,this);
         // elastic FEM mode switch: 0 = Classic baked bodies (default, bit-identity),
