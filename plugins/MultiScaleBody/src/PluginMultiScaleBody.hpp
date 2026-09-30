@@ -65,9 +65,12 @@ public:
         kParamOutBand14,kParamOutBand15,
         kParamContactNoise,   // appended input: preserve all existing host parameter IDs
         kParamModelMode,      // 0 Classic (unchanged), 1 Elastic FEM
+        // mode params appended last: preserve all existing host IDs.
+        kParamArp,            // 0/1 arpeggiator on/off (was UI-state-only; now automatable)
+        kParamScrubMode,      // 0 = spectrum-drag writes band GAIN, 1 = band DECAY
         kParameterCount
     };
-    static constexpr uint32_t kNumInputParams = kParamOutLevel+2;
+    static constexpr uint32_t kNumInputParams = kParamOutLevel+2+2;
     static constexpr bool isOutputParameter(uint32_t i) { return i>=kParamOutLevel && i<=kParamOutBand15; }
     static constexpr bool isInputParameter(uint32_t i) { return i<kParameterCount && !isOutputParameter(i); }
 private:

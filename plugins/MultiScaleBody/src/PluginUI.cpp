@@ -309,6 +309,11 @@ public:
         }
         if(i==PluginMultiScaleBody::kParamMorphTarget && fMorphDd)
             lv_dropdown_set_selected(fMorphDd,std::clamp((int)std::lround(v*(float)(modal::kNumPresets-1)),0,modal::kNumPresets-1));
+        if(i==PluginMultiScaleBody::kParamScrubMode){ fScrubMode=v>0.5f?1:0; syncScrubToggle(); }
+        if(i==PluginMultiScaleBody::kParamArp){
+            arpOnLocal=v>0.5f;
+            if(arpBtn){ if(arpOnLocal) lv_obj_add_state(arpBtn,LV_STATE_CHECKED); else lv_obj_clear_state(arpBtn,LV_STATE_CHECKED); }
+        }
     }
     // Central edit-bracket bookkeeping. Every knob/drag opens a host
     // beginEditParamChange bracket with editParameter(i,true) and closes it with
@@ -417,6 +422,12 @@ public:
                 lv_dropdown_set_selected(fMaterialDd,std::clamp((int)std::lround(v*10.f),0,10));
             if(i==PluginMultiScaleBody::kParamMorphTarget && fMorphDd)
                 lv_dropdown_set_selected(fMorphDd,std::clamp((int)std::lround(v*(float)(modal::kNumPresets-1)),0,modal::kNumPresets-1));
+            // host automation of the two new mode params must sync the UI
+            if(i==PluginMultiScaleBody::kParamArp){
+                arpOnLocal=v>0.5f;
+                if(arpBtn){ if(arpOnLocal) lv_obj_add_state(arpBtn,LV_STATE_CHECKED); else lv_obj_clear_state(arpBtn,LV_STATE_CHECKED); }
+            }
+            if(i==PluginMultiScaleBody::kParamScrubMode){ fScrubMode=v>0.5f?1:0; syncScrubToggle(); }
         }
     }
     void stateChanged(const char* key,const char* value) override {
@@ -1727,14 +1738,17 @@ private:
         int next=ui->kbBaseNote+dir; next=std::clamp(next,24,92); next=(next/12)*12;   // 92 -> floor C6: top key B6 = 119 <= 127
         if(next!=ui->kbBaseNote){ ui->kbBaseNote=next; ui->updateKeyboardNotes(); }
     }
-    // arpeggiator master switch - persisted via shared "arpon" state
+    // arpeggiator master switch - now a real automatable parameter (kParamArp);
+    // the "arpon" state is kept in sync for backward-compatible session load.
     static void arpBtnCb(lv_event_t* e){
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
         lv_obj_t* btn=(lv_obj_t*)lv_event_get_target(e);
         if(!ui||!btn) return;
         bool on=lv_obj_has_state(btn,LV_STATE_CHECKED);
         ui->arpOnLocal=on;
-        ui->setState("arpon",on?"1":"0");
+        ui->editParameter(PluginMultiScaleBody::kParamArp,true);
+        ui->setParamValue(PluginMultiScaleBody::kParamArp, on?1.f:0.f);
+        ui->editParameter(PluginMultiScaleBody::kParamArp,false);
     }
     // ---- header zoom control (replaces the old FULLSCREEN path) -----------
     // Window size = base plate * zoom%, so the 1440:990 aspect holds EXACTLY
@@ -1805,23 +1819,42 @@ private:
         set(PluginMultiScaleBody::kParamEcoBudget, rnd(0.3f,0.7f));
     }
 
-    // ---- idea 15: MIDI learn (right-click a knob -> next CC binds) ---------
-    // Resolution uses the exact LVGL click path (lv_indev_search_obj, the
-    // same search the pointer indev runs) and walks up until an lv_arc is
-    // found — only knobs carry a param index in user_data; buttons and
-    // decorative objects can't be mistaken for them. Right-click anywhere
-    // else (or a second right-click) cancels.
+    // ---- idea 15: MIDI learn (right-click any control -> next CC binds) -----
+    // Resolution uses the exact LVGL click path (lv_indev_search_obj, the same
+    // search the pointer indev runs) and walks up until it finds a learnable
+    // control: an lv_arc (knob) OR an object explicitly tagged by tagLearnable()
+    // (dropdowns + toggles). The tag is a high sentinel bit so it can never be
+    // confused with other user_data (e.g. the preset arrows store a direction).
+    // Every learnable control therefore maps to a real input parameter, so all
+    // of them are host-automatable AND in-UI right-click MIDI-learnable.
+    static constexpr uint32_t kLearnTag = 0x40000000u;
+    static void tagLearnable(lv_obj_t* o,uint32_t param){
+        if(o) lv_obj_set_user_data(o,(void*)(intptr_t)(param|kLearnTag));
+    }
+    // returns the learnable param index at/above o, or -1
+    int learnParamAt(lv_obj_t* o) const {
+        for(lv_obj_t* n=o; n; n=lv_obj_get_parent(n)){
+            const intptr_t ud=(intptr_t)lv_obj_get_user_data(n);
+            if(lv_obj_check_type(n,&lv_arc_class)){
+                // knobs carry a raw param index (no tag bit)
+                if(ud>=0 && PluginMultiScaleBody::isInputParameter((uint32_t)ud)) return (int)ud;
+                continue;
+            }
+            if(((uint32_t)ud & kLearnTag)!=0u){
+                const uint32_t p=(uint32_t)ud & ~kLearnTag;
+                if(PluginMultiScaleBody::isInputParameter(p)) return (int)p;
+            }
+        }
+        return -1;
+    }
     void handleRightClick(int wx,int wy){
         lv_obj_t* scr=myScreen();
         if(!scr) return;
         lv_point_t pt={ (lv_coord_t)wx, (lv_coord_t)wy };
         lv_obj_t* o=lv_indev_search_obj(scr,&pt);
-        lv_obj_t* arc=o;
-        while(arc && !lv_obj_check_type(arc,&lv_arc_class)) arc=lv_obj_get_parent(arc);
-        if(!arc){ cancelLearn(); return; }   // empty space (or 2nd click) cancels
-        const intptr_t ud=(intptr_t)lv_obj_get_user_data(arc);
-        if(ud<0 || !PluginMultiScaleBody::isInputParameter((uint32_t)ud)){ cancelLearn(); return; }
-        armLearn((int)ud);
+        const int pi=learnParamAt(o);
+        if(pi<0){ cancelLearn(); return; }   // empty space (or 2nd click) cancels
+        armLearn(pi);
     }
     // wave-4: MIDI learn arms a non-blocking keyboard-header chip instead of
     // a full-screen shield — knobs stay playable while waiting for the CC.
@@ -1935,10 +1968,16 @@ private:
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
         lv_obj_t* btn=(lv_obj_t*)lv_event_get_target(e);
         if(!ui||!btn) return;
-        ui->fScrubMode=!ui->fScrubMode;
-        lv_obj_t* lbl=lv_obj_get_child(btn,0);
+        ui->editParameter(PluginMultiScaleBody::kParamScrubMode,true);
+        ui->setParamValue(PluginMultiScaleBody::kParamScrubMode, ui->fScrubMode?0.f:1.f);
+        ui->editParameter(PluginMultiScaleBody::kParamScrubMode,false);
+    }
+    // shared label sync for the scrub target (button click + host automation)
+    void syncScrubToggle(){
+        if(!fScrubToggle) return;
+        lv_obj_t* lbl=lv_obj_get_child(fScrubToggle,0);
         if(lbl && lv_obj_check_type(lbl,&lv_label_class))
-            lv_label_set_text(lbl, ui->fScrubMode?"DECAY":"GAIN");
+            lv_label_set_text(lbl, fScrubMode?"DECAY":"GAIN");
     }
 
     // ---- wave-3 (idea 10): disc motion recorder ------------------------------
@@ -2376,6 +2415,7 @@ private:
         // ECO is a mode switch rather than a continuous physical control.
         lv_obj_t* ecoCell=makeRow(head,scaled(lay::MODEL_ECO_W),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_START);
         fEcoBtn=lv_btn_create(ecoCell);
+        tagLearnable(fEcoBtn,PluginMultiScaleBody::kParamEcoMode);
         lv_obj_set_size(fEcoBtn,lv_pct(100),scaled(lay::BTN_H));
         styles.applyToggleButton(fEcoBtn,paramCache[P::kParamEcoMode]>0.5f);
         lv_obj_set_style_radius(fEcoBtn,scaled(lay::RADIUS_SM),0);
@@ -2396,6 +2436,7 @@ private:
         { lv_obj_t* sp=makeBox(matCell,1,1); lv_obj_set_flex_grow(sp,1);
           lv_obj_set_style_bg_opa(sp,LV_OPA_TRANSP,0); lv_obj_clear_flag(sp,LV_OBJ_FLAG_CLICKABLE); }
         fMaterialDd=lv_dropdown_create(matCell);
+        tagLearnable(fMaterialDd,PluginMultiScaleBody::kParamMaterial);
         lv_dropdown_set_options(fMaterialDd,"DEFAULT\nALUMINIUM\nSTEEL\nBRONZE\nPINE\nROSEWOOD\nMAHOGANY\nGLASS\nBRASS\nTITANIUM\nCARBON");
         lv_obj_set_width(fMaterialDd,scaled(lay::MODEL_SEL_W));
         lv_obj_set_height(fMaterialDd,scaled(25));   // EDO-dropdown height: 15 text + 8 pad_ver + 2 border
@@ -2409,6 +2450,7 @@ private:
         { lv_obj_t* sp=makeBox(morphCell,1,1); lv_obj_set_flex_grow(sp,1);
           lv_obj_set_style_bg_opa(sp,LV_OPA_TRANSP,0); lv_obj_clear_flag(sp,LV_OBJ_FLAG_CLICKABLE); }
         fMorphDd=lv_dropdown_create(morphCell);
+        tagLearnable(fMorphDd,PluginMultiScaleBody::kParamMorphTarget);
         { std::string opts; for(int i=0;i<modal::kNumPresets;++i){ if(i) opts+="\n"; opts+=modal::kPresets[i].name; }
           lv_dropdown_set_options(fMorphDd,opts.c_str()); }
         lv_obj_set_width(fMorphDd,scaled(lay::MODEL_SEL_W));
@@ -2421,6 +2463,7 @@ private:
         // switch (ECO) in the head row so body-type selection reads top-down.
         lv_obj_t* modeCell=makeRow(head,scaled(lay::MODEL_ECO_W),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_START);
         fModeTypeBtn=lv_btn_create(modeCell);
+        tagLearnable(fModeTypeBtn,PluginMultiScaleBody::kParamModelMode);
         lv_obj_set_size(fModeTypeBtn,lv_pct(100),scaled(lay::BTN_H));
         styles.applyToggleButton(fModeTypeBtn,paramCache[P::kParamModelMode]>0.5f);
         lv_obj_set_style_radius(fModeTypeBtn,scaled(lay::RADIUS_SM),0);
@@ -2548,6 +2591,7 @@ private:
         presetPrevBtn=addPresetArrowBtn(ddRow,-1);
         // dropdown moved to the top bar (was the center card's preset row)
         presetDropdown=lv_dropdown_create(ddRow);
+        tagLearnable(presetDropdown,PluginMultiScaleBody::kParamPreset);
         {
             std::string opts; for(int i=0;i<modal::kNumPresets;++i){ if(i) opts+="\n"; opts+=modal::kPresets[i].name; }
             lv_dropdown_set_options(presetDropdown,opts.c_str());

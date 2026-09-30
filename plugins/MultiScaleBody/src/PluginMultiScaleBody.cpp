@@ -124,6 +124,8 @@ void PluginMultiScaleBody::initParameter(uint32_t index, Parameter& p){
         case kParamRayleighB: p.name="Rayl B"; p.symbol="raylb"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamEcoMode: p.name="Eco"; p.symbol="eco"; p.hints|=kParameterIsBoolean|kParameterIsInteger; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamEcoBudget: p.name="Eco Budget"; p.symbol="ecobudget"; p.ranges.def=0.5f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamArp: p.name="Arp"; p.symbol="arp"; p.hints|=kParameterIsBoolean|kParameterIsInteger; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamScrubMode: p.name="Scrub Target"; p.symbol="scrub_target"; p.hints|=kParameterIsBoolean|kParameterIsInteger; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         default:
             if(index>=kParamBandDecay0 && index<=kParamBandDecay15){
                 int band=index-kParamBandDecay0;
@@ -220,6 +222,8 @@ void PluginMultiScaleBody::setParameterValue(uint32_t idx,float v){
         case kParamRayleighB: engine_.setRayleigh(paramBase_[kParamRayleighA],v); break;
         case kParamEcoMode: engine_.setEco(v>0.5f,paramBase_[kParamEcoBudget]); break;
         case kParamEcoBudget: engine_.setEco(paramBase_[kParamEcoMode]>0.5f,v); break;
+        case kParamArp: paramBase_[idx]=v>0.5f?1.f:0.f; arpOn_=paramBase_[idx]>0.5f; break;
+        case kParamScrubMode: paramBase_[idx]=v>0.5f?1.f:0.f; break;
         default:
             if(idx>=kParamBandDecay0 && idx<=kParamBandDecay15){
                 int band=idx-kParamBandDecay0;
@@ -431,7 +435,7 @@ String PluginMultiScaleBody::getState(const char* key) const {
 void PluginMultiScaleBody::setState(const char* key, const char* value){
     if(!key||!value) return;
     const std::string k(key);
-    if(k=="arpon"){ arpOn_=(value[0]=='1'); return; }
+    if(k=="arpon"){ arpOn_=(value[0]=='1'); paramBase_[kParamArp]=arpOn_?1.f:0.f; return; }
     if(k=="scale"){ rebuildScaleFromScl(value); return; }
     if(k=="kbm"){ kbmTxt_=value; if(!scaleTxt_.empty()) rebuildScaleFromScl(scaleTxt_.c_str()); return; }
     if(k=="ccmap"){ parseCcmap(value); return; }
