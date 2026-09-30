@@ -2350,7 +2350,14 @@ private:
         lv_obj_t* head=makeRow(strip,lv_pct(100),scaled(lay::HEAD_H),scaled(12),LV_FLEX_ALIGN_START);
         addLabel(head,"PHYSICAL MODEL",getScaledSmallFont(),SEC_MODEL,2);
         // Read left to right: clamp, contact, damping, body, material.
-        lv_obj_t* row=makeRow(strip,lv_pct(100),scaled(lay::MODEL_ROW_H),scaled(4),LV_FLEX_ALIGN_START);
+        // gap 2 (was 4): the 5 group dividers add 5*(1+2*gap) width, and the
+        // card interior is only 1384px (1440-2*PAD-2*CARD_PAD) with the row
+        // exactly budgeted at 1382. At gap 4 the row overflowed ~43px and
+        // clipped the trailing Morph-target select; at gap 2 the content is
+        // 12*88 + 5*1 + 2*137 + 18*2 = 1371 (13px slack). Knob containers are
+        // 88 wide around a 64 arc (12px padding/side), so 12+2+12 = 26px
+        // between knob edges reads the same as the old 28.
+        lv_obj_t* row=makeRow(strip,lv_pct(100),scaled(lay::MODEL_ROW_H),scaled(2),LV_FLEX_ALIGN_START);
         stripKnob(row,P::kParamSupport);
         stripKnob(row,P::kParamSupX);
         stripKnob(row,P::kParamSupY);
