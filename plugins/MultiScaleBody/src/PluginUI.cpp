@@ -573,8 +573,8 @@ public:
             // resize rebuild: release held notes BEFORE touching the screen
             if(kbHeldNote>=0 && kbHeldNote<=127){ sendNote(0,(uint8_t)kbHeldNote,0); kbHeldNote=-1; }
             if(fStrikeHeld){ sendNote((uint8_t)fStrikeChannel,(uint8_t)fStrikeNote,0); fStrikeHeld=false; }
-            // wave-3 (idea 10): never strand a playback note across a rebuild
-            if(fPlayHeld||fRecPlaying) stopPlayback();
+            // wave-3 (idea 10): never strand a recorder playback across a rebuild
+            if(fRecPlaying) stopPlayback();
             for(int o=0;o<lay::KEY_WHITE_N*2;++o){ int n=kbBaseNote+o; if(n>=0&&n<=127) sendNote(0,(uint8_t)n,0); }
             // Delete the old timer FIRST so the rebuild can't be tickled
             // mid-construction (the tick dereferences fSpectrumChart etc.,
@@ -680,7 +680,7 @@ private:
         for(int i=0;i<16;++i) fBandTicks[i]=nullptr; fBandTicksDirty=true;
         fLearnChip=fLearnLbl=nullptr; fLearnParam=-1;
         fEdoDropdown=nullptr; fScaleLbl=nullptr;
-        fRecBtn=fPlayBtn=nullptr; fRecOn=false; fRecPlaying=false; fRecN=0; fRecCursor=0; fPlayHeld=false;
+        fRecBtn=fPlayBtn=nullptr; fRecOn=false; fRecPlaying=false; fRecN=0; fRecCursor=0;
         fModeTypeBtn=fMaterialDd=fMorphDd=fEcoBtn=nullptr;
         fMasterValLbl=nullptr; fStrikeChannel=0; fNextStrikeChannel=1; fLiveAge=1000; fRebuildInFlight=false;
     }
@@ -3948,9 +3948,6 @@ private:
     float fRecY[512]={};
     int fRecN=0;
     int fRecCursor=0;
-    int fPlayChannel=0;
-    uint8_t fLastPlayNote=60;     // last note sounded by playback (for a matching note-off)
-    bool fPlayHeld=false;
     // wave-4: MODEL strip controls (persistent full-width card, no modal)
     lv_obj_t* fModeTypeBtn=nullptr;
     lv_obj_t* fMaterialDd=nullptr;
