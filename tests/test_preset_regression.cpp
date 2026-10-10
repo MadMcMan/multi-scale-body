@@ -229,13 +229,16 @@ int main(){
         for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount;++i){
             if(!PluginMultiScaleBody::isInputParameter(i)) continue;
             // enum/snapped params (Preset/MorphTarget/Material/SlideMode/Eco/
-            // ModelMode/Mono) round-trip to the nearest STEP by design.
+            // ModelMode/Mono/Arp/ScrubTarget) round-trip to the nearest STEP by
+            // design.
             if(i==PluginMultiScaleBody::kParamPreset
                || i==PluginMultiScaleBody::kParamMorphTarget
                || i==PluginMultiScaleBody::kParamMaterial
                || i==PluginMultiScaleBody::kParamSlideMode
                || i==PluginMultiScaleBody::kParamEcoMode
                || i==PluginMultiScaleBody::kParamModelMode
+               || i==PluginMultiScaleBody::kParamArp
+               || i==PluginMultiScaleBody::kParamScrubMode
                || i==PluginMultiScaleBody::kParamMono) continue;
             const float probe=0.01f*((float)(i%97)+1.f);   // unique, non-default
             p.testSetParameterValue(i, probe);
