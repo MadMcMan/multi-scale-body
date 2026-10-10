@@ -586,6 +586,20 @@ static void dampDragProof(DISTRHO::UIExporter* exp,HWND hwnd){
     lv_obj_t* val=lv_obj_get_child(row,2);
     if(val && lv_obj_check_type(val,&lv_label_class))
         LOGF("[damp] B1 value label now '%s'\n",lv_label_get_text(val));
+    // The card is EXACTLY content-height (24 pad + 22 head + 16*22 rows + 16*2
+    // gaps = DAMP_CARD_H 430), so any change to DAMP_ROW_H or the head would
+    // start clipping the last bands with nothing to catch it: no bounds check
+    // looks inside a card. Assert the last row still ends inside the card.
+    if(lv_obj_get_child_count(card)>=17){
+        lv_obj_t* lastRow=lv_obj_get_child(card,16);   // [0]=head, [1..16]=bands
+        lv_area_t lrc,cc;
+        lv_obj_get_coords(lastRow,&lrc); lv_obj_get_coords(card,&cc);
+        LOGF("[damp] card h=%d ; last band row bottom=%d card bottom=%d\n",
+             (int)lv_obj_get_height(card),(int)lrc.y2,(int)cc.y2);
+        EXPECT(lrc.y2<=cc.y2,"Damp: all 16 band rows fit inside the card");
+    } else {
+        EXPECT(false,"Damp: card has the head + 16 band rows");
+    }
     checkLayout("damping-drag");
     EXPECT(gBoundFails==0 && gOverlapFails==0,"Damp: layout inside surface");
 }

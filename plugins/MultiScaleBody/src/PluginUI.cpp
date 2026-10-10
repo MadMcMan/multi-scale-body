@@ -1674,11 +1674,15 @@ private:
                 ? (int)PluginMultiScaleBody::kParamBandDecay0+band
                 : (int)PluginMultiScaleBody::kParamBand0+band;
             if(band!=ui->fScrubBand){
-                // drag crossed into another band: close the old edit bracket,
-                // open the new one (RELEASED closes by member, not by position)
+                // drag crossed into another band: close the old edit bracket and
+                // OPEN the new one (RELEASED closes by member, not by position).
+                // The OPEN call used to be missing, so a host saw a gesture-END
+                // for every scrub without a matching BEGIN and the band gain/decay
+                // edits were not bracketed as automation gestures at all.
                 if(ui->fScrubParamIdx>=0) ui->editParameter((uint32_t)ui->fScrubParamIdx,false);
                 ui->fScrubBand=band;
                 ui->fScrubParamIdx=pIdx;
+                ui->editParameter((uint32_t)pIdx,true);
                 ui->fScrubLevel=level;
             } else if(level!=ui->fScrubLevel){   // same band: write only on change
                 ui->fScrubLevel=level;
