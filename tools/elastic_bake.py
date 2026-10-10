@@ -156,10 +156,15 @@ def gains(V,active,g,field):
 # (modeCount=1, strike .37/.63, decay .5, contact OFF so only the modal ring is
 # calibrated, 44.1k, 24000 frames), audited under commit 2a3d063. Classic bank
 # untouched (golden md5 unchanged); only elastic gains carry this scale.
-GAIN_CAL = [7.1841,8.5952,4.1660,15.4803,11.2872,3.8970,5.2738,3.7559,
-            5.0155,7.5557,4.9341,3.9318,1.9235,3.6008,4.9460,6.4131,8.7939,7.9340,
-            3.9755,12.5,74.2337,21.6]  # Cymbal,Bottle,Can,Xylo (new v3 bodies; Can's tiny
-            # elastic solve stays ~4x quieter in Elastic mode - a known rough edge)
+GAIN_CAL = [1.3251,1.2544,1.8809,4.4219,1.4503,1.6841,1.2742,1.8476,
+            1.8261,1.7285,1.7409,1.9093,1.9118,1.5623,1.7794,1.8674,1.6943,1.6644,
+            1.8777,1.8009,3.8806,1.3483,
+            2.0899,1.4868,1.6928]   # +Tongue,Tube,Cone
+# Re-measured after the 0.18 frequency-scale audit fix (tools/measure_elastic_cal.cpp),
+# which made the elastic freq/decay match Classic. The cals collapsed from the old
+# 1.9..74 range to ~1.25..4.4, centred near the classic bake's kGainTrim (1.85) as
+# expected. Outliers: Squirrel (4.42) and Can (3.88) still have the roughest elastic
+# solves (tiny/sparse geometry) - a known rough edge.)
 
 
 def bake(p):
@@ -167,6 +172,13 @@ def bake(p):
     cal=GAIN_CAL[classic.PRESETS.index(p)]
     for g in (4,8):
         K,M,active=assemble(p,g,field); freq,V=modes(K,M)
+        # AUDIT FIX: the classic bake scales its raw FEM eigenvalues by 0.18
+        # (modal_bake: freq = freq * 0.18) to bring them into the musical range.
+        # The elastic bake was missing it, so every elastic mode sat 1/0.18 =
+        # 5.556x too high in pitch (Bowl f0 was 3244 Hz vs classic 584 Hz) and
+        # its Rayleigh decay, computed from that too-high freq, was ~30x too
+        # fast. Scale BEFORE decay + gains so freq and decay both match Classic.
+        freq = freq * 0.18
         G=gains(V,active,g,field)*cal
         decay=.5*(p['alpha1']+p['alpha2']*freq**2)
         data.append((freq,decay,G))

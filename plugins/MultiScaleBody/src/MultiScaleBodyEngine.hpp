@@ -555,8 +555,15 @@ public:
     inline static constexpr BodyMat kBodyMat[kNumPresets] = {
         {69e9,2700},{9e9,600},{200e9,7850},{12e9,400},{69e9,2700},{110e9,8500},
         {200e9,7850},{2e9,1100},{105e9,8800},{72e9,2500},{200e9,7850},{110e9,8600},
-        {200e9,7850},{9e9,650},{14e9,850},{105e9,8700},{200e9,7850},{200e9,7850}
+        {200e9,7850},{9e9,650},{14e9,850},{105e9,8700},{200e9,7850},{200e9,7850},
+        {72e9,8100},{73e9,2500},{190e9,7800},{16e9,750},   // Cymbal,Bottle,Can,Xylo
+        {200e9,7850},{105e9,8800},{69e9,2700}              // Tongue,Tube,Cone
     };
+    // A missing entry here zero-fills, which makes the Material override a
+    // silent no-op for that preset (updateMaterialMul bails on E<=0). Guard the
+    // table against kNumPresets so adding a preset can never go unnoticed.
+    static_assert(sizeof(kBodyMat)/sizeof(kBodyMat[0]) == kNumPresets,
+                  "kBodyMat must have one row per preset");
     void updateMaterialMul();           // material_ -> materialFreqMul_
     // ~20ms one-pole smoothing for params consumed raw in the sample loop (width/wet/exciter)
     float widthCur_=0.3f, wetCur_=0.f, exMixCur_=0.f;

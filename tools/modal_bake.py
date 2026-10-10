@@ -158,6 +158,36 @@ def build_grid(g, preset):
                 occ[g-2,g-2,1]=0.12
         else:
             occ[:,:,:]=1.0
+    elif name=='Tongue':
+        # a flat cantilever tongue clamped at the base (kalimba / handpan tongue)
+        occ[:,:,:]=0.0
+        occ[1:3,1,:]=1.0
+        if g>=4:
+            occ[:,:,0]=np.maximum(occ[:,:,0],0.6)
+    elif name=='Tube':
+        # an open cylindrical shell (tubular bell / wind chime)
+        occ[:,:,:]=0.0
+        for x in range(g):
+            for y in range(g):
+                dx, dy = x-g/2+0.5, y-g/2+0.5
+                r = np.sqrt(dx*dx+dy*dy)
+                if 0.95 < r < 2.0:
+                    occ[x,y,:]=1.0
+                elif 0.8 < r <= 2.15:
+                    occ[x,y,:]=0.4
+    elif name=='Cone':
+        # a solid cone, wide base tapering upward (drum / speaker-cone like)
+        occ[:,:,:]=0.0
+        for x in range(g):
+            for y in range(g):
+                for z in range(g):
+                    dx, dy = x-g/2+0.5, y-g/2+0.5
+                    r = np.sqrt(dx*dx+dy*dy)
+                    rr = 1.95*(1.0 - z/float(g-1))
+                    if r < rr:
+                        occ[x,y,z]=1.0
+                    elif r < rr+0.35:
+                        occ[x,y,z]=0.45
     elif name=='Chime':
         occ[:,:,:]=0.0
         for x in range(g):
@@ -354,6 +384,9 @@ PRESETS = [
     {'name':'Bottle','E':73e9,'nu':0.22,'rho':2500,'alpha1':2.4,'alpha2':8e-8,'L':0.55},
     {'name':'Can','E':190e9,'nu':0.30,'rho':7800,'alpha1':3.5,'alpha2':1.4e-7,'L':0.24},
     {'name':'Xylo','E':16e9,'nu':0.30,'rho':750,'alpha1':7.0,'alpha2':7e-7,'L':0.40},
+    {'name':'Tongue','E':200e9,'nu':0.30,'rho':7850,'alpha1':6.0,'alpha2':2e-7,'L':0.35},
+    {'name':'Tube','E':105e9,'nu':0.34,'rho':8800,'alpha1':2.5,'alpha2':1.2e-7,'L':0.85},
+    {'name':'Cone','E':69e9,'nu':0.33,'rho':2700,'alpha1':7.0,'alpha2':4e-7,'L':0.45},
 ]
 
 def bake_one(preset, g=4, nmax=128):
@@ -361,7 +394,7 @@ def bake_one(preset, g=4, nmax=128):
     freq, vecs, vals, nrigid = compute_modes(K, M, nmax)
     freq = freq * 0.18
     inharm = {'Bowl':1.02,'WoodBlock':1.08,'Plate':1.18,'Squirrel':1.10,'Blade':1.22,'Shell':1.06,'Bar':1.01,'Membrane':1.15,'Bell':1.04,'Glass':1.12,'Chime':1.015,'Gong':1.09,
-              'Handpan':1.03,'LogDrum':1.07,'Marimba':1.05,'Cowbell':1.13,'Kalimba':1.16,'Celesta':1.008}.get(preset['name'],1.0)
+              'Handpan':1.03,'LogDrum':1.07,'Marimba':1.05,'Cowbell':1.13,'Kalimba':1.16,'Celesta':1.008,'Tongue':1.05,'Tube':1.03,'Cone':1.10}.get(preset['name'],1.0)
     for i in range(len(freq)):
         stretch = 1.0 + (inharm-1.0) * (i/max(1,len(freq)-1)) * 1.5
         freq[i] *= stretch

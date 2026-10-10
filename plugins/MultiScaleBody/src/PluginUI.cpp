@@ -12,6 +12,7 @@
 #include "lvgl.h"
 #include "PluginMultiScaleBody.hpp"
 #include "ModalData.hpp"
+#include "PresetModels.hpp"      // per-preset PHYSICAL MODEL settings
 #include "styles/Palette.hpp"    // design tokens (colors, lay::, scaled(), fonts)
 #include "styles/UIStyles.hpp"   // LVGL style pack
 #include "components/UICommon.hpp"  // abstract UI contract
@@ -707,6 +708,9 @@ private:
         else if(n=="Bottle") mat="Glass Bottle";
         else if(n=="Can") mat="Steel Can";
         else if(n=="Xylo") mat="Rosewood Bar";
+        else if(n=="Tongue") mat="Steel Tongue";
+        else if(n=="Tube") mat="Brass Tube";
+        else if(n=="Cone") mat="Aluminium Cone";
         snprintf(buf,sizeof(buf),"%s  -  %s  -  %d modes  -  %.0f Hz", pr.name, mat, pr.n, pr.freq[0]/(2*3.14159f));
         lv_label_set_text(bodySubLabel, buf);
         if(hdrBodyVal){ char b[32]; snprintf(b,sizeof(b),"%s",pr.name); lv_label_set_text(hdrBodyVal,b); }
@@ -748,6 +752,10 @@ private:
                     static const float kBottle[16]={0.f,0.f,0.f,0.f, .20f,.70f,.70f,.20f, .20f,.70f,.70f,.20f, 0.f,0.f,0.f,0.f};
                     static const float kCan[16]={0.f,0.f,0.f,0.f, .40f,1.f,1.f,.40f, .40f,1.f,1.f,.40f, 0.f,0.f,0.f,0.f};
                     static const float kXylo[16]={.20f,1.f,1.f,.20f, 0.f,0.f,0.f,0.f, 0.f,0.f,0.f,0.f, 0.f,0.f,0.f,0.f};
+                    // v4 bodies: Tongue (central cantilever), Tube (open ring), Cone (widening disc)
+                    static const float kTongue[16]={0.f,.40f,.40f,0.f, 0.f,.85f,.85f,0.f, 0.f,.85f,.85f,0.f, .20f,.55f,.55f,.20f};
+                    static const float kTube[16]={.15f,.75f,.75f,.15f, .75f,.25f,.25f,.75f, .75f,.25f,.25f,.75f, .15f,.75f,.75f,.15f};
+                    static const float kCone[16]={.20f,.35f,.35f,.20f, .35f,.75f,.75f,.35f, .55f,.95f,.95f,.55f, .85f,1.f,1.f,.85f};
                     const float* t=nullptr;
                     if(name=="Handpan") t=kHandpan;
                     else if(name=="LogDrum") t=kLogDrum;
@@ -759,6 +767,9 @@ private:
                     else if(name=="Bottle") t=kBottle;
                     else if(name=="Can") t=kCan;
                     else if(name=="Xylo") t=kXylo;
+                    else if(name=="Tongue") t=kTongue;
+                    else if(name=="Tube") t=kTube;
+                    else if(name=="Cone") t=kCone;
                     if(t) occ=t[y*4+x];
                 }
                 occ = std::clamp(occ,0.f,1.f);
@@ -1506,19 +1517,28 @@ private:
         lv_obj_set_x(zoneWarnMark,(lv_coord_t)(bw*60/100));
         lv_obj_set_x(zoneHotMark,(lv_coord_t)(bw*85/100));
     }
-    // (R-user) Changing preset resets the PHYSICAL MODEL knobs so a new body
-    // doesn't inherit the previous body's material/elastic/morph/damping
-    // settings. Called only from the user-initiated preset paths (dropdown +
-    // arrows), NOT from raw host automation, to avoid feedback loops.
-    void resetPhysicalModel(){
+    // (R-user) Loading a preset applies THAT preset's PHYSICAL MODEL settings
+    // (PresetModels.hpp) instead of neutral defaults, so every preset is a
+    // complete instrument - material/damping/inharmonicity/excitation character
+    // come with it. Called only from the user-initiated preset paths (dropdown +
+    // arrows), NOT raw host automation, so a host automating kParamPreset does
+    // not fight the host's own automation of the model params.
+    void applyPresetModel(int idx){
+        idx=std::clamp(idx,0,modal::kNumPresets-1);
+        const modal::PresetModel& m=modal::kPresetModels[idx];
         using P=PluginMultiScaleBody;
-        const struct { int p; float v; } def[] = {
-            {P::kParamSupport,0.f},{P::kParamHoldDamp,0.f},{P::kParamResMorph,0.f},
-            {P::kParamMorphTarget,0.f},{P::kParamMorphAmt,0.f},{P::kParamMaterial,0.f},
-            {P::kParamRayleighA,0.f},{P::kParamRayleighB,0.f},{P::kParamModelMode,0.f},
-            {P::kParamEcoMode,0.f},{P::kParamEcoBudget,0.5f},
+        const struct { int p; float v; } vals[] = {
+            {P::kParamSupport,m.support},{P::kParamHoldDamp,m.holdDamp},
+            {P::kParamResMorph,m.resMorph},{P::kParamMorphAmt,m.morphAmt},
+            {P::kParamMorphTarget,m.morphTarget},{P::kParamMaterial,m.material},
+            {P::kParamRayleighA,m.raylA},{P::kParamRayleighB,m.raylB},
+            {P::kParamInharm,m.inharm},{P::kParamStrikeW,m.strikeW},
+            {P::kParamScrape,m.scrape},{P::kParamContactNoise,m.contactNoise},
+            {P::kParamBow,m.bow},{P::kParamDamper,m.damper},
+            {P::kParamEcoMode,m.ecoMode},{P::kParamEcoBudget,m.ecoBudget},
+            {P::kParamModelMode,m.modelMode},
         };
-        for(const auto& d : def) setParamValue((uint32_t)d.p, d.v);
+        for(const auto& d : vals) setParamValue((uint32_t)d.p, d.v);
         // a user preset change just landed: this IS the new double-click baseline
         capturePresetDefaults();
     }
@@ -1544,7 +1564,7 @@ private:
         int sel=lv_dropdown_get_selected(dd);
         int mx = modal::kNumPresets - 1;
         float v = mx ? (float)sel/(float)mx : 0.f;
-        if(ui){ ui->editParameter(PluginMultiScaleBody::kParamPreset,true); ui->setParamValue(PluginMultiScaleBody::kParamPreset, v); ui->editParameter(PluginMultiScaleBody::kParamPreset,false); ui->resetPhysicalModel(); }
+        if(ui){ ui->editParameter(PluginMultiScaleBody::kParamPreset,true); ui->setParamValue(PluginMultiScaleBody::kParamPreset, v); ui->editParameter(PluginMultiScaleBody::kParamPreset,false); ui->applyPresetModel(sel); }
     }
     // piece-6: preset browser prev/next arrow click. Cycles the selected
     // preset by +/-1 (with wrap) and writes through setParamValue so the
@@ -1565,7 +1585,7 @@ private:
         ui->editParameter(PluginMultiScaleBody::kParamPreset,true);
         ui->setParamValue(PluginMultiScaleBody::kParamPreset, v);
         ui->editParameter(PluginMultiScaleBody::kParamPreset,false);
-        ui->resetPhysicalModel();
+        ui->applyPresetModel(nxt);
     }
     static void padPressCb(lv_event_t* e){
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
@@ -3751,7 +3771,7 @@ private:
     float paramCache[PluginMultiScaleBody::kParameterCount]={};
     // Values the currently-loaded preset established; a knob double-click
     // restores its param from here. (physical-model params are hardcoded-reset
-    // on preset change and re-captured in resetPhysicalModel)
+    // on preset change and re-captured in applyPresetModel)
     float presetDefaultCache[PluginMultiScaleBody::kParameterCount]={};
 
     // master knob value label (re-uses the widget's own label, but the chip in

@@ -290,7 +290,8 @@ void MultiScaleBodyEngine::recomputeVoiceCoeffs(Voice& v) {
     // silently clamping new bodies onto an old radius.
     static const double presetRad[] = {0.1125,0.07,0.1625,0.08,0.125,0.12,0.175,0.15,0.13,0.09,0.195,0.17,
                                        0.15,   0.16,  0.13,  0.10, 0.08,  0.07,
-                                       0.225,  0.1375,0.06,  0.10};  // Cymbal,Bottle,Can,Xylo (~L/4)
+                                       0.225,  0.1375,0.06,  0.10,        // Cymbal,Bottle,Can,Xylo (~L/4)
+                                       0.0875, 0.2125,0.1125};            // Tongue(0.35),Tube(0.85),Cone(0.45)
     static_assert(int(sizeof(presetRad)/sizeof(presetRad[0])) == kNumPresets,
                   "presetRad out of sync with modal::kNumPresets");
     double a = presetRad[presetIdx_];
