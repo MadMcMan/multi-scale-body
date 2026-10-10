@@ -336,7 +336,11 @@ void MultiScaleBodyEngine::recomputeVoiceCoeffs(Voice& v) {
         // Felt damper (idea 5): frequency-dependent absorption — a felt strip
         // loaded against the body kills highs first (rate grows ~f³).
         if(felt_>1e-4f){
-            double fr=(double)f/1000.0;
+            // f is rad/s: to get kHz it must be divided by 2*pi*1000, not 1000.
+            // The old form made the felt law (2*pi)^3 = ~248x stronger than
+            // documented, so the Damper knob went from off to a broadband kill
+            // with no gentle range (everything above ~1 kHz hit the rate clamp).
+            double fr=(double)f/6283.185307179586;   // rad/s -> kHz
             d *= (float)(1.0 + (double)felt_*8.0*fr*fr*fr);
         }
         // wave-3: support (idea 2, live), hold damping (idea 6, per-voice),
@@ -360,8 +364,18 @@ void MultiScaleBodyEngine::recomputeVoiceCoeffs(Voice& v) {
                 continue;
             }
         } else {
-            if (f < 20.f) f=20.f;
-            if (f > 18000.f) f=18000.f;
+            // f is ANGULAR frequency (rad/s): the baked tables store rad/s
+            // ("angular frequencies rad/s") and theta below is f/sampleRate in
+            // radians/sample. These limits were Hz NUMBERS compared against
+            // rad/s, i.e. an effective 3.2 Hz..2.86 kHz window: 12 of the 25
+            // presets had most of their modes clamped onto a single 2.86 kHz
+            // partial (Celesta 90%, Can 91%, Squirrel 86%, Kalimba 75%), which is
+            // why bodies with real top-end (celesta, kalimba, glass...) sounded
+            // nothing like themselves. Convert the limits instead.
+            static constexpr float kFMinRad = 20.f*6.283185307f;      // 20 Hz
+            static constexpr float kFMaxRad = 18000.f*6.283185307f;   // 18 kHz
+            if (f < kFMinRad) f=kFMinRad;
+            if (f > kFMaxRad) f=kFMaxRad;
         }
         if (d < 0.2f) d=0.2f;
         if (d > 8000.f) d=8000.f;
@@ -506,7 +520,14 @@ void MultiScaleBodyEngine::setBandDecayTrim(int band,float v){
     irDirty_=true;
 }
 void MultiScaleBodyEngine::setTuning(const float ratios[128], bool active){
-    for(int n=0;n<128;++n) noteRatio_[n]=std::clamp(ratios[n],0.25f,4.f);
+    // Bound the table to the span the UNTUNED path already reaches: note 0 is
+    // 2^((0-60)/12) and note 127 is 2^((127-60)/12) relative to the note-60
+    // tonic. The old clamp was a flat [0.25, 4] (+-2 octaves), so loading ANY
+    // scale collapsed notes above ~84 and below ~36 onto a single pitch while
+    // the untuned plugin played them normally.
+    static constexpr float kTuneMin = 0.03125f;   // 2^((0-60)/12)
+    static constexpr float kTuneMax = 47.9f;      // 2^((127-60)/12)
+    for(int n=0;n<128;++n) noteRatio_[n]=std::clamp(ratios[n],kTuneMin,kTuneMax);
     tuningActive_=active;
 }
 void MultiScaleBodyEngine::updateMaterialMul(){
@@ -709,7 +730,11 @@ bool MultiScaleBodyEngine::stepIrBake(int budgetModes){
             const float im=(n>1)?(float)(m*m)/(float)((n-1)*(n-1)):0.f;
             f *= 1.f + inharm_*im;
         }
-        if(modelMode_ ? (!(f>0.f) || f>=float(M_PI*sampleRate_)) : (f<20.f||f>18000.f)) continue;
+        // NOTE: f is rad/s, so the classic limits must be converted too - as Hz
+        // numbers this dropped every IR mode above 2.86 kHz, which is exactly the
+        // top end the dry voice path was (wrongly) folding onto one partial.
+        if(modelMode_ ? (!(f>0.f) || f>=float(M_PI*sampleRate_))
+                      : (f<20.f*6.283185307f||f>18000.f*6.283185307f)) continue;
         float d=shapeDecayRate(bodyDecay(p,m,n))*decayScale_; // same ring shaping as voices
         // idea 2: per-band decay trim mirrors the voice path (1.0 = identity skip)
         {
@@ -719,7 +744,11 @@ bool MultiScaleBodyEngine::stepIrBake(int budgetModes){
         }
         // idea 5: felt absorption mirrors the voice path
         if(felt_>1e-4f){
-            double fr=(double)f/1000.0;
+            // f is rad/s: to get kHz it must be divided by 2*pi*1000, not 1000.
+            // The old form made the felt law (2*pi)^3 = ~248x stronger than
+            // documented, so the Damper knob went from off to a broadband kill
+            // with no gentle range (everything above ~1 kHz hit the rate clamp).
+            double fr=(double)f/6283.185307179586;   // rad/s -> kHz
             d *= (float)(1.0 + (double)felt_*8.0*fr*fr*fr);
         }
         // wave-3: support + hold + Rayleigh damping mirror the voice path
@@ -903,6 +932,16 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
 
     if(monoMode_ && monoTopVoice_>=0 && voices_[monoTopVoice_].active){
         Voice& v=voices_[monoTopVoice_];
+        // A re-strike landing inside the previous note's RELEASE tail must
+        // restart the amplitude envelope, exactly as the poly path does
+        // (v.env=0; v.envState=Attack). Without this the new note is multiplied
+        // by the still-decaying release - so it sounds heavily attenuated - and is
+        // then cut off when that release reaches zero. Release defaults to ~3 s,
+        // so this was audible on every mono re-strike. A re-strike during
+        // Attack/Sustain (true legato) is deliberately left alone.
+        if(v.envState==Voice::Release || v.envState==Voice::Idle){
+            v.env=0.f; v.envState=Voice::Attack;
+        }
         v.midiNote=midiNote; v.midiChannel=channel; v.sustainHold=false;
         const auto& p=presetData(presetIdx_);
         float noteShift=std::pow(2.f,(midiNote-60)/12.f);
