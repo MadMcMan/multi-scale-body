@@ -933,6 +933,24 @@ static void dropdownExclusiveProof(DISTRHO::UIExporter* exp,HWND hwnd){
     collectDropdowns(lv_screen_active(),dd,n,8);
     LOGF("[dd] dropdowns in the tree = %d\n",n);
     EXPECT(n>=4,"Dropdowns: all four dropdowns are present");
+    // Identify the preset dropdown from its tag rather than assuming tree order:
+    // the pairs that exercise its registration are the ones whose RELEASE lands
+    // on it, and if a layout change reordered the tree an index-based assumption
+    // would silently test the wrong three pairs and still pass.
+    const uint32_t TAG=0x40000000u;   // matches MultiScaleBodyUI::kLearnTag
+    int presetIdx=-1;
+    for(int i=0;i<n;++i){
+        const uintptr_t ud=(uintptr_t)lv_obj_get_user_data(dd[i]);
+        const uint32_t param=(uint32_t)(ud&~TAG);
+        const bool tagged=(ud&(uintptr_t)TAG)!=0;
+        LOGF("[dd] #%d user_data=0x%llx -> %s\n",i,(unsigned long long)ud,
+             tagged?(std::string("param ")+std::to_string((int)param)).c_str()
+                   :(std::string("untagged ")+std::to_string((int)ud)).c_str());
+        if(tagged && param==(uint32_t)PluginMultiScaleBody::kParamPreset) presetIdx=i;
+    }
+    LOGF("[dd] preset dropdown index = %d (kParamPreset=%d)\n",presetIdx,(int)PluginMultiScaleBody::kParamPreset);
+    EXPECT(presetIdx>=0,"Dropdowns: the preset dropdown is identified by its tag, not by tree order");
+    int presetSlotPairs=0;
     int checked=0;
     for(int i=0;i<n;++i) for(int j=0;j<n;++j){
         if(i==j) continue;
@@ -949,11 +967,16 @@ static void dropdownExclusiveProof(DISTRHO::UIExporter* exp,HWND hwnd){
         const bool other=lv_dropdown_is_open(dd[i]);
         if(!aBefore||!bAfter) continue;                // the gesture did not happen
         ++checked;
+        if(j==presetIdx) ++presetSlotPairs;
         LOGF("[dd] pair %d->%d: A open=%d, release opens B=%d, A still open=%d\n",i,j,aBefore,bAfter,other);
         EXPECT(!other,"Dropdowns: a release that opens one dropdown closes the other");
     }
-    LOGF("[dd] pairs actually exercised = %d\n",checked);
+    LOGF("[dd] pairs actually exercised = %d, of which release-on-preset = %d\n",checked,presetSlotPairs);
     EXPECT(checked>=2,"Dropdowns: at least two ordered pairs were exercised");
+    // these are the only pairs that exercise the preset registration - without
+    // this, a reordered tree would leave that registration unverified while the
+    // proof still reported success
+    EXPECT(presetSlotPairs>=3,"Dropdowns: the release-on-preset pairs were exercised");
 }
 
 // ---- info-column spec strip self-test ------------------------------------
