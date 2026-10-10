@@ -264,7 +264,14 @@ static void checkLayout(const char* tag)
 
 static void idleFrames(DISTRHO::UIExporter* exp, int n)
 {
-    for(int i=0;i<n && exp->plugin_idle();++i) Sleep(16);
+    // Service LVGL's timers here. DPF's plugin_idle() (which ends up in the
+    // LVGL widget's idleCallback) does NOT reliably run lv_timer_handler during
+    // this harness's headless loop, so without this the plugin's 30 ms spectrum
+    // timer never fires - which silently left the entire 30 Hz path (output
+    // meter, MODE MAP repaint, disc heatmap, and the motion-recorder playback
+    // step) unexercised. Found by the recorder-loop self-test, which asserted
+    // an advance that could never happen because playbackTick() was unreachable.
+    for(int i=0;i<n && exp->plugin_idle();++i){ Sleep(16); lv_timer_handler(); }
 }
 
 // present-kick: this pugl/GL window presents nothing until its first WM_SIZE;
@@ -523,6 +530,123 @@ static void contactProof(DISTRHO::UIExporter* exp,HWND hwnd){
         LOGF("CONTACT capture=%s arc=[%d,%d,%d,%d] writes=%d value=%.3f\n",name,a.x1,a.y1,a.x2,a.y2,gParamWrites,gLastValue);
     }
 }
+
+// ---- generic text-label finder (used by the panel self-tests) -------------
+static lv_obj_t* findLabelText(lv_obj_t* root,const char* txt){
+    if(lv_obj_check_type(root,&lv_label_class)){
+        const char* t=lv_label_get_text(root);
+        if(t && std::strcmp(t,txt)==0) return root;
+    }
+    for(uint32_t i=0;i<lv_obj_get_child_count(root);++i)
+        if(lv_obj_t* f=findLabelText(lv_obj_get_child(root,i),txt)) return f;
+    return nullptr;
+}
+
+// ---- DAMPING panel drag self-test ----------------------------------------
+// (R-user) every DAMPING row is a slider for that band's decay trim. Drive a
+// REAL press on the B1 row and require the host-visible write to be the
+// matching kParamBandDecay, at the pressed fraction (row right edge -> ~1.0).
+// This is the only automated coverage for the drag-to-adjust-damping feature.
+static void dampDragProof(DISTRHO::UIExporter* exp,HWND hwnd){
+    bool first=true; resizeWindow(hwnd,exp,1440,1068,first);
+    lv_obj_update_layout(lv_screen_active());
+    lv_obj_t* lab=findLabelText(lv_screen_active(),"DAMPING");
+    EXPECT(lab!=nullptr,"Damp: DAMPING label found");
+    if(!lab) return;
+    lv_obj_t* head=lv_obj_get_parent(lab);
+    lv_obj_t* card=head?lv_obj_get_parent(head):nullptr;
+    if(!card){ EXPECT(false,"Damp: damping card found"); return; }
+    const uint32_t nc=lv_obj_get_child_count(card);
+    LOGF("[damp] card children=%u (expect 1 head + 16 rows)\n",(unsigned)nc);
+    EXPECT(nc>=17,"Damp: card has the head + 16 band rows");
+    lv_obj_t* row=lv_obj_get_child(card,1);   // B1 (child 0 is the head row)
+    EXPECT(row!=nullptr,"Damp: B1 row found");
+    if(!row) return;
+    lv_area_t rc; lv_obj_get_coords(row,&rc);
+    LOGF("[damp] B1 row=@%d,%d %dx%d\n",(int)rc.x1,(int)rc.y1,
+         (int)(rc.x2-rc.x1+1),(int)(rc.y2-rc.y1+1));
+    // the press must resolve to the (clickable) row, not a child
+    contactPointer={ (lv_coord_t)(rc.x2-2),(lv_coord_t)((rc.y1+rc.y2)/2) };
+    EXPECT(lv_indev_search_obj(lv_screen_active(),&contactPointer)==row,"Damp: press resolves to the row");
+    lv_indev_t* pointer=lv_indev_create();
+    lv_indev_set_type(pointer,LV_INDEV_TYPE_POINTER);
+    lv_indev_set_display(pointer,lv_display_get_default());
+    lv_indev_set_read_cb(pointer,contactPointerRead);
+    gLastParam=UINT32_MAX; gLastValue=0.f;
+    contactPressed=true;  lv_indev_read(pointer); idleFrames(exp,4);
+    contactPressed=false; lv_indev_read(pointer); idleFrames(exp,4);
+    lv_indev_delete(pointer);
+    LOGF("[damp] write param=%u value=%.4f (expect param=%u ~1.0)\n",
+         (unsigned)gLastParam,gLastValue,(unsigned)PluginMultiScaleBody::kParamBandDecay0);
+    EXPECT(gLastParam==PluginMultiScaleBody::kParamBandDecay0,"Damp: drag wrote kParamBandDecay0");
+    EXPECT(gLastValue>0.9f,"Damp: right-edge press wrote ~1.0");
+    // and the panel repainted the band's value from the new trim
+    lv_obj_t* val=lv_obj_get_child(row,2);
+    if(val && lv_obj_check_type(val,&lv_label_class))
+        LOGF("[damp] B1 value label now '%s'\n",lv_label_get_text(val));
+    checkLayout("damping-drag");
+    EXPECT(gBoundFails==0 && gOverlapFails==0,"Damp: layout inside surface");
+}
+
+// ---- recorder loop self-test ---------------------------------------------
+// (R-user) REC captures the disc drag path; PLAY then advances one recorded
+// strike position per live note (the plugin's kParamNoteTick) and LOOPS for as
+// long as notes keep coming. This is the only automated coverage for the loop:
+// arm REC, capture a short path with real disc drags, start PLAY, then drive
+// note ticks and prove the position advances and the transport is STILL running
+// after far more ticks than recorded points (i.e. it wrapped, not stopped).
+static void recorderLoopProof(DISTRHO::UIExporter* exp,HWND hwnd){
+    bool first=true; resizeWindow(hwnd,exp,1440,1068,first);
+    lv_obj_update_layout(lv_screen_active());
+    lv_obj_t* recLab=findLabelText(lv_screen_active(),"REC");
+    lv_obj_t* playLab=findLabelText(lv_screen_active(),"PLAY");
+    EXPECT(recLab!=nullptr && playLab!=nullptr,"Rec: REC/PLAY buttons found");
+    if(!recLab||!playLab) return;
+    lv_obj_t* recBtn=lv_obj_get_parent(recLab);
+    lv_obj_t* playBtn=lv_obj_get_parent(playLab);
+    lv_obj_t* disc=findDisc(lv_screen_active());
+    EXPECT(disc!=nullptr,"Rec: strike disc found");
+    if(!disc) return;
+    lv_area_t dc; lv_obj_get_coords(disc,&dc);
+    lv_indev_t* p=lv_indev_create();
+    lv_indev_set_type(p,LV_INDEV_TYPE_POINTER);
+    lv_indev_set_display(p,lv_display_get_default());
+    lv_indev_set_read_cb(p,contactPointerRead);
+    // 1) arm REC, then capture a short path with REAL disc drags
+    lv_obj_send_event(recBtn,LV_EVENT_CLICKED,nullptr);
+    idleFrames(exp,4);
+    contactPointer={ (lv_coord_t)((dc.x1+dc.x2)/2),(lv_coord_t)((dc.y1+dc.y2)/2) };
+    contactPressed=true; lv_indev_read(p); idleFrames(exp,3);
+    for(int i=1;i<=5;++i){ contactPointer.y+=6; lv_indev_read(p); idleFrames(exp,3); }
+    contactPressed=false; lv_indev_read(p); idleFrames(exp,3);
+    lv_indev_delete(p);
+    // 2) start PLAY
+    lv_obj_send_event(playBtn,LV_EVENT_CLICKED,nullptr);
+    idleFrames(exp,6);
+    const bool playing=lv_obj_has_state(playBtn,LV_STATE_CHECKED);
+    LOGF("[rec] PLAY checked after click=%d\n",(int)playing);
+    EXPECT(playing,"Rec: PLAY started (a path was recorded)");
+    if(!playing) return;
+    // 3) one live note must advance the position (writes StrikeX+Y).
+    // The advance happens on the plugin's 30 ms spectrum timer, and this
+    // harness's idle loop does not service LVGL timers on its own, so pump
+    // lv_timer_handler() with real sleeps to let the tick period elapse.
+    auto pump=[&](int ms){ for(int t=0;t<ms;t+=6){ Sleep(6); lv_timer_handler(); } };
+    const int before=gStrikeWrites;
+    exp->parameterChanged(PluginMultiScaleBody::kParamNoteTick,0.001f);
+    pump(120);
+    LOGF("[rec] strike writes on 1 tick: %d -> %d\n",before,gStrikeWrites);
+    EXPECT(gStrikeWrites>before,"Rec: a live note advances the playback position");
+    // 4) LOOP: far more ticks than captured points must NOT stop the transport
+    for(int i=0;i<40;++i){
+        exp->parameterChanged(PluginMultiScaleBody::kParamNoteTick,0.001f*(float)((i%9)+1));
+        pump(45);
+    }
+    LOGF("[rec] after 40 ticks: still playing=%d strike writes=%d\n",
+         (int)lv_obj_has_state(playBtn,LV_STATE_CHECKED),gStrikeWrites);
+    EXPECT(lv_obj_has_state(playBtn,LV_STATE_CHECKED),"Rec: playback LOOPS (still running after more notes than points)");
+    EXPECT(gStrikeWrites>before+20,"Rec: every tick advanced a position");
+}
 END_NAMESPACE_DISTRHO
 
 int main(int argc,char** argv)
@@ -549,6 +673,8 @@ int main(int argc,char** argv)
     if(argc>1 && std::strcmp(argv[1],"--selftest")==0){
         contactProof(exp,hwnd);
         doubleClickResetProof(exp,hwnd);
+        dampDragProof(exp,hwnd);
+        recorderLoopProof(exp,hwnd);
         LOGF("SELFTEST RESULT failures=%d\n",gTestFails);
         exp->quit(); delete exp;
         if(gLog) fclose(gLog);
