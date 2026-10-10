@@ -1,4 +1,5 @@
 #include "PluginMultiScaleBody.hpp"
+#include "MultiScaleBodyPublish.hpp"
 #include "ModalData.hpp"
 #include <algorithm>
 #include <cmath>
@@ -72,7 +73,7 @@ PluginMultiScaleBody::PluginMultiScaleBody() : Plugin(kNumParams, 0, 6) {
 #endif
 }
 const char* PluginMultiScaleBody::getLabel() const { return "MultiScaleBody"; }
-const char* PluginMultiScaleBody::getMaker() const { return "cymbals"; }
+const char* PluginMultiScaleBody::getMaker() const { return "MadMcMan"; }
 const char* PluginMultiScaleBody::getLicense() const { return "MIT"; }
 uint32_t PluginMultiScaleBody::getVersion() const { return d_version(2,0,0); }
 int64_t PluginMultiScaleBody::getUniqueId() const { return d_cconst('M','S','B','d'); }
@@ -144,6 +145,7 @@ void PluginMultiScaleBody::initParameter(uint32_t index, Parameter& p){
                 p.hints=kParameterIsOutput;
                 p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f;
                 if(index==kParamOutLevel){ p.name="Level Out"; p.symbol="out_level"; }
+                else if(index==kParamNoteTick){ p.name="Note Tick"; p.symbol="note_tick"; }
                 else {
                     int band=index-kParamOutBand0;
                     char name[20]; snprintf(name,sizeof(name),"Band %d Out",band+1);
@@ -238,6 +240,7 @@ void PluginMultiScaleBody::setParameterValue(uint32_t idx,float v){
 }
 float PluginMultiScaleBody::getParameterValue(uint32_t idx) const {
     if(idx==kParamOutLevel) return vizLevel_;
+    if(idx==kParamNoteTick) return vizNoteTick_;
     if(idx>=kParamOutBand0 && idx<=kParamOutBand15) return vizBins_[idx-kParamOutBand0];
     if(isInputParameter(idx)) return paramBase_[idx];
     return 0.f;
@@ -305,7 +308,12 @@ void PluginMultiScaleBody::run(const float** inputs,float** outputs,uint32_t fra
         }
         if(ev.size<3) return; // guard: data[2] only valid for 3-byte messages
         uint8_t d2=ev.data[2];
-        if(st==0x90 && d2>0) engine_.noteOn(d1,d2/127.f,ch);
+        if(st==0x90 && d2>0){
+            engine_.noteOn(d1,d2/127.f,ch);
+            // publish a note-event tick for the UI's looping recorder playback
+            vizNoteTick_ += 0.001f;
+            if(vizNoteTick_ > 1.f) vizNoteTick_ = 0.f;
+        }
         else if(st==0x80 || (st==0x90 && d2==0)) engine_.noteOff(d1,ch);
         else if(st==0xE0){ // pitch bend (MPE-aware per channel)
             int val=((int)d2<<7)|d1; // 0..16383
@@ -375,8 +383,9 @@ void PluginMultiScaleBody::run(const float** inputs,float** outputs,uint32_t fra
     // stragglers: hosts may emit frame >= frames at block end — apply now, never drop
     while(mi<midiEventCount){ handleMidi(midiEvents[mi]); ++mi; }
     // publish metering outputs (DPF polls getParameterValue each block -> UI parameterChanged)
-    vizLevel_ = std::clamp(blockPeak*1.4f, 0.f, 1.f);
-    engine_.analyseBands(vizBins_);
+    // Extracted verbatim into MultiScaleBodyPublish.hpp so the render harness can
+    // call the SHIPPING publisher instead of seeding the UI's private copies.
+    modal::publishViz(engine_, blockPeak, vizLevel_, vizBins_);
 }
 // --- state save/recall: one key holding all params (inputs only; outputs are ephemeral) ---
 static String serializeParams(const std::array<float,kNumParams>& pb){

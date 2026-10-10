@@ -68,10 +68,17 @@ public:
         // mode params appended last: preserve all existing host IDs.
         kParamArp,            // 0/1 arpeggiator on/off (was UI-state-only; now automatable)
         kParamScrubMode,      // 0 = spectrum-drag writes band GAIN, 1 = band DECAY
+        // appended OUTPUT: a free-running note-event tick. Bumped in run() on
+        // every note-on so the UI (which the framework feeds output-param
+        // changes) can drive the looping motion-recorder playback from live
+        // notes (host MIDI + the on-screen keyboard). Never automated.
+        kParamNoteTick,
         kParameterCount
     };
     static constexpr uint32_t kNumInputParams = kParamOutLevel+2+2;
-    static constexpr bool isOutputParameter(uint32_t i) { return i>=kParamOutLevel && i<=kParamOutBand15; }
+    static constexpr bool isOutputParameter(uint32_t i){
+        return (i>=kParamOutLevel && i<=kParamOutBand15) || i==kParamNoteTick;
+    }
     static constexpr bool isInputParameter(uint32_t i) { return i<kParameterCount && !isOutputParameter(i); }
 private:
     modal::MultiScaleBodyEngine engine_;
@@ -80,6 +87,7 @@ private:
     float vizLevel_=0.f; float vizBins_[16]={};
     // arpeggiator — fixed up-pattern; pattern/gate tables live at the use site in run()
     bool arpOn_=false; int arpPos_=0;
+    float vizNoteTick_=0.f;   // note-event tick, published as kParamNoteTick
     double arpSamplesPerStep_=0.0; double arpCounter_=0.0;
     // --- wave-2 state (idea 13/15): MIDI-learned CC map + pending learn + tuning
     // ccToParam_[cc] = parameter index, -1 = not learned. Parse/write on the
