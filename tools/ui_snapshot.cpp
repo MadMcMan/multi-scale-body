@@ -908,7 +908,52 @@ static void hostSyncLabelProof(DISTRHO::UIExporter* exp,HWND hwnd){
                std::string("Label: ")+c.name+" keeps its formatted readout after a host sync");
     }
     // without this a layout where none of the knobs resolve would pass silently
+    LOGF("[label] readouts actually checked = %d\n",ran);
     EXPECT(ran>0,"Label: at least one knob readout was actually checked");
+}
+
+// ---- dropdown exclusivity self-test --------------------------------------
+// Only one dropdown list may be open at a time. This drives the callback path
+// directly instead of clicking: lv_dropdown_open() both lists (a real release
+// would toggle them), then dispatch LV_EVENT_RELEASED to one of them. The event
+// carries each descriptor's OWN registered user_data, so the handler runs exactly
+// as it does for a real gesture without the harness needing the UI pointer.
+// A click-driven version of this check cannot discriminate: LVGL closes the other
+// list itself on focus change, so it passed with the preset dropdown's
+// registration removed.
+static void collectDropdowns(lv_obj_t* o,lv_obj_t** out,int& n,int cap){
+    if(o->class_p && 0==std::strcmp(o->class_p->name,"lv_dropdown") && n<cap) out[n++]=o;
+    const uint32_t k=lv_obj_get_child_count(o);
+    for(uint32_t i=0;i<k;++i) collectDropdowns(lv_obj_get_child(o,i),out,n,cap);
+}
+static void dropdownExclusiveProof(DISTRHO::UIExporter* exp,HWND hwnd){
+    bool first=true; resizeWindow(hwnd,exp,1440,1068,first);
+    lv_obj_update_layout(lv_screen_active());
+    lv_obj_t* dd[8]; int n=0;
+    collectDropdowns(lv_screen_active(),dd,n,8);
+    LOGF("[dd] dropdowns in the tree = %d\n",n);
+    EXPECT(n>=4,"Dropdowns: all four dropdowns are present");
+    int checked=0;
+    for(int i=0;i<n;++i) for(int j=0;j<n;++j){
+        if(i==j) continue;
+        for(int k=0;k<n;++k) if(lv_dropdown_is_open(dd[k])) lv_dropdown_close(dd[k]);
+        lv_dropdown_open(dd[i]);                       // A open
+        if(lv_dropdown_is_open(dd[j])) lv_dropdown_close(dd[j]);   // B closed
+        const bool aBefore=lv_dropdown_is_open(dd[i]);
+        // LVGL's own release handler TOGGLES (lv_dropdown.c btn_release_handler):
+        // releasing a CLOSED dropdown opens it, and it runs before user
+        // callbacks - so the release must be sent with B closed for the
+        // exclusivity callback to see an open list.
+        lv_obj_send_event(dd[j],LV_EVENT_RELEASED,nullptr);
+        const bool bAfter=lv_dropdown_is_open(dd[j]);
+        const bool other=lv_dropdown_is_open(dd[i]);
+        if(!aBefore||!bAfter) continue;                // the gesture did not happen
+        ++checked;
+        LOGF("[dd] pair %d->%d: A open=%d, release opens B=%d, A still open=%d\n",i,j,aBefore,bAfter,other);
+        EXPECT(!other,"Dropdowns: a release that opens one dropdown closes the other");
+    }
+    LOGF("[dd] pairs actually exercised = %d\n",checked);
+    EXPECT(checked>=2,"Dropdowns: at least two ordered pairs were exercised");
 }
 
 // ---- info-column spec strip self-test ------------------------------------
@@ -995,6 +1040,7 @@ int main(int argc,char** argv)
         presetNavProof(exp,hwnd);
         specStripProof(exp,hwnd);
         hostSyncLabelProof(exp,hwnd);
+        dropdownExclusiveProof(exp,hwnd);
         LOGF("SELFTEST RESULT failures=%d\n",gTestFails);
         exp->quit(); delete exp;
         if(gLog) fclose(gLog);

@@ -2756,13 +2756,16 @@ private:
         // preset browser was dead. Wire them here.
         lv_obj_add_event_cb(presetDropdown,dropdownCb,LV_EVENT_VALUE_CHANGED,this);
         // The other three dropdowns register this and the preset one did not, so
-        // exclusivity was one-directional here: opening a material/morph/EDO list
-        // closed the preset list, but not the reverse.
-        // NOT a user-visible fix and NOT covered by an assertion: a real click is
-        // already covered by LVGL's own focus-based close of the other list, so a
-        // click-driven harness probe over every ordered pair passes with and
-        // without this line - it cannot discriminate and was not kept. Kept for
-        // consistency with the other three and for non-click opens.
+        // exclusivity was one-directional here: a release that opens a
+        // material/morph/EDO list closed the preset list, but not the reverse.
+        // LVGL's own release handler TOGGLES (btn_release_handler), so a release
+        // only reaches this callback with the list open when it just opened it -
+        // which is why the harness proof drives that exact sequence (release sent
+        // to a CLOSED dropdown) rather than clicking: a click-based check cannot
+        // discriminate, because LVGL's focus change closes the other list anyway.
+        // ui_snapshot's dropdownExclusiveProof covers all 12 ordered pairs; with
+        // this line removed it fails exactly the three whose release lands on the
+        // preset dropdown and passes the other nine.
         lv_obj_add_event_cb(presetDropdown,dropdownExclusiveCb,LV_EVENT_RELEASED,this);
         lv_obj_add_event_cb(presetPrevBtn,presetArrowCb,LV_EVENT_CLICKED,this);
         lv_obj_add_event_cb(presetNextBtn,presetArrowCb,LV_EVENT_CLICKED,this);
