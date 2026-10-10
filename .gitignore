@@ -1,6 +1,10 @@
 # Build output
 build/
 build-dbg/
+# Built plugin bundles written to a repo-root bin/ by some build configs:
+# *.exe/*.a are covered below but .clap and the .vst3/.lv2 bundle members are
+# not, so without this a `git add -A` commits ~54 MB of binaries.
+bin/
 
 # Vendored deps are Windows junctions into E:/dev/deps/* — never commit
 deps/
@@ -25,6 +29,18 @@ ui_disc*.png
 ui_zoom*.png
 ui_dropdown_open.png
 ui_verify*
+# Root-level PNG captures written by the verification targets themselves:
+# test_multiscalebody_ui writes ours_<paper>_v<n>[_half].png, and the gauntlet
+# crop passes leave c_*/d_* crops here. (*.bmp above already covers the
+# ui_snapshot harness bmp dumps.) Ignoring these is what stops `git add -A`
+# from sweeping test output into a commit - the files stay on disk for reading.
+ours_*.png
+c_damp.png
+c_full.png
+c_phys.png
+d_full.png
+d_strip.png
+d_top.png
 gdb*.txt
 *_out.txt
 *_err.txt
