@@ -559,7 +559,7 @@ public:
             if(!d||!lv_dropdown_is_open(d)) continue;
             lv_obj_t* list=lv_dropdown_get_list(d);
             if(!list) return false;
-            lv_obj_scroll_by_bounded(list,0,(lv_coord_t)(dir*scaled(lay::DROPDOWN_ROW_H)),LV_ANIM_OFF);
+            lv_obj_scroll_by_bounded(list,0,(lv_coord_t)(dir*mkScaled(lay::DROPDOWN_ROW_H)),LV_ANIM_OFF);
             return true;   // consume so nothing else scrolls
         }
         return false;
@@ -687,6 +687,11 @@ private:
         bodyPreview=lfoDot=strikeLastMark=nullptr;
         hdrBodyVal=hdrMatVal=hdrModeVal=hdrF0Val=nullptr;
         fSpectrumChart=fScopeChart=fLevelBar=fLevelPeak=zoneWarnMark=zoneHotMark=nullptr;
+        // The rebuilt chart starts empty, so the smoothing envelope and the
+        // peak-hold state must start empty too - they are per-instance members
+        // but they outlived a rebuild and replayed the previous tree's meter
+        // (a stale transient on every zoom step).
+        for(int i=0;i<16;++i){ fSpecEnv[i]=0.f; fSpecPeaks[i]=0.f; fSpecHoldAge[i]=0; }
         fScopeSeries=nullptr; fScopeAreaSeries=nullptr; arpBtn=nullptr;
         kbContainer=kbOctLabel=zoomMinus=zoomPlus=zoomValLbl=nullptr;
         // full range, not the 1-octave prefix 7/5: the arrays are KEY_WHITE_N /
@@ -722,9 +727,13 @@ private:
         clearDropdownRegistry();
         fMasterValLbl=nullptr; fStrikeChannel=0; fNextStrikeChannel=1; fLiveAge=1000; fRebuildInFlight=false;
     }
-    static void previewGeometry(int& cell,int& gap,int& off){
-        gap = scaled(lay::PREVIEW_GAP);
-        const int inner = scaled(lay::PREVIEW_BOX) - 2*scaled(lay::PREVIEW_PAD);
+    // Runtime helper (called from updateBodyPreview), so it measures with this
+    // instance's scale: the builder creates the box from the same PREVIEW_*
+    // tokens at build time, and reading the process-global gUIScale here let a
+    // second editor at a different zoom shift this one's preview grid.
+    void previewGeometry(int& cell,int& gap,int& off) const {
+        gap = mkScaled(lay::PREVIEW_GAP);
+        const int inner = mkScaled(lay::PREVIEW_BOX) - 2*mkScaled(lay::PREVIEW_PAD);
         cell = (inner - 3*gap) / 4;                 // (48 - 3*2)/4 = 10 at s=1
         const int grid = 4*cell + 3*gap;            // 46 <= inner 48
         off = std::max(0, (inner - grid) / 2);      // center the slack
@@ -2748,10 +2757,12 @@ private:
         lv_obj_add_event_cb(presetDropdown,dropdownCb,LV_EVENT_VALUE_CHANGED,this);
         // The other three dropdowns register this and the preset one did not, so
         // exclusivity was one-directional here: opening a material/morph/EDO list
-        // closed the preset list, but not the reverse. A real click is already
-        // covered by LVGL's own click-outside close (measured: the observable
-        // rule holds for all 12 ordered pairs even without this line), so this is
-        // consistency/robustness for non-click opens, not a user-visible fix.
+        // closed the preset list, but not the reverse.
+        // NOT a user-visible fix and NOT covered by an assertion: a real click is
+        // already covered by LVGL's own focus-based close of the other list, so a
+        // click-driven harness probe over every ordered pair passes with and
+        // without this line - it cannot discriminate and was not kept. Kept for
+        // consistency with the other three and for non-click opens.
         lv_obj_add_event_cb(presetDropdown,dropdownExclusiveCb,LV_EVENT_RELEASED,this);
         lv_obj_add_event_cb(presetPrevBtn,presetArrowCb,LV_EVENT_CLICKED,this);
         lv_obj_add_event_cb(presetNextBtn,presetArrowCb,LV_EVENT_CLICKED,this);

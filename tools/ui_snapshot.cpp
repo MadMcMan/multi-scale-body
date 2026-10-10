@@ -893,11 +893,13 @@ static void hostSyncLabelProof(DISTRHO::UIExporter* exp,HWND hwnd){
     const Case cases[]={{PluginMultiScaleBody::kParamModeCount,"Modes"},
                         {PluginMultiScaleBody::kParamGlide,"Glide"},
                         {PluginMultiScaleBody::kParamEcoBudget,"Eco Budget"}};
+    int ran=0;
     for(const Case& c:cases){
         lv_obj_t* arc=findParamArc(lv_screen_active(),c.pi);
         if(!arc){ LOGF("[label] %s knob is not in this layout - skipped\n",c.name); continue; }
         lv_obj_t* lbl=knobValueLabel(arc);
         if(!lbl){ EXPECT(false,std::string("Label: ")+c.name+" value label present"); continue; }
+        ++ran;
         exp->parameterChanged(c.pi,0.67f);
         idleFrames(exp,3);
         const char* t=lv_label_get_text(lbl);
@@ -905,6 +907,8 @@ static void hostSyncLabelProof(DISTRHO::UIExporter* exp,HWND hwnd){
         EXPECT(t && std::strcmp(t,"0.67")!=0,
                std::string("Label: ")+c.name+" keeps its formatted readout after a host sync");
     }
+    // without this a layout where none of the knobs resolve would pass silently
+    EXPECT(ran>0,"Label: at least one knob readout was actually checked");
 }
 
 // ---- info-column spec strip self-test ------------------------------------
