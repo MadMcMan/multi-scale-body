@@ -796,6 +796,57 @@ static void presetBaselineProof(DISTRHO::UIExporter* exp,HWND hwnd){
     lv_obj_send_event(dd,LV_EVENT_VALUE_CHANGED,nullptr);
     idleFrames(exp,6);
 }
+
+// ---- preset browser navigation + dice self-test ---------------------------
+// presetArrowCb (prev/next, including the end wrap) and rndBtnCb (the dice)
+// were both touched in this batch - the arrows now also apply the preset's
+// PHYSICAL MODEL row - and neither path had any coverage. The row's four
+// children are [prev arrow][dropdown][next arrow][dice], so they are reachable
+// from the dropdown itself.
+static void presetNavProof(DISTRHO::UIExporter* exp,HWND hwnd){
+    bool first=true; resizeWindow(hwnd,exp,1440,1068,first);
+    lv_obj_update_layout(lv_screen_active());
+    lv_obj_t* dd=findByClass(lv_screen_active(),"lv_dropdown");
+    EXPECT(dd!=nullptr,"Nav: preset dropdown found");
+    if(!dd) return;
+    lv_obj_t* row=lv_obj_get_parent(dd);
+    const uint32_t n=row?(uint32_t)lv_obj_get_child_count(row):0u;
+    LOGF("[nav] preset row children=%u (expect 4: prev, dropdown, next, dice)\n",(unsigned)n);
+    EXPECT(n>=4,"Nav: preset row has prev/next/dice");
+    if(n<4) return;
+    lv_obj_t* prev=lv_obj_get_child(row,0);
+    lv_obj_t* next=lv_obj_get_child(row,2);
+    lv_obj_t* dice=lv_obj_get_child(row,3);
+    lv_dropdown_set_selected(dd,0);
+    lv_obj_send_event(dd,LV_EVENT_VALUE_CHANGED,nullptr);
+    idleFrames(exp,4);
+    // NEXT: selection advances AND that preset's model row is applied
+    int before=gParamWrites; gLastParam=UINT32_MAX;
+    lv_obj_send_event(next,LV_EVENT_CLICKED,nullptr);
+    idleFrames(exp,6);
+    LOGF("[nav] next -> sel=%d writes=%d last=%u\n",lv_dropdown_get_selected(dd),
+         gParamWrites-before,(unsigned)gLastParam);
+    EXPECT(lv_dropdown_get_selected(dd)==1,"Nav: next advances the selection");
+    EXPECT(gParamWrites-before>=17,"Nav: next applies the preset model row");
+    EXPECT(gLastParam==PluginMultiScaleBody::kParamModelMode,"Nav: arrow path applies the model row");
+    // PREV: steps back, then wraps from preset 0 to the last preset
+    lv_obj_send_event(prev,LV_EVENT_CLICKED,nullptr);
+    idleFrames(exp,6);
+    EXPECT(lv_dropdown_get_selected(dd)==0,"Nav: prev steps back");
+    lv_obj_send_event(prev,LV_EVENT_CLICKED,nullptr);
+    idleFrames(exp,6);
+    LOGF("[nav] prev from 0 -> %d (expect %d)\n",lv_dropdown_get_selected(dd),modal::kNumPresets-1);
+    EXPECT(lv_dropdown_get_selected(dd)==modal::kNumPresets-1,"Nav: prev wraps to the last preset");
+    // DICE: randomize must write a spread of params
+    before=gParamWrites;
+    lv_obj_send_event(dice,LV_EVENT_CLICKED,nullptr);
+    idleFrames(exp,10);
+    LOGF("[nav] dice writes=%d\n",gParamWrites-before);
+    EXPECT(gParamWrites-before>=20,"Nav: dice randomizes a spread of params");
+    lv_dropdown_set_selected(dd,0);                 // leave the default body selected
+    lv_obj_send_event(dd,LV_EVENT_VALUE_CHANGED,nullptr);
+    idleFrames(exp,6);
+}
 END_NAMESPACE_DISTRHO
 
 int main(int argc,char** argv)
@@ -828,6 +879,7 @@ int main(int argc,char** argv)
         presetModelProof(exp,hwnd);
         exposureWiringProof(exp,hwnd);
         presetBaselineProof(exp,hwnd);
+        presetNavProof(exp,hwnd);
         LOGF("SELFTEST RESULT failures=%d\n",gTestFails);
         exp->quit(); delete exp;
         if(gLog) fclose(gLog);
