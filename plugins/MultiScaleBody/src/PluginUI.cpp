@@ -2084,6 +2084,13 @@ private:
     // sounds there. The cursor wraps, so the gesture repeats over and over for as
     // long as you keep playing. The incoming note itself sounds (no note is
     // generated here), so there is exactly one note per advance - no double-fire.
+    //
+    // The on-screen keyboard works in EVERY target, not just the standalone:
+    // UI::sendNote writes a notes ring buffer that the plugin's process reads
+    // back into its MIDI input (JACK DistrhoPluginJACK.cpp:435, CLAP
+    // DistrhoPluginCLAP.cpp:1033, VST3 DistrhoPluginVST3.cpp:1524; LV2 routes it
+    // through the host). So a keyboard press always reaches run() and always
+    // ticks - there is deliberately NO UI-side advance, which would double-fire.
     void playbackTick(){
         if(!fRecPlaying) return;
         if(fRecN<=0) return;
