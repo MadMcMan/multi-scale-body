@@ -178,6 +178,80 @@ int main(){
                 "12-TET scl == classic path (bit-identical mode-0 coeff)");
         printf("12-TET scl identity PASS\n");
     }
+    // --- .scl audit regressions -------------------------------------------------
+    // (1) The count line must be the WHOLE line. The UI's own generator writes a
+    // "<n>-edo" description line (PluginUI.cpp edoSclText) and atoi() used to eat
+    // "12-edo" as the count, so the real count line was parsed as a DEGREE
+    // (folded to 1.5) and every generated N-EDO scale came out corrupted.
+    // (2) The trailing 1200c octave is the PERIOD marker, not a pitch class:
+    // keeping it made the period one MIDI note too long, stretching every octave
+    // above the first by one step.
+    {
+        auto mode0Rad=[&](TestPlug& p,int note,const char* scl){
+            p.testSampleRate2(44100); p.testActivate();
+            p.setState("scale",scl);
+            MidiEvent on{}; on.frame=0; on.size=3; on.data[0]=0x90; on.data[1]=(uint8_t)note; on.data[2]=100;
+            p.testRun2(nullptr,out,512,&on,1);
+            return std::acos(std::clamp((double)p.testEngine().voice(0).cosTheta[0],-1.0,1.0))*44100.0;
+        };
+        char gen[512]="12-edo\n12\n";      // exactly the UI generator's shape
+        for(int k=1;k<=12;++k){ char c[32]; snprintf(c,sizeof(c),"%.6f\n",1200.0*(double)k/12.0); strcat(gen,c); }
+        TestPlug a,b,c; 
+        const double f60=mode0Rad(a,60,gen);
+        const double f61=mode0Rad(b,61,gen);
+        const double f67=mode0Rad(c,67,gen);
+        require(std::fabs(f61/f60-std::pow(2.0,100.0/1200.0))<2e-3,
+                "scl: generated N-EDO count line parses (note 61 == 100 cents)");
+        require(std::fabs(f67/f60-std::pow(2.0,700.0/1200.0))<2e-3,
+                "scl: generated N-EDO note 67 == perfect fifth");
+        printf("scl generated-EDO parse PASS\n");
+        // 7-EDO: one step ABOVE the octave must be 2^(8/7), not 2.0
+        const char* scl7="seven-edo\n7\n171.428571\n342.857143\n514.285714\n685.714286\n857.142857\n1028.571429\n1200.0\n";
+        TestPlug d,e;
+        const double g60=mode0Rad(d,60,scl7);
+        const double g68=mode0Rad(e,68,scl7);
+        require(std::fabs(g68/g60-std::pow(2.0,8.0/7.0))<3e-3,
+                "scl: 7-EDO period is 7 notes (note 68 == 2^(8/7))");
+        printf("scl 7-EDO period PASS\n");
+        // (3) an unparsable/infinite degree must be REJECTED, not spin forever in
+        // the octave-normalisation loop, and the engine must fall back to 12-EDO.
+        TestPlug f,h;
+        const double h60=mode0Rad(h,60,"");                                  // untuned = 12-EDO
+        const char* bad="x\n2\n2000\\1\n";                                   // 2^2000 -> inf
+        const double b60=mode0Rad(f,60,bad);
+        require(std::fabs(b60-h60)<1.0,"scl: infinite degree rejected -> 12-EDO fallback");
+        printf("scl bad-degree fallback PASS\n");
+    }
+    // --- classic-path mode frequencies must not collapse onto one pitch -------
+    // The baked tables store ANGULAR frequency (rad/s) but the classic path
+    // clamped against Hz numbers (f>18000), so every mode above 2.86 kHz was
+    // pinned to exactly 18000 rad/s: Celesta had 72 of its 80 modes folded onto a
+    // single partial (9 distinct frequencies), Kalimba 60, Squirrel 69, Can 73.
+    // Count the distinct mode frequencies the voice actually runs.
+    {
+        TestPlug p;
+        p.testSampleRate2(44100); p.testActivate();
+        p.testSetParameterValue(PluginMultiScaleBody::kParamPreset,
+                                17.f/(float)(modal::kNumPresets-1));   // Celesta
+        p.testSetParameterValue(PluginMultiScaleBody::kParamModeCount,1.0f);
+        MidiEvent on{}; on.frame=0; on.size=3; on.data[0]=0x90; on.data[1]=60; on.data[2]=100;
+        p.testRun2(nullptr,out,512,&on,1);
+        const auto& v=p.testEngine().voice(0);
+        std::vector<int> bins;
+        for(int i=0;i<v.n;++i){
+            const double th=std::acos(std::clamp((double)v.cosTheta[i],-1.0,1.0));
+            const int hz=(int)(th*44100.0/6.283185307);
+            if(hz>0) bins.push_back(hz);
+        }
+        std::sort(bins.begin(),bins.end());
+        bins.erase(std::unique(bins.begin(),bins.end()),bins.end());
+        const int hi=bins.empty()?0:bins.back();
+        printf("collapsed-modes: %d distinct mode freqs, top %d Hz (Celesta)\n",
+               (int)bins.size(),hi);
+        require((int)bins.size()>40,"classic modes do not fold (Celesta distinct freqs)");
+        require(hi>6000,"classic path keeps the preset's top end");
+        printf("classic mode-collapse PASS\n");
+    }
     // --- wave-5: new param defaults are identity -------------------------
     {
         PluginMultiScaleBody p;

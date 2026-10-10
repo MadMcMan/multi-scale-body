@@ -75,7 +75,14 @@ public:
         kParamNoteTick,
         kParameterCount
     };
-    static constexpr uint32_t kNumInputParams = kParamOutLevel+2+2;
+    // Derived, not a magic "+2+2": the outputs are the level-meter block
+    // (kParamOutLevel .. kParamOutBand15) plus the appended note-event tick; every
+    // other declared parameter is an input. The old expression happened to equal 74
+    // but encoded nothing about the appended inputs, so adding or reordering one
+    // silently broke it (and it had exactly one reader, which discarded it).
+    static constexpr uint32_t kNumBandOutputs = kParamOutBand15 - kParamOutLevel + 1;
+    static constexpr uint32_t kNumOutputParams = kNumBandOutputs + 1;   // + kParamNoteTick
+    static constexpr uint32_t kNumInputParams  = kParameterCount - kNumOutputParams;
     static constexpr bool isOutputParameter(uint32_t i){
         return (i>=kParamOutLevel && i<=kParamOutBand15) || i==kParamNoteTick;
     }

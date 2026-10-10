@@ -158,6 +158,11 @@ void PluginMultiScaleBody::initParameter(uint32_t index, Parameter& p){
 }
 void PluginMultiScaleBody::setParameterValue(uint32_t idx,float v){
     if(!isInputParameter(idx)) return;
+    // std::clamp(NaN,0,1) returns NaN (both comparisons are false), so without
+    // this a non-finite value from host automation or a corrupted patch string
+    // would be stored, pushed into the engine's coefficients, and re-serialised
+    // as "nan" - surviving a save/reload cycle.
+    if(!std::isfinite(v)) return;
     v=std::clamp(v,0.f,1.f); paramBase_[idx]=v;
     switch(idx){
         case kParamPitch: engine_.setPitchScale(v); break;
@@ -535,9 +540,18 @@ void PluginMultiScaleBody::rebuildScaleFromScl(const char* sclText){
             // plain-text description line BEFORE it ('!' comments are already
             // skipped); a non-numeric first data line is treated as that
             // description and skipped once.
-            const int c=std::atoi(line.c_str());
-            if(c>=2 && c<=128){ count=c; haveCount=true; continue; }
+            // The WHOLE line must be the integer: atoi() accepts a leading-digit
+            // prefix, and the UI's own EDO generator emits a "<n>-edo"
+            // description (PluginUI.cpp edoSclText), which atoi would happily
+            // eat as the count - leaving the real count line to be parsed as a
+            // degree and corrupting the whole scale.
+            char* cend=nullptr;
+            const long c=std::strtol(line.c_str(),&cend,10);
+            if(cend!=line.c_str() && cend && *cend=='\0' && c>=2 && c<=128){
+                count=(int)c; haveCount=true; continue;
+            }
             if(!skippedName){ skippedName=true; continue; }
+            engine_.setTuning(scaleRatios_,false);   // rejected: engine must not keep the old scale
             return;                     // two non-numeric lines: invalid file
         }
         if((int)deg.size()>=count) break;             // trailing lines ignored
@@ -557,12 +571,33 @@ void PluginMultiScaleBody::rebuildScaleFromScl(const char* sclText){
         } else {                                       // integer ratio n/1
             ratio=(double)std::atoi(line.c_str()); ok=true;
         }
-        if(!ok || !(ratio>0.0)) return;               // parse failure -> 12-EDO
+        // inf must be rejected here too: inf*0.5 is still inf, so the folding
+        // loops below would never terminate (a malformed line like "2000\1"
+        // overflows pow(2,2000) to inf and used to hang setState -> host freeze).
+        if(!ok || !(ratio>0.0) || !std::isfinite(ratio)){
+            engine_.setTuning(scaleRatios_,false);   // rejected: drop the old tuning too
+            return;                                  // parse failure -> 12-EDO
+        }
         while(ratio>=2.0) ratio*=0.5;
         while(ratio<1.0) ratio*=2.0;
         deg.push_back(ratio);
     }
-    if(!haveCount || (int)deg.size()<count) return;
+    if(!haveCount || (int)deg.size()<count){
+        // A truncated/absent degree list used to return here leaving the
+        // engine on whatever scale was loaded before: the UI and getState
+        // showed the new file while the sound stayed on the old tuning, and it
+        // silently snapped to identity at the next sample-rate change.
+        engine_.setTuning(scaleRatios_,false);
+        return;
+    }
+    // A trailing octave line (1200.000000 cents, or a 2/1 ratio) folds to exactly
+    // 1.0 above. It is the PERIOD MARKER, not a pitch class of its own: leaving
+    // it in the table makes the period one MIDI note too long, so every octave
+    // above the first is stretched by one step (7-EDO repeated every 8 semitones
+    // and drifted ~5 semitones by the top of the keyboard).
+    if(count>1 && (int)deg.size()>=count && std::fabs(deg[(size_t)count-1]-1.0)<1e-9){
+        deg.pop_back(); --count;
+    }
     // Convention: if the FILE lists the tonic itself (first degree parses to
     // 1.0), degree k sits on MIDI note (first+k) and the scale repeats every
     // N notes. Otherwise the tonic is implicit on note `first` (ratio 1.0)
@@ -581,25 +616,13 @@ void PluginMultiScaleBody::rebuildScaleFromScl(const char* sclText){
     // optional kbm: first (base) note + optional consecutive note list
     int first=60;
     if(!kbmTxt_.empty()){
-        int f=60,l=119;
-        if(std::sscanf(kbmTxt_.c_str(),"%d,%d",&f,&l)>=1 && f>=0 && f<128) first=f;
-        const char* semi=strchr(kbmTxt_.c_str(),';');
-        if(semi){
-            std::vector<int> notes;
-            const char* c=semi+1;
-            while(*c){
-                int nn=0;
-                if(std::sscanf(c,"%d",&nn)!=1) break;
-                if(nn<0||nn>127){ notes.clear(); break; }
-                notes.push_back(nn);
-                const char* nc=strchr(c,',');
-                if(!nc) break;
-                c=nc+1;
-            }
-            bool consec=((int)notes.size()==M);
-            if(consec) for(int i=0;i<M;++i) if(notes[i]!=first+i){ consec=false; break; }
-            if(!consec) notes.clear(); // non-consecutive lists unsupported -> consecutive default
-        }
+        // Only the base note is honoured. The optional ";a,b,c" degree-to-note
+        // list used to be parsed here, validated against M and then DISCARDED
+        // (nothing ever read `notes`), so it silently had no effect while costing
+        // a heap allocation and sscanf work on every scale/kbm state load. The
+        // mapping is consecutive-by-default, which is what the engine applies.
+        int f=60;
+        if(std::sscanf(kbmTxt_.c_str(),"%d",&f)>=1 && f>=0 && f<128) first=f;
     }
     for(int midi=0;midi<128;++midi){
         const int rel=midi-first;
