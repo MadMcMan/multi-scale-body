@@ -270,7 +270,9 @@ static void idleFrames(DISTRHO::UIExporter* exp, int n)
     // timer never fires - which silently left the entire 30 Hz path (output
     // meter, MODE MAP repaint, disc heatmap, and the motion-recorder playback
     // step) unexercised. Found by the recorder-loop self-test, which asserted
-    // an advance that could never happen because playbackTick() was unreachable.
+    // an advance that could never happen because the recorder's advance was
+    // unreachable (it was timer-driven then; it is synchronous now, which is
+    // what made the bug obvious).
     for(int i=0;i<n && exp->plugin_idle();++i){ Sleep(16); lv_timer_handler(); }
 }
 
