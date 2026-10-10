@@ -41,7 +41,6 @@ struct ArcDragState{ lv_point_t startPoint{0,0}; int startValue=0; bool active=f
 struct ArcVisualBinding{ lv_obj_t* face=nullptr; lv_obj_t* valueLabel=nullptr; };
 static std::unordered_map<lv_obj_t*, ArcDragState> gArcDragStates;
 static std::unordered_map<lv_obj_t*, ArcVisualBinding> gArcVisualBindings;
-static std::unordered_map<lv_obj_t*, int> gArcParamIndex;
 
 // Our own tuned arc mapping: 2250 = 225° => arc 135° + face pivot offset
 // (needle up = north 270°, so 135-270 = -135 = 225°). Kept from the original
@@ -64,11 +63,11 @@ static void sharedArcVisualEventCb(lv_event_t* e){
 // DELETE gets its OWN callback: syncFromParam() removes sharedArcVisualEventCb
 // to re-arm it, and lv_obj_remove_event_cb strips EVERY descriptor with a
 // matching cb -- so a shared handler would lose the cleanup and leak
-// gArcVisualBindings/gArcDragStates/gArcParamIndex entries (with dangling
+// gArcVisualBindings/gArcDragStates entries (with dangling
 // face/valueLabel pointers) on every rebuild.
 static void sharedArcDeleteCb(lv_event_t* e){
     lv_obj_t* arc=(lv_obj_t*)lv_event_get_target(e);
-    if(lv_event_get_code(e)==LV_EVENT_DELETE){ gArcVisualBindings.erase(arc); gArcDragStates.erase(arc); gArcParamIndex.erase(arc); }
+    if(lv_event_get_code(e)==LV_EVENT_DELETE){ gArcVisualBindings.erase(arc); gArcDragStates.erase(arc); }
 }
 static void allowChildOverflow(lv_obj_t* obj){
     lv_obj_add_flag(obj, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
@@ -167,7 +166,6 @@ struct UIWidgets {
         lv_obj_clear_flag(arc,LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_style_anim_duration(arc,200,0);
         lv_obj_set_user_data(arc,(void*)(intptr_t)paramIndex);
-        gArcParamIndex[arc]=paramIndex;
         lv_obj_add_event_cb(arc,arcDragCb,LV_EVENT_ALL,ui);
         lv_obj_add_event_cb(arc,sharedArcVisualEventCb,LV_EVENT_VALUE_CHANGED,nullptr);
         lv_obj_add_event_cb(arc,sharedArcDeleteCb,LV_EVENT_DELETE,nullptr);
@@ -213,7 +211,6 @@ struct UIWidgets {
         if(it!=gArcVisualBindings.end()&&it->second.valueLabel){ char buf[32]; snprintf(buf,sizeof(buf),"%.2f",v); lv_label_set_text(it->second.valueLabel,buf); }
         // also sync the hidden modRing if present? not needed for this synth
     }
-    static void updateLabel(lv_obj_t* label,float v){ if(label){ char buf[32]; snprintf(buf,sizeof(buf),"%.2f",v); lv_label_set_text(label,buf); } }
 };
 END_NAMESPACE_DISTRHO
 #endif

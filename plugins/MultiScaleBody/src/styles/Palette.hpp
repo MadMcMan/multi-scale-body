@@ -232,7 +232,6 @@ namespace lay {
     constexpr int MAP_BAR_W = 1;              // per-mode bar width (128-slot comb)
     constexpr int MAP_PEAK_H = 12;            // PEAK/M<n> readout row under the bars
     // top-bar identity cluster: brand mark | preset dropdown | master knob | zoom
-    constexpr int NAV_CHIP_W = 86, NAV_CHIP_GAP = 6;
     // === R5: DAMPING panel (per-band tail-time map, fills infoCol dead band) ===
     // Paper-47 physics: each baked preset has 128 modes with per-mode decay
     // RATES; mean decay across a frequency band is the body's damping at
@@ -259,8 +258,6 @@ namespace lay {
     // dividers + info row 52 + strip 62 + card 430 + 6 gaps*6 = 602 of 610.
     constexpr int DAMP_CARD_H = 430;
     constexpr int DAMP_ROW_H = 22;              // per-band row (16 fit cleanly)
-    constexpr int DAMP_LABEL_W = 22;            // "B1".."B16" column
-    constexpr int DAMP_VAL_W = 40;              // tail-time value column
 }
 
  extern float gUIScale;

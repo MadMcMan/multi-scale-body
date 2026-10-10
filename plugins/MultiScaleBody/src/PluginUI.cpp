@@ -347,9 +347,11 @@ public:
     int extraWidgetCount=0;
     void syncParamWidget(uint32_t i,float v) override {
         if(i>=PluginMultiScaleBody::kParameterCount) return;
-        if(widgets[i]) UIWidgets::syncFromParam(widgets[i],v);
-        for(int e=0;e<extraWidgetCount;++e) if(extraWidgets[e].pi==i && extraWidgets[e].arc)
+        if(widgets[i]){ UIWidgets::syncFromParam(widgets[i],v); formatKnobText(widgets[i],(int)i); }
+        for(int e=0;e<extraWidgetCount;++e) if(extraWidgets[e].pi==i && extraWidgets[e].arc){
             UIWidgets::syncFromParam(extraWidgets[e].arc,v);
+            formatKnobText(extraWidgets[e].arc,(int)i);
+        }
     }
     void regExtraWidget(uint32_t pi, lv_obj_t* arc){
         if(extraWidgetCount>=kMaxExtraWidgets) return;
@@ -673,11 +675,13 @@ private:
         fSpectrumChart=fScopeChart=fLevelBar=fLevelPeak=zoneWarnMark=zoneHotMark=nullptr;
         fScopeSeries=nullptr; fScopeAreaSeries=nullptr; arpBtn=nullptr;
         kbContainer=kbOctLabel=zoomMinus=zoomPlus=zoomValLbl=nullptr;
-        for(int i=0;i<7;++i) kbWhite[i]=nullptr;
-        for(int i=0;i<5;++i) kbBlack[i]=nullptr;
+        // full range, not the 1-octave prefix 7/5: the arrays are KEY_WHITE_N /
+        // KEY_BLACK_N and a rebuild deletes the objects they point at
+        for(int i=0;i<lay::KEY_WHITE_N;++i) kbWhite[i]=nullptr;
+        for(int i=0;i<lay::KEY_BLACK_N;++i) kbBlack[i]=nullptr;
         // R5: damping panel - bars + value labels
         for(int i=0;i<16;++i){ fDampBars[i]=nullptr; fDampVals[i]=nullptr; }
-        fDampMax=1.f; fDampPresetCache=-1; fDampDecayCache=-1.f; fDampBandSumCache=-1.f; fDampPhysSumCache=-1.f;
+        fDampPresetCache=-1; fDampDecayCache=-1.f; fDampBandSumCache=-1.f; fDampPhysSumCache=-1.f;
         fDampDragBand=-1;
         for(int i=0;i<100;++i) fHeatDots[i]=nullptr; fHeatCount=0; fHeatDirty=true; fModeFocus=-1;
         // A rebuild creates BRAND-NEW derived views (the mode-map bars are born
@@ -689,6 +693,11 @@ private:
         // zoom/resize until some unrelated parameter happened to change.
         fModeMapDirty=true;
         fScopePreviewReady=false;
+        // the bars themselves: 128 pointers into the tree that is about to be
+        // deleted. buildUI reassigns them all, but if it ever returns early
+        // (null surface) the next tick would read freed objects.
+        for(int i=0;i<modal::kMaxModes;++i) fModeBars[i]=nullptr;
+        fModePeakIdx=-1;
         fScrubMode=0; fScrubParamIdx=-1; fScrubToggle=nullptr;
         fScrubLbl=nullptr; fScrubLblAge=0; fScrubBand=-1; fScrubLevel=-1.f;
         for(int i=0;i<16;++i) fBandTicks[i]=nullptr; fBandTicksDirty=true;
@@ -794,7 +803,7 @@ private:
                 lv_obj_t* cellObj=lv_obj_create(bodyPreview);
                 lv_obj_set_size(cellObj,cell,cell);
                 lv_obj_set_pos(cellObj, off + x*(cell+gap), off + y*(cell+gap));
-                lv_obj_set_style_radius(cellObj,scaled(3),0);
+                lv_obj_set_style_radius(cellObj,mkScaled(3),0);
                 lv_obj_set_style_border_width(cellObj,1,0);
                 lv_obj_set_style_border_color(cellObj,COL_HAIRLINE,0);
                 lv_obj_set_style_pad_all(cellObj,0,0);
@@ -825,7 +834,7 @@ private:
                     else if(name=="Xylo") base = MAT_WOOD;         // rosewood bar
                     lv_obj_set_style_bg_color(cellObj,base,0);
                     lv_obj_set_style_bg_opa(cellObj, (lv_opa_t)(LV_OPA_30 + occ*0.7f*255),0);
-                    lv_obj_set_style_shadow_width(cellObj, occ>0.9f?scaled(4):0,0);
+                    lv_obj_set_style_shadow_width(cellObj, occ>0.9f?mkScaled(4):0,0);
                     lv_obj_set_style_shadow_color(cellObj,base,0);
                     lv_obj_set_style_shadow_opa(cellObj, occ>0.6f?LV_OPA_30:LV_OPA_0,0);
                 }
@@ -1011,7 +1020,6 @@ private:
             bandT60[b]=t60;
             if(t60>maxT60) maxT60=t60;
         }
-        fDampMax=maxT60;
         // paint bars + values
         for(int b=0;b<16;++b){
             int m0=(b*pr.n)/16;
@@ -1073,7 +1081,7 @@ private:
     static void resonanceDrawCb(lv_event_t* e){
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
         lv_obj_t* disc=(lv_obj_t*)lv_event_get_target(e);
-        if(!ui||!disc||!ui->fShowSurface) return;
+        if(!ui||!disc) return;
         if(!(ui->fGotLiveViz && ui->fLiveAge<45)) return;
         ui->ensureBandAvg();
         float eMax=0.f; for(int b=0;b<16;++b) eMax=std::max(eMax,ui->fVizBins[b]);
@@ -1192,9 +1200,9 @@ private:
                 if(v<0.02f) continue;
                 if(fHeatCount>=100) return;
                 lv_obj_t* dot=lv_obj_create(strikeDisc);
-                lv_obj_set_size(dot, scaled(dotS), scaled(dotS));
-                lv_obj_set_pos(dot, margin + gx*cell + (cell-scaled(dotS))/2,
-                                   margin + gy*cell + (cell-scaled(dotS))/2);
+                lv_obj_set_size(dot, mkScaled(dotS), mkScaled(dotS));
+                lv_obj_set_pos(dot, margin + gx*cell + (cell-mkScaled(dotS))/2,
+                                   margin + gy*cell + (cell-mkScaled(dotS))/2);
                 lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
                 lv_obj_set_style_bg_color(dot, hl?PLATE_AMBER_PALE:COL_HIGHLIGHT, 0);
                 // R4: raised floor/ceiling (was LV_OPA_10..LV_OPA_70) -
@@ -1245,13 +1253,13 @@ private:
     void placeLastStrike(int px,int py){
         if(!strikeDisc) return;
         if(!strikeLastMark){
-            strikeLastMark=makeBox(strikeDisc,scaled(lay::DISC_STRIKE_MARKER),scaled(lay::DISC_STRIKE_MARKER));
+            strikeLastMark=makeBox(strikeDisc,mkScaled(lay::DISC_STRIKE_MARKER),mkScaled(lay::DISC_STRIKE_MARKER));
             lv_obj_set_style_radius(strikeLastMark,LV_RADIUS_CIRCLE,0);
             lv_obj_set_style_bg_color(strikeLastMark,COL_HIGHLIGHT,0);
             lv_obj_set_style_bg_opa(strikeLastMark,LV_OPA_COVER,0);
             lv_obj_set_style_border_color(strikeLastMark,PLATE_AMBER_PALE,0);
             lv_obj_set_style_border_width(strikeLastMark,1,0);
-            lv_obj_set_style_shadow_width(strikeLastMark,scaled(8),0);
+            lv_obj_set_style_shadow_width(strikeLastMark,mkScaled(8),0);
             lv_obj_set_style_shadow_color(strikeLastMark,COL_HIGHLIGHT,0);
             lv_obj_set_style_shadow_opa(strikeLastMark,LV_OPA_60,0);
             lv_obj_clear_flag(strikeLastMark,LV_OBJ_FLAG_CLICKABLE);
@@ -1265,7 +1273,7 @@ private:
         if(!strikeDisc || !strikeDot) return;
         lv_coord_t pw = lv_obj_get_width(strikeDisc);
         lv_coord_t ph = lv_obj_get_height(strikeDisc);
-        int dotS = scaled(lay::DOT+4);              // mallet marker 12px base
+        int dotS = mkScaled(lay::DOT+4);              // mallet marker 12px base
         if(pw<=0||ph<=0) return;                    // no geometry yet; timer retries
         int x = (int)(paramCache[PluginMultiScaleBody::kParamStrikeX] * (pw - dotS));
         int y = (int)((1.f - paramCache[PluginMultiScaleBody::kParamStrikeY]) * (ph - dotS));
@@ -1298,7 +1306,7 @@ private:
         for(int k=0;k<nRings;++k){
             lv_obj_t* ring=lv_obj_create(strikeDisc);
             lv_obj_remove_style_all(ring);
-            int d0=scaled(lay::DOT+6);
+            int d0=mkScaled(lay::DOT+6);
             lv_obj_set_size(ring,d0,d0);
             lv_obj_set_pos(ring,cx-d0/2,cy-d0/2);
             lv_obj_set_style_radius(ring,LV_RADIUS_CIRCLE,0);
@@ -1416,6 +1424,29 @@ private:
             default:                 snprintf(buf,cap,"%.2f",v); break;
         }
     }
+    // Repaint a knob's readout with its contextual text. Called from
+    // valueFormatCb (user drags) AND from syncParamWidget (host automation,
+    // preset loads): UIWidgets::syncFromParam ends by writing a raw "%.2f" to
+    // the same label and sends no VALUE_CHANGED, so without the second caller a
+    // preset load left the Modes knob reading "0.67" instead of "80". Direct
+    // call, deliberately not a synthetic LV_EVENT_VALUE_CHANGED, which would
+    // re-enter the knob callbacks.
+    void formatKnobText(lv_obj_t* arc,int pi) const {
+        if(!arc) return;
+        // Master arc writes its owned beside-arc label (the widget's own
+        // built-in labels are hidden) with the formatted dB readout.
+        if(pi==PluginMultiScaleBody::kParamVolume && fMasterValLbl){
+            char b[24]; formatParamValue(pi,lv_arc_get_value(arc)/1000.f,b,sizeof(b));
+            lv_label_set_text(fMasterValLbl,b);
+            return;
+        }
+        auto fIt=gArcVisualBindings.find(arc);
+        lv_obj_t* lbl=(fIt!=gArcVisualBindings.end())?fIt->second.valueLabel:nullptr;
+        if(!lbl||!lv_obj_check_type(lbl,&lv_label_class)) return;
+        char buf[24];
+        formatParamValue(pi,lv_arc_get_value(arc)/1000.f,buf,sizeof(buf));
+        lv_label_set_text(lbl,buf);
+    }
     // registered AFTER UIWidgets' own arc handlers (insertion order), so the
     // formatted text wins over their raw %.2f writes on every drag frame
     static void valueFormatCb(lv_event_t* e){
@@ -1424,20 +1455,7 @@ private:
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
         lv_obj_t* arc=(lv_obj_t*)lv_event_get_target(e);
         if(!ui||!arc) return;
-        int pi=(int)(intptr_t)lv_obj_get_user_data(arc);
-        // Master arc writes its owned beside-arc label (the widget's own
-        // built-in labels are hidden) with the formatted dB readout.
-        if(pi==PluginMultiScaleBody::kParamVolume && ui->fMasterValLbl){
-            char b[24]; ui->formatParamValue(pi,lv_arc_get_value(arc)/1000.f,b,sizeof(b));
-            lv_label_set_text(ui->fMasterValLbl,b);
-            return;
-        }
-        auto fIt=gArcVisualBindings.find(arc);
-        lv_obj_t* lbl=(fIt!=gArcVisualBindings.end())?fIt->second.valueLabel:nullptr;
-        if(!lbl||!lv_obj_check_type(lbl,&lv_label_class)) return;
-        char buf[24];
-        ui->formatParamValue(pi,lv_arc_get_value(arc)/1000.f,buf,sizeof(buf));
-        lv_label_set_text(lbl,buf);
+        ui->formatKnobText(arc,(int)(intptr_t)lv_obj_get_user_data(arc));
     }
     // spectrum peak-hold caps: falling-hold markers painted over the bars in
     // DRAW_POST_END. Peak state lives in fSpecPeaks[]/fSpecHoldAge[]; y-mapping
@@ -1462,7 +1480,7 @@ private:
             lv_draw_rect_dsc_t dsc; lv_draw_rect_dsc_init(&dsc);
             dsc.bg_color=PLATE_AMBER_PALE; dsc.bg_opa=LV_OPA_80;
             dsc.radius=1; dsc.border_width=0; dsc.shadow_width=0;
-            lv_coord_t w=scaled(lay::PEAK_CAP_W), hh=scaled(lay::PEAK_CAP_H);
+            lv_coord_t w=ui->mkScaled(lay::PEAK_CAP_W), hh=ui->mkScaled(lay::PEAK_CAP_H);
             lv_area_t a;
             a.x1=(lv_coord_t)(cc.x1+pl+p.x-w/2); a.x2=a.x1+w-1;
             a.y1=(lv_coord_t)(contentBottom-h*ui->fSpecPeaks[b]-hh/2);
@@ -2127,7 +2145,7 @@ private:
         setParamValue(PluginMultiScaleBody::kParamStrikeY,fRecY[fRecCursor]);
         fRecCursor=(fRecCursor+1)%fRecN;      // loop over and over
     }
-    // ---- small builder helpers (all sizes flow through scaled()) ----------
+    // ---- small builder helpers (all sizes flow through mkScaled()) ----------
     static lv_obj_t* makeBox(lv_obj_t* parent,lv_coord_t w,lv_coord_t h){
         lv_obj_t* c=lv_obj_create(parent);
         lv_obj_set_size(c,w,h);
@@ -3239,7 +3257,6 @@ private:
         // piece-3: one vertical gridline per band (16) so the analyzer reads as
         // 16 discrete mode bins, not 12 generic column dividers. Opacity stays
         // at OPA_30 below; the per-band peak tick is what carries the highlight.
-        lv_chart_set_div_line_count(chart,4,16);
         lv_obj_set_style_line_color(chart,PLATE_LINE,LV_PART_MAIN); lv_obj_set_style_line_width(chart,1,LV_PART_MAIN); lv_obj_set_style_line_opa(chart,LV_OPA_30,LV_PART_MAIN);
         lv_chart_series_t* series=lv_chart_add_series(chart,COL_HIGHLIGHT,LV_CHART_AXIS_PRIMARY_Y);
         lv_chart_set_series_color(chart,series,COL_HIGHLIGHT); lv_chart_set_update_mode(chart,LV_CHART_UPDATE_MODE_CIRCULAR);
@@ -3339,9 +3356,12 @@ private:
         lv_obj_set_style_line_width(scope,scaled(2),LV_PART_ITEMS);
         lv_obj_set_style_line_color(scope,COL_LIVE,LV_PART_ITEMS);
         lv_obj_set_style_line_opa(scope,LV_OPA_COVER,LV_PART_ITEMS);
-        // round-7: simpler fix - just make the line thicker + add a dim area
-        // fill via a second series that mirrors the line. Both seeded.
-        // (area series is added first so it paints behind the line)
+        // round-7: simpler fix - just make the line thicker + add a dim trace
+        // behind it. Both seeded. The dim series is a 1px OPA_50 under-trace,
+        // NOT an area fill (LVGL has no per-series area fill; the comment here
+        // used to claim one). It is fed the same value as the bright series so
+        // the two stay coincident - cheap, and it softens the line's edge.
+        // (dim series is added first so it paints behind the line)
         lv_chart_series_t* ssArea=lv_chart_add_series(scope,COL_LIVE_DIM,LV_CHART_AXIS_PRIMARY_Y);
         lv_obj_set_style_line_color(scope,COL_LIVE_DIM,LV_PART_ITEMS);
         lv_obj_set_style_line_opa(scope,LV_OPA_50,LV_PART_ITEMS);
@@ -3548,7 +3568,7 @@ private:
             if(hasGain && hasDecay) col=PLATE_TRIM_BOTH;   // never hide the second trim
             if(b==fScrubBand){ col=PLATE_AMBER_PALE; ls=1; }
             lv_obj_set_style_text_color(lbl,col,0);
-            lv_obj_set_style_text_letter_space(lbl,scaled(ls),0);
+            lv_obj_set_style_text_letter_space(lbl,mkScaled(ls),0);
         }
     }
     void updateSpectrumDisplay(){
@@ -3607,7 +3627,7 @@ private:
             for(int b=0;b<16;++b) bins[b]/=mxv;
             totalE=peakOf(bins)*0.35f;
         }
-        static float env[16]={};
+        float* env=fSpecEnv;   // per-instance: a local static was shared by every editor
         for(int b=0;b<16;++b){
             float target=bins[b];
             env[b]=(target>env[b])?env[b]+(target-env[b])*0.6f:env[b]+(target-env[b])*0.18f;
@@ -3628,20 +3648,18 @@ private:
             const int ew=1+(fDiscEnergy>0.5f?1:0);
             lv_obj_set_style_border_opa(discEnergyRing,(lv_opa_t)eo,0);
             lv_obj_set_style_border_width(discEnergyRing,ew,0);
-            lv_obj_set_style_shadow_width(discEnergyRing,(lv_coord_t)(scaled(4.0f+10.0f*fDiscEnergy)),0);
+            lv_obj_set_style_shadow_width(discEnergyRing,(lv_coord_t)(mkScaled(4.0f+10.0f*fDiscEnergy)),0);
             lv_obj_set_style_shadow_color(discEnergyRing,COL_HIGHLIGHT,0);
             lv_obj_set_style_shadow_opa(discEnergyRing,(lv_opa_t)(fDiscEnergy*70.f),0);
         }
         // While the resonant-surface field is LIVE, fade out the static
         // hit-aim dots so the disc reads as ONE surface that is ringing,
         // rather than two overlapping grids. Idle (aim mode) shows the dots.
-        if(fShowSurface){
-            const bool fieldLive=live && peakOf(fVizBins)>0.02f;
-            for(int i=0;i<fHeatCount;++i){
-                if(!fHeatDots[i]||!lv_obj_is_valid(fHeatDots[i])) continue;
-                if(fieldLive) lv_obj_add_flag(fHeatDots[i],LV_OBJ_FLAG_HIDDEN);
-                else         lv_obj_clear_flag(fHeatDots[i],LV_OBJ_FLAG_HIDDEN);
-            }
+        const bool fieldLive=live && peakOf(fVizBins)>0.02f;
+        for(int i=0;i<fHeatCount;++i){
+            if(!fHeatDots[i]||!lv_obj_is_valid(fHeatDots[i])) continue;
+            if(fieldLive) lv_obj_add_flag(fHeatDots[i],LV_OBJ_FLAG_HIDDEN);
+            else         lv_obj_clear_flag(fHeatDots[i],LV_OBJ_FLAG_HIDDEN);
         }
         // ROUND-6: MODE MAP bars (hero column). Per-mode strike gains from the
         // bilinear sound-map (baked ModalData + current preset / strike X/Y /
@@ -3682,7 +3700,7 @@ private:
             }
             int peakM=0;
             float peakG=-1.f;
-            const lv_coord_t maxH=(lv_coord_t)(scaled(lay::MAP_BARS_H)-2);
+            const lv_coord_t maxH=(lv_coord_t)(mkScaled(lay::MAP_BARS_H)-2);
             for(int m=0;m<modal::kMaxModes;++m){
                 // FIX: heights were never written - bars kept their 1px
                 // construction height (the flat dotted line). Active modes
@@ -3696,7 +3714,7 @@ private:
                 }
                 fModeMapH[m]=hh2;
                 lv_obj_t* bar=fModeBars[m];
-                if(bar) lv_obj_set_size(bar,scaled(lay::MAP_BAR_W),hh2);
+                if(bar) lv_obj_set_size(bar,mkScaled(lay::MAP_BAR_W),hh2);
             }
             for(int m=0;m<modal::kMaxModes;++m){
                 lv_obj_t* bar=fModeBars[m];
@@ -3796,6 +3814,14 @@ private:
     UIStyles styles;
     bool fUIBuilt=false;   // tracks whether buildUI() has populated the tree
     float fBuiltScale=1.0f;   // per-instance scale the current tree was built at (multi-instance safe)
+    // Instance-scoped counterpart of mkScaled() for everything that runs AFTER
+    // the build: the 33 ms spectrum timer, DRAW_POST_END handlers, the ripple
+    // animation and the parameter-driven marker updates. mkScaled() reads the
+    // process-global gUIScale, which every instance rewrites in uiIdle(), so
+    // with two editors open at different zoom steps a runtime path could compute
+    // this instance's geometry with the other instance's scale. Same rounding as
+    // mkScaled() so a single-instance build is unaffected.
+    lv_coord_t mkScaled(lv_coord_t base) const { return (lv_coord_t)(base * fBuiltScale + 0.5f); }
     // fRebuildInFlight: true while rebuildForScale() is mid-rebuild. uiReshape
     // and uiIdle both call rebuildForScale; if a resize re-enters while the
     // first rebuild is still constructing the new tree, the second pass can
@@ -3834,7 +3860,6 @@ private:
     // surface motion, so the disc visibly rings and decays with the body.
     float fBandAvg[16][16][16]={};
     int fBandAvgPreset=-1;              // preset the cache was built for (-1 = stale)
-    bool fShowSurface=true;             // surface overlay visibility toggle
     lv_obj_t* strikeCoordLabel=nullptr;
     lv_obj_t* presetDropdown=nullptr;
     // piece-6: preset browser prev/next mini arrows flanking the dropdown
@@ -3892,7 +3917,6 @@ private:
     // the trace switches to the audio-rate envelope.
     float fScopePreview[128]={};
     bool fScopePreviewReady=false;
-    int fScopePreviewIdx=0;
     lv_obj_t* arpBtn=nullptr;
     bool arpOnLocal=false;
     // keyboard - round-6: 3 octaves (C3-B5) spanning the full footer strip
@@ -3908,6 +3932,7 @@ private:
     lv_obj_t* zoomValLbl=nullptr;
     int fZoomIdx=2;   // 100% (index into lay::ZOOM_STEPS)
     // spectrum peak-hold caps (falling-hold markers above the bars)
+    float fSpecEnv[16]={};   // per-instance meter envelope (was a fn-local static)
     float fSpecPeaks[16]={};
     int fSpecHoldAge[16]={};
     // ROUND-6: MODE MAP (per-mode strike-gain comb, disc column). Gains come
@@ -3929,14 +3954,13 @@ private:
     int fModeFocus=-1;
     // R5: DAMPING panel (per-band tail-time map, infoCol dead-band fill).
     // 16 bars, one per frequency band, each holding a normalized 0..1000
-    // fill value; 16 value labels read "<T60> s" per band. fDampMax
-    // caches the longest-band T60 (in seconds) for the current preset so
-    // subsequent updates skip the loop when neither preset nor DECAY knob
-    // moved (same gating as fModeMapDirty).
+    // fill value; 16 value labels read "<T60> s" per band. The longest-band T60
+    // is a local in updateDampingDisplay (the member that used to cache it was
+    // written and never read); updates still skip the loop when neither preset
+    // nor DECAY knob moved (same gating as fModeMapDirty).
     lv_obj_t* fDampBars[16]={};
     lv_obj_t* fDampVals[16]={};
     int fDampDragBand=-1;    // DAMPING panel: band whose edit bracket is open
-    float fDampMax=1.f;
     int fDampPresetCache=-1;
     float fDampDecayCache=-1.f;
     float fDampBandSumCache=-1.f;

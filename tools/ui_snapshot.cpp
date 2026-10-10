@@ -864,6 +864,49 @@ static void presetNavProof(DISTRHO::UIExporter* exp,HWND hwnd){
     idleFrames(exp,6);
 }
 
+// ---- host-sync readout self-test -----------------------------------------
+// A host/preset sync must leave a knob showing its CONTEXTUAL text.
+// UIWidgets::syncFromParam ends by writing a raw "%.2f" into the value label and
+// sends no VALUE_CHANGED, so before this fix every host automation write or
+// preset load reverted the readout - Modes "88" became "0.67", Glide "90 MS"
+// became "0.15", Wet "30 %" became "0.30" - and it stayed raw until the knob was
+// dragged. syncParamWidget now re-runs the formatter after the sync.
+// createArcKnob puts the caption label first in the knob container and the value
+// readout last, so tree order identifies it (the widget's own
+// gArcVisualBindings map is a `static` in a header, i.e. one copy per TU, and
+// this harness is a different TU from PluginUI.cpp).
+static lv_obj_t* knobValueLabel(lv_obj_t* arc){
+    if(!arc) return nullptr;
+    lv_obj_t* cont=lv_obj_get_parent(arc);
+    if(!cont) return nullptr;
+    lv_obj_t* last=nullptr;
+    for(uint32_t i=0;i<lv_obj_get_child_count(cont);++i){
+        lv_obj_t* c=lv_obj_get_child(cont,i);
+        if(lv_obj_check_type(c,&lv_label_class)) last=c;
+    }
+    return last;
+}
+static void hostSyncLabelProof(DISTRHO::UIExporter* exp,HWND hwnd){
+    bool first=true; resizeWindow(hwnd,exp,1440,1068,first);
+    lv_obj_update_layout(lv_screen_active());
+    struct Case{ uint32_t pi; const char* name; };
+    const Case cases[]={{PluginMultiScaleBody::kParamModeCount,"Modes"},
+                        {PluginMultiScaleBody::kParamGlide,"Glide"},
+                        {PluginMultiScaleBody::kParamEcoBudget,"Eco Budget"}};
+    for(const Case& c:cases){
+        lv_obj_t* arc=findParamArc(lv_screen_active(),c.pi);
+        if(!arc){ LOGF("[label] %s knob is not in this layout - skipped\n",c.name); continue; }
+        lv_obj_t* lbl=knobValueLabel(arc);
+        if(!lbl){ EXPECT(false,std::string("Label: ")+c.name+" value label present"); continue; }
+        exp->parameterChanged(c.pi,0.67f);
+        idleFrames(exp,3);
+        const char* t=lv_label_get_text(lbl);
+        LOGF("[label] %-11s host sync -> '%s'\n",c.name,t?t:"(null)");
+        EXPECT(t && std::strcmp(t,"0.67")!=0,
+               std::string("Label: ")+c.name+" keeps its formatted readout after a host sync");
+    }
+}
+
 // ---- info-column spec strip self-test ------------------------------------
 // The BODY/MODES/MAT/F0 strip was built as a 0-height container. LVGL's
 // content-size sentinel is LV_SIZE_CONTENT, so an explicit 0 is an EMPTY area
@@ -947,6 +990,7 @@ int main(int argc,char** argv)
         presetBaselineProof(exp,hwnd);
         presetNavProof(exp,hwnd);
         specStripProof(exp,hwnd);
+        hostSyncLabelProof(exp,hwnd);
         LOGF("SELFTEST RESULT failures=%d\n",gTestFails);
         exp->quit(); delete exp;
         if(gLog) fclose(gLog);
