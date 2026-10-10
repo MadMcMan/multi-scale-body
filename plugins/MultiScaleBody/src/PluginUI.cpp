@@ -384,9 +384,13 @@ public:
             fGotLiveViz=true; fLiveAge=0;
             return;
         }
-        // note-event tick: each bump = one live note-on (host MIDI or the
-        // on-screen keyboard). Drives the looping recorder playback below.
-        if(i==PluginMultiScaleBody::kParamNoteTick){ ++fNoteTicks; return; }
+        // note-event tick: one live note-on (host MIDI or the on-screen
+        // keyboard). Advance the looping recorder playback RIGHT HERE rather
+        // than deferring to the 30 ms spectrum timer: parameterChanged runs on
+        // the UI thread, and this is the same thread the control callbacks
+        // already call setParamValue from, so it is deterministic, adds no
+        // latency, and cannot coalesce two fast notes into one advance.
+        if(i==PluginMultiScaleBody::kParamNoteTick){ advanceRecorder(); return; }
         // A real (non-metering) parameter just moved. The learn chip is
         // non-blocking, so only the armed target counts as a landed binding.
         if(fLearnParam>=0 && i==(uint32_t)fLearnParam){
@@ -676,7 +680,7 @@ private:
         for(int i=0;i<16;++i) fBandTicks[i]=nullptr; fBandTicksDirty=true;
         fLearnChip=fLearnLbl=nullptr; fLearnParam=-1;
         fEdoDropdown=nullptr; fScaleLbl=nullptr;
-        fRecBtn=fPlayBtn=nullptr; fRecOn=false; fRecPlaying=false; fRecN=0; fRecCursor=0; fPlayHeld=false; fNoteTicks=0;
+        fRecBtn=fPlayBtn=nullptr; fRecOn=false; fRecPlaying=false; fRecN=0; fRecCursor=0; fPlayHeld=false;
         fModeTypeBtn=fMaterialDd=fMorphDd=fEcoBtn=nullptr;
         fMasterValLbl=nullptr; fStrikeChannel=0; fNextStrikeChannel=1; fLiveAge=1000; fRebuildInFlight=false;
     }
@@ -1770,7 +1774,7 @@ private:
         if(code==LV_EVENT_PRESSED){
             ui->kbHeldNote=note;
             // (R-user) during recorder playback the incoming note sounds at the
-            // strike position the recorder PRE-LOADED (see playbackTick), so this
+            // strike position the recorder PRE-LOADED (see advanceRecorder), so this
             // is always a normal note; the recorder advances off the plugin's
             // note-on publish (host MIDI + this keyboard both pass through run()).
             ui->sendNote(0,(uint8_t)note,100);
@@ -2059,7 +2063,7 @@ private:
         ui->editParameter(PluginMultiScaleBody::kParamStrikeX,true);
         ui->editParameter(PluginMultiScaleBody::kParamStrikeY,true);
         // pre-load the first recorded strike so the FIRST incoming note sounds
-        // there; playbackTick then pre-loads each subsequent position in turn.
+        // there; advanceRecorder then pre-loads each subsequent position in turn.
         ui->setParamValue(PluginMultiScaleBody::kParamStrikeX, ui->fRecX[0]);
         ui->setParamValue(PluginMultiScaleBody::kParamStrikeY, ui->fRecY[0]);
         ui->fRecCursor = (ui->fRecN>1) ? 1 : 0;
@@ -2090,12 +2094,16 @@ private:
     // back into its MIDI input (JACK DistrhoPluginJACK.cpp:435, CLAP
     // DistrhoPluginCLAP.cpp:1033, VST3 DistrhoPluginVST3.cpp:1524; LV2 routes it
     // through the host). So a keyboard press always reaches run() and always
-    // ticks - there is deliberately NO UI-side advance, which would double-fire.
-    void playbackTick(){
+    // ticks - there is deliberately NO UI-side note generation, which would
+    // double-fire.
+    //
+    // Called SYNCHRONOUSLY from parameterChanged's kParamNoteTick branch (that
+    // runs on the UI thread, the same thread the control callbacks write params
+    // from), so there is no timer latency and two fast notes can never coalesce
+    // into a single advance.
+    void advanceRecorder(){
         if(!fRecPlaying) return;
         if(fRecN<=0) return;
-        if(fNoteTicks<=0) return;   // no new live note since the last tick
-        fNoteTicks=0;
         if(fRecCursor<0||fRecCursor>=fRecN) fRecCursor=0;
         setParamValue(PluginMultiScaleBody::kParamStrikeX,fRecX[fRecCursor]);
         setParamValue(PluginMultiScaleBody::kParamStrikeY,fRecY[fRecCursor]);
@@ -3697,8 +3705,8 @@ private:
         // params, the mode count, or the node focus changed (serviced here so
         // repaints batch with the 33 ms mode-map cadence, never per gesture).
         if(fHeatDirty){ fHeatDirty=false; paintDiscHeatmap(); }
-        // wave-3 (idea 10): advance the motion-recorder playback (33 ms steps)
-        playbackTick();
+        // (the motion-recorder step is no longer here: it is driven
+        // synchronously by parameterChanged's kParamNoteTick branch)
         if(fRippleCooldown>0) --fRippleCooldown;
         bool onset=(totalE>fPrevEnergy+std::max(0.02f,fPrevEnergy*1.1f)) && totalE>0.04f;
         fPrevEnergy=std::max(totalE,fPrevEnergy*0.90f);
@@ -3936,7 +3944,6 @@ private:
     lv_obj_t* fPlayBtn=nullptr;
     bool fRecOn=false;
     bool fRecPlaying=false;
-    int fNoteTicks=0;   // live note-ons observed since the last playback tick
     float fRecX[512]={};
     float fRecY[512]={};
     int fRecN=0;

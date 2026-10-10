@@ -628,24 +628,22 @@ static void recorderLoopProof(DISTRHO::UIExporter* exp,HWND hwnd){
     EXPECT(playing,"Rec: PLAY started (a path was recorded)");
     if(!playing) return;
     // 3) one live note must advance the position (writes StrikeX+Y).
-    // The advance happens on the plugin's 30 ms spectrum timer, and this
-    // harness's idle loop does not service LVGL timers on its own, so pump
-    // lv_timer_handler() with real sleeps to let the tick period elapse.
-    auto pump=[&](int ms){ for(int t=0;t<ms;t+=6){ Sleep(6); lv_timer_handler(); } };
+    // The advance is SYNCHRONOUS inside parameterChanged, so no timer pumping
+    // is needed - this asserts that determinism itself.
     const int before=gStrikeWrites;
     exp->parameterChanged(PluginMultiScaleBody::kParamNoteTick,0.001f);
-    pump(120);
+    idleFrames(exp,4);
     LOGF("[rec] strike writes on 1 tick: %d -> %d\n",before,gStrikeWrites);
     EXPECT(gStrikeWrites>before,"Rec: a live note advances the playback position");
     // 4) LOOP: far more ticks than captured points must NOT stop the transport
     for(int i=0;i<40;++i){
         exp->parameterChanged(PluginMultiScaleBody::kParamNoteTick,0.001f*(float)((i%9)+1));
-        pump(45);
+        idleFrames(exp,2);
     }
     LOGF("[rec] after 40 ticks: still playing=%d strike writes=%d\n",
          (int)lv_obj_has_state(playBtn,LV_STATE_CHECKED),gStrikeWrites);
-    EXPECT(lv_obj_has_state(playBtn,LV_STATE_CHECKED),"Rec: playback LOOPS (still running after more notes than points)");
     EXPECT(gStrikeWrites>before+20,"Rec: every tick advanced a position");
+    EXPECT(lv_obj_has_state(playBtn,LV_STATE_CHECKED),"Rec: playback LOOPS (still running after more notes than points)");
 }
 END_NAMESPACE_DISTRHO
 
