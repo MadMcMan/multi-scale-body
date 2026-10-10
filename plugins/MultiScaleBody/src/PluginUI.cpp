@@ -354,7 +354,9 @@ public:
         }
     }
     void regExtraWidget(uint32_t pi, lv_obj_t* arc){
-        if(extraWidgetCount>=kMaxExtraWidgets) return;
+        // loud, not silent: a dropped registration means this duplicate widget
+        // stops following the host and preset changes with no other symptom
+        if(extraWidgetCount>=kMaxExtraWidgets){ LV_LOG_WARN("extra-widget registry full (%d)",kMaxExtraWidgets); return; }
         extraWidgets[extraWidgetCount++]={pi,arc};
     }
     void parameterChanged(uint32_t i,float v) override {
@@ -526,10 +528,23 @@ public:
     // (R-user) Only one dropdown may be open at a time, and a list never
     // scrolls past its first/last row. closeOtherDropdowns() is invoked by each
     // dropdown's own open so the previously-open list collapses first.
+    // One owner of the dropdown inventory: every dropdown registers itself as
+    // it is created, so a fifth one added later is automatically covered by the
+    // exclusivity rule and by wheel scrolling. A hardcoded list silently
+    // excluded anything not in it.
+    static constexpr int kMaxDropdowns=8;
+    lv_obj_t* fDropdowns[kMaxDropdowns]={};
+    int fDropdownCount=0;
+    void regDropdown(lv_obj_t* d){
+        if(!d) return;
+        for(int i=0;i<fDropdownCount;++i) if(fDropdowns[i]==d) return;
+        if(fDropdownCount>=kMaxDropdowns){ LV_LOG_WARN("dropdown registry full (%d)",kMaxDropdowns); return; }
+        fDropdowns[fDropdownCount++]=d;
+    }
+    void clearDropdownRegistry(){ for(int i=0;i<kMaxDropdowns;++i) fDropdowns[i]=nullptr; fDropdownCount=0; }
     void closeOtherDropdowns(lv_obj_t* keep){
-        lv_obj_t* all[4]={presetDropdown, fMaterialDd, fMorphDd, fEdoDropdown};
-        for(int i=0;i<4;++i){
-            lv_obj_t* d=all[i];
+        for(int i=0;i<fDropdownCount;++i){
+            lv_obj_t* d=fDropdowns[i];
             if(d && d!=keep && lv_dropdown_is_open(d)) lv_dropdown_close(d);
         }
     }
@@ -539,9 +554,8 @@ public:
     // lv_obj_scroll_by_bounded() runs lv_obj_update_layout() itself and clamps
     // via lv_obj_get_scroll_top/bottom, so it is correct before the first scroll.
     bool scrollOpenList(int dir){
-        lv_obj_t* all[4]={presetDropdown, fMaterialDd, fMorphDd, fEdoDropdown};
-        for(int i=0;i<4;++i){
-            lv_obj_t* d=all[i];
+        for(int i=0;i<fDropdownCount;++i){
+            lv_obj_t* d=fDropdowns[i];
             if(!d||!lv_dropdown_is_open(d)) continue;
             lv_obj_t* list=lv_dropdown_get_list(d);
             if(!list) return false;
@@ -705,6 +719,7 @@ private:
         fEdoDropdown=nullptr; fScaleLbl=nullptr;
         fRecBtn=fPlayBtn=nullptr; fRecOn=false; fRecPlaying=false; fRecN=0; fRecCursor=0;
         fModeTypeBtn=fMaterialDd=fMorphDd=fEcoBtn=nullptr;
+        clearDropdownRegistry();
         fMasterValLbl=nullptr; fStrikeChannel=0; fNextStrikeChannel=1; fLiveAge=1000; fRebuildInFlight=false;
     }
     static void previewGeometry(int& cell,int& gap,int& off){
@@ -2337,7 +2352,7 @@ private:
         // wave-4: tuning selects inline — EDO applies immediately, LOAD reads
         // a .scl file, CLEAR restores 12-EDO (same handlers as the old menu)
         lv_obj_t* selCluster=makeRow(kbHead,scaled(lay::KB_SEL_W),scaled(lay::BTN_H),scaled(8),LV_FLEX_ALIGN_CENTER);
-        fEdoDropdown=lv_dropdown_create(selCluster);
+        fEdoDropdown=lv_dropdown_create(selCluster); regDropdown(fEdoDropdown);
         lv_obj_add_event_cb(fEdoDropdown,dropdownExclusiveCb,LV_EVENT_RELEASED,this);
         lv_dropdown_set_options(fEdoDropdown,"5\n7\n10\n12\n15\n17\n19\n22\n24\n31\n41\n53\n72");
         lv_dropdown_set_selected(fEdoDropdown,3); // 12-EDO default
@@ -2538,7 +2553,7 @@ private:
         // [label, spacer, dropdown] and the select lands on the cell bottom.
         { lv_obj_t* sp=makeBox(matCell,1,1); lv_obj_set_flex_grow(sp,1);
           lv_obj_set_style_bg_opa(sp,LV_OPA_TRANSP,0); lv_obj_clear_flag(sp,LV_OBJ_FLAG_CLICKABLE); }
-        fMaterialDd=lv_dropdown_create(matCell);
+        fMaterialDd=lv_dropdown_create(matCell); regDropdown(fMaterialDd);
         tagLearnable(fMaterialDd,PluginMultiScaleBody::kParamMaterial);
         lv_dropdown_set_options(fMaterialDd,"DEFAULT\nALUMINIUM\nSTEEL\nBRONZE\nPINE\nROSEWOOD\nMAHOGANY\nGLASS\nBRASS\nTITANIUM\nCARBON");
         lv_obj_set_width(fMaterialDd,scaled(lay::MODEL_SEL_W));
@@ -2552,7 +2567,7 @@ private:
         lv_obj_set_style_translate_y(morphCell,scaled(2),0);
         { lv_obj_t* sp=makeBox(morphCell,1,1); lv_obj_set_flex_grow(sp,1);
           lv_obj_set_style_bg_opa(sp,LV_OPA_TRANSP,0); lv_obj_clear_flag(sp,LV_OBJ_FLAG_CLICKABLE); }
-        fMorphDd=lv_dropdown_create(morphCell);
+        fMorphDd=lv_dropdown_create(morphCell); regDropdown(fMorphDd);
         tagLearnable(fMorphDd,PluginMultiScaleBody::kParamMorphTarget);
         { std::string opts; for(int i=0;i<modal::kNumPresets;++i){ if(i) opts+="\n"; opts+=modal::kPresets[i].name; }
           lv_dropdown_set_options(fMorphDd,opts.c_str()); }
@@ -2693,7 +2708,7 @@ private:
         // prev arrow
         presetPrevBtn=addPresetArrowBtn(ddRow,-1);
         // dropdown moved to the top bar (was the center card's preset row)
-        presetDropdown=lv_dropdown_create(ddRow);
+        presetDropdown=lv_dropdown_create(ddRow); regDropdown(presetDropdown);
         tagLearnable(presetDropdown,PluginMultiScaleBody::kParamPreset);
         {
             std::string opts; for(int i=0;i<modal::kNumPresets;++i){ if(i) opts+="\n"; opts+=modal::kPresets[i].name; }
@@ -2731,6 +2746,13 @@ private:
         // (dropdownCb/presetArrowCb) but never registered, so the whole
         // preset browser was dead. Wire them here.
         lv_obj_add_event_cb(presetDropdown,dropdownCb,LV_EVENT_VALUE_CHANGED,this);
+        // The other three dropdowns register this and the preset one did not, so
+        // exclusivity was one-directional here: opening a material/morph/EDO list
+        // closed the preset list, but not the reverse. A real click is already
+        // covered by LVGL's own click-outside close (measured: the observable
+        // rule holds for all 12 ordered pairs even without this line), so this is
+        // consistency/robustness for non-click opens, not a user-visible fix.
+        lv_obj_add_event_cb(presetDropdown,dropdownExclusiveCb,LV_EVENT_RELEASED,this);
         lv_obj_add_event_cb(presetPrevBtn,presetArrowCb,LV_EVENT_CLICKED,this);
         lv_obj_add_event_cb(presetNextBtn,presetArrowCb,LV_EVENT_CLICKED,this);
         // R5: vertical divider between the preset browser and the master
