@@ -717,6 +717,85 @@ static void presetModelProof(DISTRHO::UIExporter* exp,HWND hwnd){
     lv_obj_send_event(dd,LV_EVENT_VALUE_CHANGED,nullptr);
     idleFrames(exp,6);
 }
+
+// ---- exposure wiring: the toggles that only exist to be automatable --------
+// kParamScrubMode and kParamArp are the two params added so previously
+// UI-only controls became host/MIDI-controllable. Assert the UI actually
+// writes them (the tagging test covers learnability, not the click path).
+static void exposureWiringProof(DISTRHO::UIExporter* exp,HWND hwnd){
+    bool first=true; resizeWindow(hwnd,exp,1440,1068,first);
+    lv_obj_update_layout(lv_screen_active());
+    // scrub target toggle: GAIN (0) -> click -> DECAY (1)
+    lv_obj_t* gl=findLabelText(lv_screen_active(),"GAIN");
+    EXPECT(gl!=nullptr,"Expose: scrub-target toggle found");
+    if(gl){
+        lv_obj_t* btn=lv_obj_get_parent(gl);
+        gLastParam=UINT32_MAX; gLastValue=-1.f;
+        lv_obj_send_event(btn,LV_EVENT_CLICKED,nullptr);
+        idleFrames(exp,4);
+        LOGF("[expose] scrub click -> param=%u value=%.3f (expect %u 1.0)\n",
+             (unsigned)gLastParam,gLastValue,(unsigned)PluginMultiScaleBody::kParamScrubMode);
+        EXPECT(gLastParam==PluginMultiScaleBody::kParamScrubMode,"Expose: scrub toggle writes kParamScrubMode");
+        EXPECT(gLastValue>0.9f,"Expose: GAIN->DECAY writes 1.0");
+    }
+    // arpeggiator toggle: off -> on
+    lv_obj_t* al=findLabelText(lv_screen_active(),"ARP");
+    EXPECT(al!=nullptr,"Expose: ARP toggle found");
+    if(al){
+        lv_obj_t* btn=lv_obj_get_parent(al);
+        lv_obj_add_state(btn,LV_STATE_CHECKED);
+        gLastParam=UINT32_MAX; gLastValue=-1.f;
+        lv_obj_send_event(btn,LV_EVENT_VALUE_CHANGED,nullptr);
+        idleFrames(exp,4);
+        LOGF("[expose] arp click -> param=%u value=%.3f (expect %u 1.0)\n",
+             (unsigned)gLastParam,gLastValue,(unsigned)PluginMultiScaleBody::kParamArp);
+        EXPECT(gLastParam==PluginMultiScaleBody::kParamArp,"Expose: ARP toggle writes kParamArp");
+        EXPECT(gLastValue>0.9f,"Expose: ARP on writes 1.0");
+    }
+}
+
+// ---- preset -> double-click baseline interaction --------------------------
+// The double-click reset restores "the value the current preset loaded it
+// with". Loading a preset now applies its PHYSICAL MODEL row, so that row must
+// become the new baseline. Select a preset through the real dropdown (the user
+// path), nudge one of its model knobs, and require a double-click to bring it
+// back to the value THAT preset established.
+static void presetBaselineProof(DISTRHO::UIExporter* exp,HWND hwnd){
+    bool first=true; resizeWindow(hwnd,exp,1440,1068,first);
+    lv_obj_update_layout(lv_screen_active());
+    lv_obj_t* dd=findByClass(lv_screen_active(),"lv_dropdown");
+    EXPECT(dd!=nullptr,"Base: preset dropdown found");
+    if(!dd) return;
+    lv_dropdown_set_selected(dd,7);                 // Membrane; its row sets raylA = 0.12
+    lv_obj_send_event(dd,LV_EVENT_VALUE_CHANGED,nullptr);
+    idleFrames(exp,6);
+    lv_obj_t* arc=findParamArc(lv_screen_active(),PluginMultiScaleBody::kParamRayleighA);
+    EXPECT(arc!=nullptr,"Base: Rayleigh A arc found");
+    if(!arc) return;
+    // nudge it off the baseline through the host path (must NOT re-baseline)
+    exp->parameterChanged(PluginMultiScaleBody::kParamRayleighA,0.90f);
+    idleFrames(exp,4);
+    lv_area_t a; lv_obj_get_coords(arc,&a);
+    contactPointer={(lv_coord_t)((a.x1+a.x2)/2),(lv_coord_t)((a.y1+a.y2)/2)};
+    lv_indev_t* p=lv_indev_create();
+    lv_indev_set_type(p,LV_INDEV_TYPE_POINTER);
+    lv_indev_set_display(p,lv_display_get_default());
+    lv_indev_set_read_cb(p,contactPointerRead);
+    gLastParam=UINT32_MAX; gLastValue=-1.f;
+    for(int click=0;click<2;++click){
+        contactPressed=true;  lv_indev_read(p); idleFrames(exp,2);
+        contactPressed=false; lv_indev_read(p); idleFrames(exp,2);
+    }
+    lv_indev_delete(p);
+    idleFrames(exp,6);
+    LOGF("[base] dbl-click after preset 7 -> param=%u value=%.3f (expect %u 0.12)\n",
+         (unsigned)gLastParam,gLastValue,(unsigned)PluginMultiScaleBody::kParamRayleighA);
+    EXPECT(gLastParam==PluginMultiScaleBody::kParamRayleighA,"Base: double-click writes the knob's param");
+    EXPECT(std::fabs(gLastValue-0.12f)<0.02f,"Base: restored to the NEW preset's model value");
+    lv_dropdown_set_selected(dd,0);                 // leave the default body selected
+    lv_obj_send_event(dd,LV_EVENT_VALUE_CHANGED,nullptr);
+    idleFrames(exp,6);
+}
 END_NAMESPACE_DISTRHO
 
 int main(int argc,char** argv)
@@ -747,6 +826,8 @@ int main(int argc,char** argv)
         recorderLoopProof(exp,hwnd);
         learnTagProof(exp,hwnd);
         presetModelProof(exp,hwnd);
+        exposureWiringProof(exp,hwnd);
+        presetBaselineProof(exp,hwnd);
         LOGF("SELFTEST RESULT failures=%d\n",gTestFails);
         exp->quit(); delete exp;
         if(gLog) fclose(gLog);
