@@ -54,7 +54,6 @@ void MultiScaleBodyEngine::prepare(double sr) {
     irDirty_=true; irBaking_=false;
     rebuildDetuneTable();
     computeDecayRef(); // uniform-damping ring anchor for the current preset
-    interpolateGainsFor(nextGain_, strikeX_, strikeY_);
     for (auto& v : voices_) if (v.active) recomputeVoiceCoeffs(v);
     limPrepare(sr);
 }
@@ -73,6 +72,11 @@ void MultiScaleBodyEngine::reset() {
     nextAge_=0; lfoPhase_=0; lfoUpdateCounter_=0; irBakeGate_=0; sustainPedal_=false; exFollow_=0.f;
     strikeSeq_=0; transPeak_=0.f; // fresh deterministic transient sequence + telemetry per reset
     for (int c=1;c<16;++c) mpeZ_[c]=-1.f; // MPE: fresh latch set per reset (matches allSoundOff)
+    // the convolver reads up to kIrLen samples of dry history, so leaving it
+    // meant a re-activated instance replayed the previous signal as a wet tail
+    for (auto& x : wetBufL_) x=0.f;
+    for (auto& x : wetBufR_) x=0.f;
+    wetPos_=0;
     modelFadeLeft_=0;
     modelLastL_=modelLastR_=modelBridgeL_=modelBridgeR_=0.f;
     limReset();
@@ -118,7 +122,12 @@ void MultiScaleBodyEngine::interpolateGainsFor(float* out, float sx, float sy, i
         }
         float base = cubicInterp(col[0],col[1],col[2],col[3],ty);
         base = std::clamp(base, -0.08f, 0.08f);
-        int band = (m*16)/std::max(1,modeCount_);
+        // band index must use the SAME denominator as the voice decay path and
+        // the IR bake (n = min(preset n, modeCount_), computed above), not the
+        // raw modeCount_: after selecting a smaller body while Modes was raised
+        // the gain trim mapped modes onto bands 0-10 while the decay trim used
+        // 0-14, so the two 16-band sliders acted on different mode ranges.
+        int band = (m*16)/std::max(1,n);
         out[m] = base * bandTrim_[std::clamp(band,0,15)] * densTrim;
     }
     for (int m=n;m<kMaxModes;++m) out[m]=0.f;
@@ -126,7 +135,6 @@ void MultiScaleBodyEngine::interpolateGainsFor(float* out, float sx, float sy, i
 void MultiScaleBodyEngine::setBandTrim(int band,float v){
     band=std::clamp(band,0,15); v=std::clamp(v,0.f,2.f);
     bandTrim_[band]=v;
-    interpolateGainsFor(nextGain_, strikeX_, strikeY_);
     irDirty_=true;
 }
 // live analyser: Goertzel over recent output isn't stored, so approximate by
@@ -389,7 +397,15 @@ void MultiScaleBodyEngine::recomputeVoiceCoeffs(Voice& v) {
         double eff = (ka*ka)/(1.0+ka*ka);
         double rad = std::sqrt(eff);
         rad = (1.0 - radiationMix_) + radiationMix_*rad;
-        if(f>8000) rad *= (1.0 - 0.18* std::min(1.0,(f-8000)/7000.0) * radiationMix_);
+        // f is rad/s in this scope (it is used as omega just above), so the
+        // 8-15 kHz rolloff constants must be converted first: the raw compare
+        // started the rolloff at 8000 rad/s = 1273 Hz and saturated at 2387 Hz,
+        // dulling every mode above the lower-mid by up to 0.18*radiationMix
+        // (about -0.7 dB at the default 0.45) instead of only the top octave.
+        // Third rad/s-vs-Hz site in this file after the classic clamp and the
+        // felt damper.
+        const double fHz = (double)f / 6.283185307179586;
+        if(fHz>8000.0) rad *= (1.0 - 0.18* std::min(1.0,(fHz-8000.0)/7000.0) * radiationMix_);
         v.radGain[i]=(float)std::clamp(rad,0.05,1.0);
         // exciter Q-compensation: injection scaled by (1-R_i) so the
         // steady-state driven amplitude ~ exciterGain*gains[i]/2 is
@@ -708,20 +724,21 @@ bool MultiScaleBodyEngine::stepIrBake(int budgetModes){
     const auto& p=presetData(presetIdx_);
     int n=std::min(p.n,modeCount_);
     int end=std::min(n,irBakeCursor_+budgetModes);
-    float fx=std::clamp(strikeX_,0.f,1.f)*(kGainGrid-1);
-    float fy=std::clamp(strikeY_,0.f,1.f)*(kGainGrid-1);
+    float gv[kMaxModes];
+    interpolateGainsFor(gv, strikeX_, strikeY_);
+    if(morphAmt_>1e-4f){
+        float tG[kMaxModes];
+        interpolateGainsFor(tG, strikeX_, strikeY_, morphTarget_);
+        for(int i=0;i<kMaxModes;++i) gv[i]=gv[i]+(tG[i]-gv[i])*morphAmt_;
+    }
     for(int m=irBakeCursor_;m<end;++m){
-        // bicubic gain at strike
-        int ix=(int)fx, iy=(int)fy; float tx=fx-ix, ty=fy-iy;
-        float col[4];
-        for(int j=0;j<4;++j){
-            int yj=std::clamp(iy-1+j,0,kGainGrid-1);
-            col[j]=cubicInterp(modeGain(p,m,yj,std::clamp(ix-1,0,15)),
-                               modeGain(p,m,yj,std::clamp(ix,0,15)),
-                               modeGain(p,m,yj,std::clamp(ix+1,0,15)),
-                               modeGain(p,m,yj,std::clamp(ix+2,0,15)),tx);
-        }
-        float g=cubicInterp(col[0],col[1],col[2],col[3],ty);
+        // Same per-mode gain the voice path injects, via the same helper: the
+        // raw bicubic used here ignored the 16-band level trims, the >64-mode
+        // density trim and the +-0.08 interpolation clamp, so with Body Reverb
+        // up the wet tail did not match the dry attack it convolves (and
+        // engaging Morph moved the IR's frequencies without moving its gains,
+        // contradicting the "IR mirrors the physical model" comment below).
+        float g=gv[m];
         // wave-3: the IR mirrors the current physical model (resolution morph,
         // body morph, support, material)
         float f=bodyFreq(p,m,n)*pitchScale_;
@@ -802,7 +819,6 @@ void MultiScaleBodyEngine::setPreset(int idx) {
     presetIdx_ = idx;
     computeDecayRef(); // ring anchor is per-body — must follow the preset
     updateMaterialMul(); // material rescale is per-body too (uses presetIdx_)
-    interpolateGainsFor(nextGain_, strikeX_, strikeY_);
     // wave-5 fix (presets must work after RANDOM): held notes — bow drones
     // especially — re-derive tables from the NEW body at their stored strike
     // point. States, envelope and bow bridge keep ringing uninterrupted;
@@ -847,7 +863,6 @@ void MultiScaleBodyEngine::setBrightness(float v) {
 void MultiScaleBodyEngine::setStrike(float x, float y) {
     strikeX_ = std::clamp(x,0.f,1.f);
     strikeY_ = std::clamp(y,0.f,1.f);
-    interpolateGainsFor(nextGain_, strikeX_, strikeY_);
     irDirty_=true;
 }
 void MultiScaleBodyEngine::setModeCount(float v) {
@@ -856,7 +871,6 @@ void MultiScaleBodyEngine::setModeCount(float v) {
     modeCount_ = 8 + int(v * 120.f);
     const auto& p = presetData(presetIdx_);
     if (modeCount_ > p.n) modeCount_ = p.n;
-    interpolateGainsFor(nextGain_, strikeX_, strikeY_);
     irDirty_=true;
 }
 void MultiScaleBodyEngine::setRadiationMix(float v){
@@ -944,7 +958,11 @@ void MultiScaleBodyEngine::noteOn(int midiNote, float vel01, int channel) {
         }
         v.midiNote=midiNote; v.midiChannel=channel; v.sustainHold=false;
         const auto& p=presetData(presetIdx_);
-        float noteShift=std::pow(2.f,(midiNote-60)/12.f);
+        // Kept identical to rebakeVoiceTables: with a .scl/.kbm scale loaded the
+        // mono retrigger re-derived the voice in 12-TET, so the note jumped off
+        // the loaded scale (the poly path and preset-follow honoured the table).
+        float noteShift = tuningActive_ ? noteRatio_[std::clamp(midiNote,0,127)]
+                                        : std::pow(2.f,(midiNote-60)/12.f);
         // velocity morph strike position
         float vx=strikeX_+(0.5f-strikeX_)*0.f; // base
         float edgeX=drive>0.5f?1.f:0.f;
@@ -1069,6 +1087,11 @@ void MultiScaleBodyEngine::allNotesOff() {
             v.envState=Voice::Release; v.sustainHold=false; v.bowOn=false;   // natural release tail
         }
     }
+    // CC123 must drop the per-member pressure latches like CC120 does: a latch
+    // survives until a matching note-off arrives, so a channel left latched at
+    // Z=1.0 would inflate the NEXT strike on it (velocity 0.3 -> drive 0.65,
+    // about +6.7 dB) with no key held in between.
+    for (int c=1;c<16;++c) mpeZ_[c]=-1.f;
     monoTopVoice_=-1;
 }
 
@@ -1082,6 +1105,12 @@ void MultiScaleBodyEngine::allSoundOff() {
     }
     for (int c=1;c<16;++c) mpeZ_[c]=-1.f; // MPE panic: drop every latched pressure
     monoTopVoice_=-1;
+    // CC120 is documented as immediate silence: the convolution history is up to
+    // 46 ms of the pre-panic signal, which kept emitting as a wet tail unless
+    // it was cleared too (the all-notes-off path does not need this).
+    for (auto& x : wetBufL_) x=0.f;
+    for (auto& x : wetBufR_) x=0.f;
+    wetPos_=0;
 }
 
 void MultiScaleBodyEngine::setSustainPedal(float amt01) {

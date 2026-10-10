@@ -254,7 +254,6 @@ public:
     float getBow() const { return bowPressure_; }
     float getDamper() const { return damperKnob_; }
     float getInharmSpread() const { return inharm_; }
-    int   getSlideMode() const { return slideMode_; }
     float getBandDecayTrim(int b) const { return bandDecay_[std::clamp(b,0,15)]; }
     // --- wave-3 physical-model params (all default to identity/no-op) ------
     // Boundary support 0..1 (idea 2): clamping stiffens the body — higher
@@ -302,11 +301,8 @@ public:
     float getSupport() const { return support_; }
     float getResMorph() const { return resMorph_; }
     float getMorphAmt() const { return morphAmt_; }
-    int   getMorphTarget() const { return morphTarget_; }
-    int   getMaterial() const { return material_; }
     float getRayleighA() const { return rayA_; }
     float getRayleighB() const { return rayB_; }
-    bool  getEcoMode() const { return ecoMode_; }
     float getSupX() const { return supX_; }
     float getSupY() const { return supY_; }
     float getStrikeW() const { return strikeW_; }
@@ -328,8 +324,6 @@ public:
     float getGlideNorm() const { return glideNorm_; }
     float getExciteMix() const { return exciteMix_; }
     float getVelStrike() const { return velStrike_; }
-    bool  getMonoMode() const { return monoMode_; }
-    float getEcoBudget() const { return ecoBudgetNorm_; }
     // wave-3 shared body-table helpers (used by noteOn and the IR bake so the
     // reverb send tracks the current physical model)
     float bodyFreq(const modal::PresetData& p, int i, int n) const;
@@ -378,12 +372,6 @@ public:
     void processSampleStereo(float &l,float &r);
     // live analyser: Goertzel magnitudes at current mode freqs (16 bands)
     void analyseBands(float* out16);
-    // R3: percussive envelope (sum of active voice envelopes) for the UI
-    // decay scope. Cheap O(N) read, no allocation, safe to call from the
-    // UI timer (33 ms cadence) without locking.
-    float outputEnvelope() const {
-        float e=0.f; for (const auto& v : voices_) if (v.active) e += v.env; return e;
-    }
     int currentPreset() const { return presetIdx_; }
     int currentModeCount() const { return modeCount_; }
     float getPitchScale() const { return pitchScale_; }
@@ -573,7 +561,6 @@ public:
     float detuneTable_[kMaxModes]{};
     // analyser state
     float anaEnv_[16]={};
-    float nextGain_[kMaxModes]{};
     // Reverb-IR mirror of the clamp-proximity weights (wave-5): raw |gain|
     // per mode at the clamp point, baked in beginIrBake() with the same
     // normalization the voice path uses. Fixed-size, RT-safe.
