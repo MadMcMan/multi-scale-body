@@ -178,7 +178,6 @@ namespace lay {
     constexpr int CARD_PAD = 12;
     constexpr int HEAD_H = 22;                   // card caption rows
     constexpr int DISC_D = 280;                  // round-2: shrunk from 406
-    constexpr int SPEC_STRIP_H = 32;             // body spec cells (BODY/MATERIAL/MODES/F0)
 
     // body preset preview - builder and painter share these (clip-bug killer):
     //   inner = BOX - 2*PAD = 48; cell = (inner - 3*GAP)/4 = 10; grid = 4*10+3*2 = 46 <= 48
@@ -246,7 +245,19 @@ namespace lay {
     // (exact match STAGE_H; the grow spacer absorbs the 44px the nav-strip
     // deletion freed). Card internals: 2*4 pad + 22 head + 4 gap +
     // 16*22 rows = 392; inner 400 - 8 pad = 392. See PluginUI.cpp builder.
-    constexpr int DAMP_CARD_H = 400;             // full infoCol-height fill
+    // 400 -> 486 (round-1 blind critic: "a large empty dark block in the
+    // middle-right... between the material chip and the top of the DAMPING
+    // BY BAND list"). That gap was the infoCol flex spacer: the column
+    // fixed its content sizes, then absorbed every remaining pixel into an
+    // empty, unpainted, unframed block. Growing the one real framed module
+    // in that column into the slack removes the void without inventing a
+    // new panel, and 16 rows at DAMP_ROW_H still fit with the head.
+    // The card's own content needs exactly 24 pad + 22 head + 16*22 rows +
+    // 16*2 gaps = 430. It used to be 486, which over-reserved 56px; that slack
+    // is now spent on the info column's spec strip, which previously never
+    // rendered at all (a 0-height container). Column total: coord 20 + 2
+    // dividers + info row 52 + strip 62 + card 430 + 6 gaps*6 = 602 of 610.
+    constexpr int DAMP_CARD_H = 430;
     constexpr int DAMP_ROW_H = 22;              // per-band row (16 fit cleanly)
     constexpr int DAMP_LABEL_W = 22;            // "B1".."B16" column
     constexpr int DAMP_VAL_W = 40;              // tail-time value column
@@ -264,9 +275,16 @@ inline const lv_font_t* getScaledSmallFont() {
     if (gUIScale >= 1.2f) return &lv_font_montserrat_14;
     return &lv_font_montserrat_12;
 }
+// 12px floor: the micro role is the smallest text this editor may ship. It
+// previously bottomed out at montserrat_10, which the legibility walker in
+// tests/render_multiscalebody_ui.cpp flagged on 101 labels (section captions,
+// the B1..B16 band ticks, keyboard note names, live readouts). 10px at this
+// layout density is not legible and 12px is the smallest size that is.
+// LV_FONT_MONTSERRAT_10 is compiled out in lv_conf.h so this cannot silently
+// regress; the walker in the render test is the standing guard.
 inline const lv_font_t* getScaledMicroFont() {
     if (gUIScale >= 1.2f) return &lv_font_montserrat_14;
-    return &lv_font_montserrat_10;
+    return &lv_font_montserrat_12;
 }
 inline const lv_font_t* getDisplayFont() {
     return &lv_font_montserrat_24;  // display role: title only, largest baked size

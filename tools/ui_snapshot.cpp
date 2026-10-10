@@ -849,6 +849,56 @@ static void presetNavProof(DISTRHO::UIExporter* exp,HWND hwnd){
     lv_obj_send_event(dd,LV_EVENT_VALUE_CHANGED,nullptr);
     idleFrames(exp,6);
 }
+
+// ---- info-column spec strip self-test ------------------------------------
+// The BODY/MODES/MAT/F0 strip was built as a 0-height container. LVGL's
+// content-size sentinel is LV_SIZE_CONTENT, so an explicit 0 is an EMPTY area
+// and the strip's children were never drawn - the band read as dead space while
+// updateBodyInfo kept writing labels nobody could see. Assert it renders, that
+// the rows are tall enough for a caption+value, and that the whole info column
+// still fits its budget (a within-column overflow is invisible to the
+// surface-level bounds check, which is how this class of bug survives).
+static void specStripProof(DISTRHO::UIExporter* exp,HWND hwnd){
+    bool first=true; resizeWindow(hwnd,exp,1440,1068,first);
+    lv_obj_update_layout(lv_screen_active());
+    lv_obj_t* lab=findLabelText(lv_screen_active(),"DAMPING");
+    EXPECT(lab!=nullptr,"Spec: DAMPING label found");
+    if(!lab) return;
+    // label -> dampHead -> dampCard -> infoCol
+    lv_obj_t* col=lv_obj_get_parent(lv_obj_get_parent(lv_obj_get_parent(lab)));
+    EXPECT(col!=nullptr,"Spec: info column found");
+    if(!col) return;
+    const uint32_t n=(uint32_t)lv_obj_get_child_count(col);
+    LOGF("[spec] info column children=%u\n",(unsigned)n);
+    EXPECT(n>=6,"Spec: info column has coord/dividers/rows/strip/spacer/card");
+    // locate the strip structurally, not by index: F0 label -> cell -> row -> strip
+    lv_obj_t* f0=findLabelText(lv_screen_active(),"F0");
+    EXPECT(f0!=nullptr,"Spec: F0 cell label exists");
+    if(!f0) return;
+    lv_obj_t* row2=lv_obj_get_parent(lv_obj_get_parent(f0));
+    lv_obj_t* strip=row2?lv_obj_get_parent(row2):nullptr;
+    EXPECT(strip!=nullptr,"Spec: spec strip found above the F0 cell");
+    if(!strip) return;
+    const lv_coord_t sh=lv_obj_get_height(strip);
+    LOGF("[spec] strip h=%d rows=%u\n",(int)sh,(unsigned)lv_obj_get_child_count(strip));
+    EXPECT(sh>20,"Spec: the BODY/MODES/MAT/F0 strip renders (not a 0-height clip)");
+    EXPECT(lv_obj_get_child_count(strip)==2,"Spec: strip has two rows");
+    // and each caption inside the strip must be actually visible in the layout
+    for(int i=0;i<2;++i){
+        lv_obj_t* row=lv_obj_get_child(strip,i);
+        LOGF("[spec] row%d @%d,%d %dx%d\n",i,
+             (int)lv_obj_get_x(row),(int)lv_obj_get_y(row),
+             (int)lv_obj_get_width(row),(int)lv_obj_get_height(row));
+        EXPECT(lv_obj_get_height(row)>=24,"Spec: spec row fits a caption+value pair");
+    }
+    // column budget: the card must not spill past the column bottom
+    lv_obj_t* card=lv_obj_get_child(col,(int32_t)n-1);
+    lv_area_t cc,colc;
+    lv_obj_get_coords(card,&cc); lv_obj_get_coords(col,&colc);
+    LOGF("[spec] card bottom=%d column bottom=%d (column h=%d)\n",
+         (int)cc.y2,(int)colc.y2,(int)lv_obj_get_height(col));
+    EXPECT(cc.y2<=colc.y2,"Spec: damping card stays inside the info column");
+}
 END_NAMESPACE_DISTRHO
 
 int main(int argc,char** argv)
@@ -882,6 +932,7 @@ int main(int argc,char** argv)
         exposureWiringProof(exp,hwnd);
         presetBaselineProof(exp,hwnd);
         presetNavProof(exp,hwnd);
+        specStripProof(exp,hwnd);
         LOGF("SELFTEST RESULT failures=%d\n",gTestFails);
         exp->quit(); delete exp;
         if(gLog) fclose(gLog);

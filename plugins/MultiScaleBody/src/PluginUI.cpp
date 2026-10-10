@@ -17,6 +17,7 @@
 #include "styles/UIStyles.hpp"   // LVGL style pack
 #include "components/UICommon.hpp"  // abstract UI contract
 #include "components/UIWidgets.hpp" // arc-knob component
+#include <bitset>                // open-edit-bracket set (see editParameter)
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -324,13 +325,17 @@ public:
     // that survive a rebuild in closeOpenEdits().
     void editParameter(uint32_t i,bool s) override {
         if(i>=PluginMultiScaleBody::kParameterCount) return;
-        if(s) fOpenEditMask |= (uint64_t)1<<i;
-        else   fOpenEditMask &= ~((uint64_t)1<<i);
+        // A uint64 bitmask was used here with the comment "kParameterCount < 64";
+        // that stopped being true long ago (it is now 90+), so `1u<<i` for
+        // i>=64 was UB and closeOpenEdits() could never close those brackets,
+        // leaving the host with edit gestures open forever.
+        if(s) fOpenEditMask.set(i);
+        else  fOpenEditMask.reset(i);
         UI::editParameter(i,s);
     }
     void closeOpenEdits(){
-        for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount && i<64;++i){
-            if(fOpenEditMask & ((uint64_t)1<<i)){ fOpenEditMask &= ~((uint64_t)1<<i); UI::editParameter(i,false); }
+        for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount;++i){
+            if(fOpenEditMask.test(i)){ fOpenEditMask.reset(i); UI::editParameter(i,false); }
         }
     }
     // duplicate parameter widgets - macros + master arc replicate the same
@@ -675,6 +680,15 @@ private:
         fDampMax=1.f; fDampPresetCache=-1; fDampDecayCache=-1.f; fDampBandSumCache=-1.f; fDampPhysSumCache=-1.f;
         fDampDragBand=-1;
         for(int i=0;i<100;++i) fHeatDots[i]=nullptr; fHeatCount=0; fHeatDirty=true; fModeFocus=-1;
+        // A rebuild creates BRAND-NEW derived views (the mode-map bars are born
+        // 1px tall, the scope chart is born empty). Their repaint gates must be
+        // forced here too - fHeatDirty/fBandTicksDirty already were, but
+        // fModeMapDirty and fScopePreviewReady only had declaration initialisers,
+        // which run once at construction. Without this the MODE MAP came back as
+        // a comb of flat 1px bars and the DECAY SCOPE as a zero line after any
+        // zoom/resize until some unrelated parameter happened to change.
+        fModeMapDirty=true;
+        fScopePreviewReady=false;
         fScrubMode=0; fScrubParamIdx=-1; fScrubToggle=nullptr;
         fScrubLbl=nullptr; fScrubLblAge=0; fScrubBand=-1; fScrubLevel=-1.f;
         for(int i=0;i<16;++i) fBandTicks[i]=nullptr; fBandTicksDirty=true;
@@ -3091,20 +3105,22 @@ private:
         // divider hairline
         addDivider(infoCol,scaled(1));
         // spec strip: BODY / MATERIAL / MODES / F0 in a 2x2 grid so it
-        // fits the narrow 190px info column without the r1 truncated captions
-        // Height 0 = content-sized, which is CORRECT here: specRow1/2 are
-        // in-flow flex children, so the strip measures itself. Giving it the
-        // theme's SPEC_STRIP_H (32) was tried and REVERTED - it over-reserved
-        // the strip and pushed the BODY/MODES/MAT captions into the material
-        // row above (form 3, typography-box). SPEC_STRIP_H is therefore a
-        // vestigial token and has been deleted from the theme rather than
-        // left as a declared-but-unreferenced size.
-        lv_obj_t* specStrip=makeCol(infoCol,lv_pct(100),0,scaled(2));
-        lv_obj_t* specRow1=makeRow(specStrip,lv_pct(100),scaled(16),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
+        // fits the narrow 190px info column without the r1 truncated captions.
+        // Height must be LV_SIZE_CONTENT, NOT 0: LVGL's content-size sentinel is
+        // LV_SIZE_CONTENT, and an explicit 0 makes the container area empty, so
+        // its children were never drawn (the band read as dead space and a
+        // previous note here wrongly claimed "height 0 = content-sized").
+        // Rows are 30px: a caption + value pair stacks ~24px, so the old 16px
+        // rows clipped even once the strip rendered.
+        lv_obj_t* specStrip=makeCol(infoCol,lv_pct(100),LV_SIZE_CONTENT,scaled(2));
+        lv_obj_t* specRow1=makeRow(specStrip,lv_pct(100),scaled(30),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         addSpecCell(specRow1,"BODY",&hdrBodyVal,PLATE_AMBER,80);
-        addSpecCell(specRow1,"MODES",&hdrModeVal,PLATE_TEXT,56);
-        lv_obj_t* specRow2=makeRow(specStrip,lv_pct(100),scaled(16),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
+        addSpecCell(specRow1,"MODES",&hdrModeVal,PLATE_TEXT,64);   // 5 chars at letter-space 4 (56 clipped it)
+        lv_obj_t* specRow2=makeRow(specStrip,lv_pct(100),scaled(30),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         addSpecCell(specRow2,"MAT",&hdrMatVal,PLATE_TEXT,80);
+        // the F0 cell the design called for: hdrF0Val was written by
+        // updateBodyInfo but no cell was ever created for it (a dead write).
+        addSpecCell(specRow2,"F0",&hdrF0Val,PLATE_TEXT,56);
         // R5: DAMPING card - the 16-band tail-time map that fills the
         // infoCol's dead band (R4 critic: "plate floats in dead space").
         // Each row is one frequency band (B1..B16 = ascending mode index
@@ -3781,7 +3797,13 @@ private:
     // first rebuild is still constructing the new tree, the second pass can
     // lv_obj_clean mid-construction and leave the screen blank. Guard it.
     bool fRebuildInFlight=false;
-    uint64_t fOpenEditMask=0;   // bit per param with an open host edit bracket (kParameterCount < 64)
+    // One bit per parameter with an open host edit bracket. Sized above
+    // kParameterCount and asserted, so it can never silently under-represent
+    // the range the way the old uint64 did once the param count passed 64.
+    static constexpr size_t kEditMaskBits=128;
+    static_assert(PluginMultiScaleBody::kParameterCount<=kEditMaskBits,
+                  "kEditMaskBits must cover every parameter");
+    std::bitset<kEditMaskBits> fOpenEditMask;
     lv_obj_t* widgets[PluginMultiScaleBody::kParameterCount]={};
     float paramCache[PluginMultiScaleBody::kParameterCount]={};
     // Values the currently-loaded preset established; a knob double-click
