@@ -29,9 +29,18 @@ No CTest. Two standalone tests, run by hand:
 ```sh
 g++ -std=c++17 -I plugins/MultiScaleBody/src tests/test_modal_dsp.cpp plugins/MultiScaleBody/src/MultiScaleBodyEngine.cpp -o build/test_modal_dsp.exe && build/test_modal_dsp.exe
 g++ -std=c++17 -O1 -DHOST_BINARY -I plugins/MultiScaleBody/src -I deps/DPF/distrho -I deps/DPF/dgl tests/test_preset_regression.cpp build/libMultiScaleBody-dsp.a deps/DPF/distrho/src/DistrhoPlugin.cpp deps/DPF/distrho/src/DistrhoUtils.cpp -DDISTRHO_IS_STANDALONE -o build/test_preset_regression.exe && build/test_preset_regression.exe
+g++ -std=c++17 -I plugins/MultiScaleBody/src tests/test_engine_audit_fixes.cpp plugins/MultiScaleBody/src/MultiScaleBodyEngine.cpp -o build/test_engine_audit_fixes.exe && build/test_engine_audit_fixes.exe
 ```
 
 - Preset regression requires the plugin built first (`build/libMultiScaleBody-dsp.a`) and compiles the *plugin header* with `-DHOST_BINARY`, which exposes the `test*()` hooks (`PluginMultiScaleBody.hpp:45`).
+- `test_engine_audit_fixes.cpp` covers the engine paths the golden gate and the DSP
+  suite are blind to — both render preset 0 (Bowl) with Body Reverb at 0, and Bowl
+  is the one body with no modes above 2.86 kHz. It pins the radiation rolloff's
+  band edge, the IR bake's per-mode gain mirroring, the gain-path band
+  denominator, the MPE latch on CC123, the wet history on CC120, and the mono
+  path honouring a loaded scale. Every assertion was verified to fail against a
+  build with just that one fix reverted, so each is a real discriminator rather
+  than a smoke test.
 
 ### Golden bit-identity gate (run this after any DSP edit)
 
