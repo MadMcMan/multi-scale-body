@@ -645,6 +645,78 @@ static void recorderLoopProof(DISTRHO::UIExporter* exp,HWND hwnd){
     EXPECT(gStrikeWrites>before+20,"Rec: every tick advanced a position");
     EXPECT(lv_obj_has_state(playBtn,LV_STATE_CHECKED),"Rec: playback LOOPS (still running after more notes than points)");
 }
+
+// ---- control-exposure (MIDI learn) tagging self-test ----------------------
+// (R-user) "all controls exposed": every PARAM-backed control must be
+// right-click MIDI-learnable. That works by tagging the control's object
+// user_data with (param | kLearnTag) for dropdowns/toggles, while knob arcs
+// carry the raw param index; learnParamAt() walks up to exactly those. Assert
+// the tagging contract directly - it is the whole mechanism, and a missing tag
+// silently makes a control unlearnable.
+static void learnTagProof(DISTRHO::UIExporter* exp,HWND hwnd){
+    bool first=true; resizeWindow(hwnd,exp,1440,1068,first);
+    lv_obj_update_layout(lv_screen_active());
+    const uint32_t TAG=0x40000000u;   // must match MultiScaleBodyUI::kLearnTag
+    auto tagged=[&](const char* what,lv_obj_t* o,uint32_t expect){
+        if(!o){ EXPECT(false,what); return; }
+        const uint32_t ud=(uint32_t)(intptr_t)lv_obj_get_user_data(o);
+        char msg[96];
+        snprintf(msg,sizeof(msg),"%s tagged -> param %u (expect %u)",
+                 what,(unsigned)(ud&~TAG),(unsigned)expect);
+        EXPECT((ud&TAG)!=0u && (ud&~TAG)==expect,msg);
+    };
+    lv_obj_t* ecoLab=findLabelText(lv_screen_active(),"ECO");
+    tagged("Learn: ECO toggle",ecoLab?lv_obj_get_parent(ecoLab):nullptr,
+           PluginMultiScaleBody::kParamEcoMode);
+    lv_obj_t* ela=findLabelText(lv_screen_active(),"ELASTIC");
+    tagged("Learn: ELASTIC toggle",ela?lv_obj_get_parent(ela):nullptr,
+           PluginMultiScaleBody::kParamModelMode);
+    auto lastChild=[](lv_obj_t* p){ return p?lv_obj_get_child(p,(int32_t)lv_obj_get_child_count(p)-1):nullptr; };
+    lv_obj_t* mat=findLabelText(lv_screen_active(),"Material");
+    tagged("Learn: Material dropdown",lastChild(mat?lv_obj_get_parent(mat):nullptr),
+           PluginMultiScaleBody::kParamMaterial);
+    lv_obj_t* mt=findLabelText(lv_screen_active(),"Morph Tgt");
+    tagged("Learn: Morph Tgt dropdown",lastChild(mt?lv_obj_get_parent(mt):nullptr),
+           PluginMultiScaleBody::kParamMorphTarget);
+    tagged("Learn: preset dropdown",findByClass(lv_screen_active(),"lv_dropdown"),
+           PluginMultiScaleBody::kParamPreset);
+    // knobs carry the RAW param index (no tag) - that is what the arc branch of
+    // learnParamAt reads
+    lv_obj_t* knob=findParamArc(lv_screen_active(),PluginMultiScaleBody::kParamDecay);
+    if(!knob){ EXPECT(false,"Learn: Decay arc found"); return; }
+    const uint32_t kud=(uint32_t)(intptr_t)lv_obj_get_user_data(knob);
+    LOGF("[learn] knob user_data=%u (expect %u, untagged)\n",(unsigned)kud,
+         (unsigned)PluginMultiScaleBody::kParamDecay);
+    EXPECT(kud==PluginMultiScaleBody::kParamDecay,"Learn: knob carries a raw param index");
+}
+
+// ---- per-preset physical-model application self-test ---------------------
+// (R-user) loading a preset must apply THAT preset's PHYSICAL MODEL row
+// (PresetModels.hpp). Drive a real dropdown selection and require the model
+// params to be written, ending on the row's last field (modelMode).
+static void presetModelProof(DISTRHO::UIExporter* exp,HWND hwnd){
+    bool first=true; resizeWindow(hwnd,exp,1440,1068,first);
+    lv_obj_update_layout(lv_screen_active());
+    lv_obj_t* dd=findByClass(lv_screen_active(),"lv_dropdown");
+    EXPECT(dd!=nullptr,"Model: preset dropdown found");
+    if(!dd) return;
+    const int writesBefore=gParamWrites;
+    gLastParam=UINT32_MAX;
+    lv_dropdown_set_selected(dd,7);            // Membrane
+    lv_obj_send_event(dd,LV_EVENT_VALUE_CHANGED,nullptr);
+    idleFrames(exp,6);
+    const int applied=gParamWrites-writesBefore;
+    LOGF("[model] preset 7 applied %d param write(s), last param=%u (expect modelMode=%u)\n",
+         applied,(unsigned)gLastParam,(unsigned)PluginMultiScaleBody::kParamModelMode);
+    // the preset itself + the row's 17 fields
+    EXPECT(applied>=17,"Model: selecting a preset applies its physical-model row");
+    EXPECT(gLastParam==PluginMultiScaleBody::kParamModelMode,
+           "Model: the row is applied (ends on modelMode)");
+    // leave the UI on preset 0 so later work sees the default body
+    lv_dropdown_set_selected(dd,0);
+    lv_obj_send_event(dd,LV_EVENT_VALUE_CHANGED,nullptr);
+    idleFrames(exp,6);
+}
 END_NAMESPACE_DISTRHO
 
 int main(int argc,char** argv)
@@ -673,6 +745,8 @@ int main(int argc,char** argv)
         doubleClickResetProof(exp,hwnd);
         dampDragProof(exp,hwnd);
         recorderLoopProof(exp,hwnd);
+        learnTagProof(exp,hwnd);
+        presetModelProof(exp,hwnd);
         LOGF("SELFTEST RESULT failures=%d\n",gTestFails);
         exp->quit(); delete exp;
         if(gLog) fclose(gLog);
