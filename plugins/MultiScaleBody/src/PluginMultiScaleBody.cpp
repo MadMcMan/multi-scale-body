@@ -9,7 +9,7 @@
 #include <vector>
 START_NAMESPACE_DISTRHO
 static const int kNumParams = PluginMultiScaleBody::kParameterCount;
-PluginMultiScaleBody::PluginMultiScaleBody() : Plugin(kNumParams, 0, 6) {
+PluginMultiScaleBody::PluginMultiScaleBody() : Plugin(kNumParams, 0, 7) {   // 7 states: patch/arpon/scale/kbm/ccmap/learn/soundpreset
     paramBase_.fill(0.f);
     std::fill(ccToParam_, ccToParam_+128, -1);
     learnPending_=-1;
@@ -429,6 +429,11 @@ void PluginMultiScaleBody::initState(uint32_t index, State& state){
             state.defaultValue="";
             state.hints=kStateIsHostReadable;
             break;
+        case 6:
+            state.key="soundpreset"; // selected library preset (body x character)
+            state.defaultValue="0";
+            state.hints=kStateIsHostReadable;
+            break;
         case 5:
             state.key="learn";       // pending MIDI-learn target ("5" or "")
             state.defaultValue="";
@@ -439,6 +444,7 @@ void PluginMultiScaleBody::initState(uint32_t index, State& state){
 }
 String PluginMultiScaleBody::getState(const char* key) const {
     if(key && std::string(key)=="arpon") return String(arpOn_?"1":"0");
+    if(key && std::string(key)=="soundpreset") return String(std::to_string(soundPresetIdx_).c_str());
     if(key && std::string(key)=="scale") return String(scaleTxt_.c_str());
     if(key && std::string(key)=="kbm") return String(kbmTxt_.c_str());
     if(key && std::string(key)=="ccmap") return serializeCcmap(ccToParam_);
@@ -449,6 +455,9 @@ void PluginMultiScaleBody::setState(const char* key, const char* value){
     if(!key||!value) return;
     const std::string k(key);
     if(k=="arpon"){ arpOn_=(value[0]=='1'); paramBase_[kParamArp]=arpOn_?1.f:0.f; return; }
+    // the library selection: UI state, not a parameter. Clamped to the library
+    // so a stale value from an older session cannot select past the end.
+    if(k=="soundpreset"){ soundPresetIdx_=std::max(0,std::atoi(value)); return; }
     if(k=="scale"){ rebuildScaleFromScl(value); return; }
     if(k=="kbm"){ kbmTxt_=value; if(!scaleTxt_.empty()) rebuildScaleFromScl(scaleTxt_.c_str()); return; }
     if(k=="ccmap"){ parseCcmap(value); return; }

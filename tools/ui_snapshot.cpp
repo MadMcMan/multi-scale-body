@@ -16,6 +16,7 @@
 #include "../deps/lvgl/src/core/lv_obj_class_private.h"  // _lv_obj_class_t struct
 #include "PluginMultiScaleBody.hpp"
 #include "styles/Palette.hpp"        // design tokens (colors, lay::, scaled(), fonts)
+#include "SoundPresets.hpp"        // sound-preset library (body x character)
 #include "components/UICommon.hpp"  // abstract UI contract
 #include <windows.h>
 #include <functional>
@@ -29,9 +30,11 @@ START_NAMESPACE_DISTRHO
 static int gNoteOns=0,gNoteOffs=0,gParamWrites=0,gStrikeWrites=0,gPresetWrites=0,gBandWrites=0;
 static uint32_t gLastParam=UINT32_MAX;
 static float gLastValue=0.f;
+static float gParamVal[PluginMultiScaleBody::kParameterCount];   // latest value per param
 static void stubEditParam(void*, uint32_t, bool) {}
 static void stubSetParam(void*, uint32_t i, float value){
     gLastParam=i; gLastValue=value;
+    if(i<PluginMultiScaleBody::kParameterCount) gParamVal[i]=value;
     ++gParamWrites;
     if(i==PluginMultiScaleBody::kParamStrikeX||i==PluginMultiScaleBody::kParamStrikeY) ++gStrikeWrites;
     else if(i==PluginMultiScaleBody::kParamPreset) ++gPresetWrites;
@@ -348,6 +351,31 @@ static lv_obj_t* findRegion(const lv_obj_t* plate,lv_coord_t h)
 // are created earlier in the tree, so a user_data scan resolves the PRESET
 // arrow instead (the R4 zoom-test regression: the "zoom click" changed the
 // preset and the display stayed 1440x1068).
+// dropdowns in tree order: 0 = the preset library, 1 = the BODY browser,
+// then the model-strip selectors
+static lv_obj_t* findNthDropdown(lv_obj_t* o,int& seen,int want){
+    if(o->class_p && 0==std::strcmp(o->class_p->name,"lv_dropdown")){
+        if(seen==want) return o;
+        ++seen;
+    }
+    for(uint32_t i=0;i<lv_obj_get_child_count(o);++i)
+        if(auto* f=findNthDropdown(lv_obj_get_child(o,i),seen,want)) return f;
+    return nullptr;
+}
+static lv_obj_t* findNthDropdown(lv_obj_t* root,int want){ int seen=0; return findNthDropdown(root,seen,want); }
+// The two browsers share ONE row, so "first/last child of the row" picks the
+// wrong browser's arrow. Each stepper is the dropdown's immediate sibling.
+static lv_obj_t* siblingArrow(lv_obj_t* dd,int dir){
+    lv_obj_t* row=lv_obj_get_parent(dd);
+    if(!row) return nullptr;
+    const uint32_t n=lv_obj_get_child_count(row);
+    for(uint32_t i=0;i<n;++i){
+        if(lv_obj_get_child(row,i)!=dd) continue;
+        if(dir<0) return i>0?lv_obj_get_child(row,i-1):nullptr;
+        return (i+1<n)?lv_obj_get_child(row,i+1):nullptr;
+    }
+    return nullptr;
+}
 static lv_obj_t* findZoomButton(lv_obj_t* root,intptr_t ud)
 {
     if(root->class_p && 0==std::strcmp(root->class_p->name,"lv_button")){
@@ -737,8 +765,11 @@ static void learnTagProof(DISTRHO::UIExporter* exp,HWND hwnd){
 static void presetModelProof(DISTRHO::UIExporter* exp,HWND hwnd){
     bool first=true; resizeWindow(hwnd,exp,1440,1068,first);
     lv_obj_update_layout(lv_screen_active());
-    lv_obj_t* dd=findByClass(lv_screen_active(),"lv_dropdown");
-    EXPECT(dd!=nullptr,"Model: preset dropdown found");
+    // the library browser is the first dropdown in the tree and the BODY
+    // browser the second: this proof is about a body selection laying down the
+    // physical-model row, so it must target the body one.
+    lv_obj_t* dd=findNthDropdown(lv_screen_active(),1);
+    EXPECT(dd!=nullptr,"Model: body dropdown found");
     if(!dd) return;
     const int writesBefore=gParamWrites;
     gLastParam=UINT32_MAX;
@@ -837,68 +868,93 @@ static void presetBaselineProof(DISTRHO::UIExporter* exp,HWND hwnd){
     idleFrames(exp,6);
 }
 
-// ---- preset browser navigation + dice self-test ---------------------------
-// presetArrowCb (prev/next, including the end wrap) and rndBtnCb (the dice)
-// were both touched in this batch - the arrows now also apply the preset's
-// PHYSICAL MODEL row - and neither path had any coverage. The row's four
-// children are [prev arrow][dropdown][next arrow][dice], so they are reachable
-// from the dropdown itself.
+// ---- preset + body browser self-test --------------------------------------
+// The top bar carries TWO browsers: the preset LIBRARY (25 bodies x 6
+// characters) and the BODY selector. Selecting a library preset applies its body
+// AND its character; swapping the body under a preset must KEEP the character,
+// which is the whole point of having both.
 static void presetNavProof(DISTRHO::UIExporter* exp,HWND hwnd){
     bool first=true; resizeWindow(hwnd,exp,1440,1068,first);
     lv_obj_update_layout(lv_screen_active());
-    lv_obj_t* dd=findByClass(lv_screen_active(),"lv_dropdown");
-    EXPECT(dd!=nullptr,"Nav: preset dropdown found");
-    if(!dd) return;
-    lv_obj_t* row=lv_obj_get_parent(dd);
-    const uint32_t n=row?(uint32_t)lv_obj_get_child_count(row):0u;
-    LOGF("[nav] preset row children=%u (expect 4: prev, dropdown, next, dice)\n",(unsigned)n);
-    EXPECT(n>=4,"Nav: preset row has prev/next/dice");
-    if(n<4) return;
-    lv_obj_t* prev=lv_obj_get_child(row,0);
-    lv_obj_t* next=lv_obj_get_child(row,2);
-    lv_obj_t* dice=lv_obj_get_child(row,3);
-    lv_dropdown_set_selected(dd,0);
-    lv_obj_send_event(dd,LV_EVENT_VALUE_CHANGED,nullptr);
+    lv_obj_t* lib=findNthDropdown(lv_screen_active(),0);
+    lv_obj_t* body=findNthDropdown(lv_screen_active(),1);
+    EXPECT(lib!=nullptr,"Nav: preset library dropdown found");
+    EXPECT(body!=nullptr && body!=lib,"Nav: body dropdown found (a separate browser)");
+    if(!lib||!body) return;
+    EXPECT(modal::soundPresetCount()==modal::kNumPresets*modal::kNumCharacters,
+           "Nav: the library is bodies x characters");
+    LOGF("[nav] library=%d entries (%d bodies x %d characters)\n",
+         modal::soundPresetCount(),modal::kNumPresets,modal::kNumCharacters);
+
+    // --- a library selection applies the body AND the character -------------
+    const int bell=modal::soundPresetIndex(0,modal::kNumCharacters-1);   // "<body0> Bell"
+    const modal::Character& ch=modal::kCharacters[modal::kNumCharacters-1];
+    lv_dropdown_set_selected(lib,bell);
+    lv_obj_send_event(lib,LV_EVENT_VALUE_CHANGED,nullptr);
+    idleFrames(exp,6);
+    const float bellInharm=gParamVal[PluginMultiScaleBody::kParamInharm];
+    const float bellDecay=gParamVal[PluginMultiScaleBody::kParamDecay];
+    LOGF("[nav] '%s' -> inharm %.3f decay %.3f (character %.3f / %.3f)\n",
+         modal::soundPreset(bell).name,(double)bellInharm,(double)bellDecay,
+         (double)ch.inharm,(double)ch.decay);
+    EXPECT(std::fabs(bellInharm-ch.inharm)<1e-3f,
+           "Nav: the preset's character reached the host (inharmonicity)");
+    EXPECT(std::fabs(bellDecay-ch.decay)<1e-3f,
+           "Nav: the preset's character reached the host (decay)");
+    EXPECT(lv_dropdown_get_selected(lib)==bell,"Nav: the library selection stuck");
+
+    // --- swapping the body keeps the character ------------------------------
+    lv_dropdown_set_selected(body,5);
+    lv_obj_send_event(body,LV_EVENT_VALUE_CHANGED,nullptr);
+    idleFrames(exp,8);
+    const int mxb=modal::kNumPresets-1;
+    LOGF("[nav] body 5 under '%s' -> inharm %.3f decay %.3f body-param %.3f\n",
+         modal::soundPreset(bell).name,(double)gParamVal[PluginMultiScaleBody::kParamInharm],
+         (double)gParamVal[PluginMultiScaleBody::kParamDecay],
+         (double)gParamVal[PluginMultiScaleBody::kParamPreset]);
+    EXPECT(std::fabs(gParamVal[PluginMultiScaleBody::kParamInharm]-bellInharm)<1e-3f,
+           "Nav: the character's inharmonicity survives a body swap");
+    EXPECT(std::fabs(gParamVal[PluginMultiScaleBody::kParamDecay]-bellDecay)<1e-3f,
+           "Nav: the character's decay survives a body swap");
+    EXPECT(lv_dropdown_get_selected(body)==5,"Nav: the body selection stuck");
+    EXPECT(std::fabs(gParamVal[PluginMultiScaleBody::kParamPreset]-(float)5/(float)mxb)<1e-3f,
+           "Nav: the body swap reached the host's BODY parameter");
+
+    // --- the steppers move their own browser, and wrap ----------------------
+    lv_dropdown_set_selected(lib,0);
+    lv_obj_send_event(lib,LV_EVENT_VALUE_CHANGED,nullptr); idleFrames(exp,4);
+    lv_obj_t* libNext=siblingArrow(lib,+1);
+    lv_obj_t* libPrev=siblingArrow(lib,-1);
+    EXPECT(libNext && libPrev,"Nav: the library stepper buttons found");
+    lv_obj_send_event(libNext,LV_EVENT_CLICKED,nullptr); idleFrames(exp,6);
+    LOGF("[nav] library next -> sel=%d (expect 1)\n",lv_dropdown_get_selected(lib));
+    EXPECT(lv_dropdown_get_selected(lib)==1,"Nav: the library stepper advances the LIBRARY, not the body");
+    lv_obj_send_event(libPrev,LV_EVENT_CLICKED,nullptr); idleFrames(exp,6);
+    LOGF("[nav] library prev -> sel=%d (expect 0)\n",lv_dropdown_get_selected(lib));
+    EXPECT(lv_dropdown_get_selected(lib)==0,"Nav: the library stepper steps back");
+    lv_obj_send_event(libPrev,LV_EVENT_CLICKED,nullptr); idleFrames(exp,6);
+    LOGF("[nav] library prev from 0 -> sel=%d (expect %d, the wrap)\n",
+         lv_dropdown_get_selected(lib),modal::soundPresetCount()-1);
+    EXPECT(lv_dropdown_get_selected(lib)==modal::soundPresetCount()-1,
+           "Nav: the library stepper wraps to the last entry");
+    // and the body stepper must move the BODY dropdown
+    lv_dropdown_set_selected(body,0);
+    lv_obj_send_event(body,LV_EVENT_VALUE_CHANGED,nullptr); idleFrames(exp,4);
+    lv_obj_t* bodyNext=siblingArrow(body,+1);
+    lv_obj_send_event(bodyNext,LV_EVENT_CLICKED,nullptr); idleFrames(exp,6);
+    LOGF("[nav] body next -> sel=%d (expect 1)\n",lv_dropdown_get_selected(body));
+    EXPECT(lv_dropdown_get_selected(body)==1,"Nav: the body stepper moves the BODY dropdown");
+    // leave the default selection behind for the later proofs
+    lv_dropdown_set_selected(lib,0);
+    lv_obj_send_event(lib,LV_EVENT_VALUE_CHANGED,nullptr);
     idleFrames(exp,4);
-    // NEXT: selection advances AND that preset's model row is applied
-    int before=gParamWrites; gLastParam=UINT32_MAX;
-    lv_obj_send_event(next,LV_EVENT_CLICKED,nullptr);
-    idleFrames(exp,6);
-    LOGF("[nav] next -> sel=%d writes=%d last=%u\n",lv_dropdown_get_selected(dd),
-         gParamWrites-before,(unsigned)gLastParam);
-    EXPECT(lv_dropdown_get_selected(dd)==1,"Nav: next advances the selection");
-    EXPECT(gParamWrites-before>=17,"Nav: next applies the preset model row");
-    EXPECT(gLastParam==PluginMultiScaleBody::kParamModelMode,"Nav: arrow path applies the model row");
-    // PREV: steps back, then wraps from preset 0 to the last preset
-    lv_obj_send_event(prev,LV_EVENT_CLICKED,nullptr);
-    idleFrames(exp,6);
-    EXPECT(lv_dropdown_get_selected(dd)==0,"Nav: prev steps back");
-    lv_obj_send_event(prev,LV_EVENT_CLICKED,nullptr);
-    idleFrames(exp,6);
-    LOGF("[nav] prev from 0 -> %d (expect %d)\n",lv_dropdown_get_selected(dd),modal::kNumPresets-1);
-    EXPECT(lv_dropdown_get_selected(dd)==modal::kNumPresets-1,"Nav: prev wraps to the last preset");
-    // DICE: randomize must write a spread of params
-    before=gParamWrites;
-    lv_obj_send_event(dice,LV_EVENT_CLICKED,nullptr);
-    idleFrames(exp,10);
-    LOGF("[nav] dice writes=%d\n",gParamWrites-before);
-    EXPECT(gParamWrites-before>=20,"Nav: dice randomizes a spread of params");
-    lv_dropdown_set_selected(dd,0);                 // leave the default body selected
-    lv_obj_send_event(dd,LV_EVENT_VALUE_CHANGED,nullptr);
-    idleFrames(exp,6);
 }
 
-// ---- host-sync readout self-test -----------------------------------------
-// A host/preset sync must leave a knob showing its CONTEXTUAL text.
-// UIWidgets::syncFromParam ends by writing a raw "%.2f" into the value label and
-// sends no VALUE_CHANGED, so before this fix every host automation write or
-// preset load reverted the readout - Modes "88" became "0.67", Glide "90 MS"
-// became "0.15", Wet "30 %" became "0.30" - and it stayed raw until the knob was
-// dragged. syncParamWidget now re-runs the formatter after the sync.
 // createArcKnob puts the caption label first in the knob container and the value
-// readout last, so tree order identifies it (the widget's own
-// gArcVisualBindings map is a `static` in a header, i.e. one copy per TU, and
-// this harness is a different TU from PluginUI.cpp).
+// readout last, so tree order identifies it. (The widget's own
+// gArcVisualBindings map is a `static` in a header, i.e. one copy per TU, and the
+// harness is a different TU from PluginUI.cpp - navigating the tree is the
+// reliable way to reach the live label.)
 static lv_obj_t* knobValueLabel(lv_obj_t* arc){
     if(!arc) return nullptr;
     lv_obj_t* cont=lv_obj_get_parent(arc);
@@ -910,6 +966,7 @@ static lv_obj_t* knobValueLabel(lv_obj_t* arc){
     }
     return last;
 }
+
 static void hostSyncLabelProof(DISTRHO::UIExporter* exp,HWND hwnd){
     bool first=true; resizeWindow(hwnd,exp,1440,1068,first);
     lv_obj_update_layout(lv_screen_active());

@@ -95,6 +95,7 @@ private:
     float vizLevel_=0.f; float vizBins_[16]={};
     // arpeggiator — fixed up-pattern; pattern/gate tables live at the use site in run()
     bool arpOn_=false; int arpPos_=0;
+    int soundPresetIdx_=0;   // selected library preset (persisted via the "soundpreset" state)
     float vizNoteTick_=0.f;   // note-event tick, published as kParamNoteTick
     double arpSamplesPerStep_=0.0; double arpCounter_=0.0;
     // --- wave-2 state (idea 13/15): MIDI-learned CC map + pending learn + tuning

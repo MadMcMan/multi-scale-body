@@ -13,6 +13,7 @@
 #include "PluginMultiScaleBody.hpp"
 #include "ModalData.hpp"
 #include "PresetModels.hpp"      // per-preset PHYSICAL MODEL settings
+#include "SoundPresets.hpp"       // sound-preset library (body x character)
 #include "styles/Palette.hpp"    // design tokens (colors, lay::, scaled(), fonts)
 #include "styles/UIStyles.hpp"   // LVGL style pack
 #include "components/UICommon.hpp"  // abstract UI contract
@@ -461,6 +462,15 @@ public:
         }
     }
     void stateChanged(const char* key,const char* value) override {
+        // library selection from a loaded session: show it, do NOT re-apply it
+        // (the host restores the parameters themselves)
+        if(key && std::strcmp(key,"soundpreset")==0){
+            fPresetLibIdx=std::max(0,std::atoi(value?value:"0"));
+            if(presetDropdown){
+                const int n=modal::soundPresetCount();
+                lv_dropdown_set_selected(presetDropdown,std::clamp(fPresetLibIdx,0,n>0?n-1:0));
+            }
+        }
         if(key && std::strcmp(key,"arpon")==0){
             arpOnLocal = value && value[0]=='1';
             if(arpBtn){ if(arpOnLocal) lv_obj_add_state(arpBtn,LV_STATE_CHECKED); else lv_obj_clear_state(arpBtn,LV_STATE_CHECKED); }
@@ -1283,10 +1293,18 @@ private:
         }
     }
     void syncPresetDropdown(float v){
-        if(!presetDropdown) return;
-        int mx = modal::kNumPresets - 1;
-        int idx = (int)std::round(v*(float)mx); idx=std::clamp(idx,0,mx);
-        lv_dropdown_set_selected(presetDropdown, idx);
+        // Host/automation path for the BODY parameter: the body browser follows
+        // it. The library dropdown is UI-side selection (fPresetLibIdx), synced
+        // here too so a preset applied from anywhere is reflected.
+        if(fBodyDropdown){
+            int mx = modal::kNumPresets - 1;
+            int idx = (int)std::round(v*(float)mx); idx=std::clamp(idx,0,mx);
+            lv_dropdown_set_selected(fBodyDropdown, idx);
+        }
+        if(presetDropdown){
+            const int n=modal::soundPresetCount();
+            lv_dropdown_set_selected(presetDropdown, std::clamp(fPresetLibIdx,0,n>0?n-1:0));
+        }
     }
     // last-strike marker: a small filled amber dot at the click position that
     // persists for ~0.5s after the hit and then fades. Visual feedback the
@@ -1613,6 +1631,59 @@ private:
     // come with it. Called only from the user-initiated preset paths (dropdown +
     // arrows), NOT raw host automation, so a host automating kParamPreset does
     // not fight the host's own automation of the model params.
+    // Apply one character's overrides. -1 = inherit (leave the parameter alone),
+    // which is what makes "Pure" the body's designed sound exactly.
+    void applyCharacter(const modal::Character& ch){
+        using P=PluginMultiScaleBody;
+        const struct { uint32_t p; float v; } vals[] = {
+            {P::kParamDecay,ch.decay},{P::kParamBrightness,ch.brightness},
+            {P::kParamWidth,ch.width},{P::kParamRadiation,ch.radiation},
+            {P::kParamAttack,ch.attack},{P::kParamRelease,ch.release},
+            {P::kParamInharm,ch.inharm},{P::kParamStrikeW,ch.strikeW},
+            {P::kParamScrape,ch.scrape},{P::kParamBow,ch.bow},
+            {P::kParamDamper,ch.damper},{P::kParamContactNoise,ch.contactNoise},
+            {P::kParamExciteMix,ch.exciteMix},{P::kParamSupport,ch.support},
+            {P::kParamHoldDamp,ch.holdDamp},{P::kParamResMorph,ch.resMorph},
+            {P::kParamMorphAmt,ch.morphAmt},{P::kParamRayleighA,ch.raylA},
+            {P::kParamRayleighB,ch.raylB},{P::kParamVelStrike,ch.velStrike},
+            {P::kParamDetune,ch.detune},{P::kParamGlide,ch.glide},
+            {P::kParamModeCount,ch.modeCount},{P::kParamStrikeX,ch.strikeX},
+            {P::kParamStrikeY,ch.strikeY},
+        };
+        for(const auto& d : vals) if(d.v>=0.f) setParamValue(d.p,d.v);
+    }
+    // Select a library preset: its BODY first (which lays down that body's own
+    // physical-model defaults), then the character on top so the character always
+    // wins. fPresetLibIdx records the selection so the body browser can swap the
+    // body underneath it and re-assert the same character.
+    void applySoundPreset(int idx){
+        using P=PluginMultiScaleBody;
+        const modal::SoundPreset& sp=modal::soundPreset(idx);
+        const int mx=modal::kNumPresets-1;
+        // record the selection FIRST: setParamValue reaches parameterChanged
+        // synchronously, and that path syncs the library dropdown from
+        // fPresetLibIdx - assigning after would snap the dropdown back.
+        fPresetLibIdx=idx;
+        setParamValue(P::kParamPreset, mx? (float)sp.body/(float)mx : 0.f);
+        applyPresetModel((int)sp.body);
+        applyCharacter(modal::kCharacters[sp.character]);
+        // persist the selection so a session reloads on the same preset name
+        // (the sound itself rides the ordinary parameters)
+        setState("soundpreset",std::to_string(fPresetLibIdx).c_str());
+    }
+    // BODY browser: change the body without losing the sound. The new body's own
+    // model defaults are laid down first (that is what selecting a body means
+    // when no preset is active), then the active preset's character is
+    // re-asserted over them so the character survives the swap.
+    void applyBodySelection(int bodyIdx){
+        using P=PluginMultiScaleBody;
+        const int mx=modal::kNumPresets-1;
+        bodyIdx=std::clamp(bodyIdx,0,mx);
+        setParamValue(P::kParamPreset, mx? (float)bodyIdx/(float)mx : 0.f);
+        applyPresetModel(bodyIdx);
+        if(fPresetLibIdx>=0)
+            applyCharacter(modal::kCharacters[modal::soundPreset(fPresetLibIdx).character]);
+    }
     void applyPresetModel(int idx){
         idx=std::clamp(idx,0,modal::kNumPresets-1);
         const modal::PresetModel& m=modal::kPresetModels[idx];
@@ -1648,34 +1719,51 @@ private:
         setParamValue(index,target);
         editParameter(index,false);
     }
+    // PRESET browser (the library): selecting an entry applies its body and then
+    // its character. The BODY parameter's edit is bracketed because the library
+    // moves it; the character writes are plain, exactly like applyPresetModel.
     static void dropdownCb(lv_event_t* e){
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
         lv_obj_t* dd=(lv_obj_t*)lv_event_get_target(e);
-        int sel=lv_dropdown_get_selected(dd);
-        int mx = modal::kNumPresets - 1;
-        float v = mx ? (float)sel/(float)mx : 0.f;
-        if(ui){ ui->editParameter(PluginMultiScaleBody::kParamPreset,true); ui->setParamValue(PluginMultiScaleBody::kParamPreset, v); ui->editParameter(PluginMultiScaleBody::kParamPreset,false); ui->applyPresetModel(sel); }
-    }
-    // piece-6: preset browser prev/next arrow click. Cycles the selected
-    // preset by +/-1 (with wrap) and writes through setParamValue so the
-    // existing dropdown sync + body info + body preview paths all fire.
-    static void presetArrowCb(lv_event_t* e){
-        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
-        if(!ui||!ui->presetDropdown) return;
-        int dir=(int)(intptr_t)lv_obj_get_user_data((lv_obj_t*)lv_event_get_target(e));
-        if(dir==0) return;
-        int mx = modal::kNumPresets - 1;
-        int cur=lv_dropdown_get_selected(ui->presetDropdown);
-        int nxt=std::clamp(cur+dir, 0, mx);
-        if(nxt==cur && ((dir<0 && cur==0) || (dir>0 && cur==mx))){
-            // wrap at the end
-            nxt = (dir<0) ? mx : 0;
-        }
-        float v = mx ? (float)nxt/(float)mx : 0.f;
+        if(!ui) return;
         ui->editParameter(PluginMultiScaleBody::kParamPreset,true);
-        ui->setParamValue(PluginMultiScaleBody::kParamPreset, v);
+        ui->applySoundPreset(lv_dropdown_get_selected(dd));
         ui->editParameter(PluginMultiScaleBody::kParamPreset,false);
-        ui->applyPresetModel(nxt);
+    }
+    // BODY browser: swap the body under whatever is playing.
+    static void bodyDropdownCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* dd=(lv_obj_t*)lv_event_get_target(e);
+        if(!ui) return;
+        ui->editParameter(PluginMultiScaleBody::kParamPreset,true);
+        ui->applyBodySelection(lv_dropdown_get_selected(dd));
+        ui->editParameter(PluginMultiScaleBody::kParamPreset,false);
+    }
+    // +/-1 stepper shared by both browsers (dir is the button's user_data).
+    static void browserArrowCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        if(!ui) return;
+        lv_obj_t* btn=(lv_obj_t*)lv_event_get_target(e);
+        const int dir=(int)(intptr_t)lv_obj_get_user_data(btn);
+        if(dir==0) return;
+        if(btn==ui->fBodyPrevBtn || btn==ui->fBodyNextBtn){
+            const int mx=modal::kNumPresets-1;
+            int cur=lv_dropdown_get_selected(ui->fBodyDropdown);
+            int nxt=std::clamp(cur+dir,0,mx);
+            if(nxt==cur) nxt=(dir<0)?mx:0;              // wrap
+            ui->editParameter(PluginMultiScaleBody::kParamPreset,true);
+            ui->applyBodySelection(nxt);
+            ui->editParameter(PluginMultiScaleBody::kParamPreset,false);
+            return;
+        }
+        if(!ui->presetDropdown) return;
+        const int n=modal::soundPresetCount();
+        int cur=lv_dropdown_get_selected(ui->presetDropdown);
+        int nxt=std::clamp(cur+dir,0,n-1);
+        if(nxt==cur) nxt=(dir<0)?n-1:0;                 // wrap
+        ui->editParameter(PluginMultiScaleBody::kParamPreset,true);
+        ui->applySoundPreset(nxt);
+        ui->editParameter(PluginMultiScaleBody::kParamPreset,false);
     }
     static void padPressCb(lv_event_t* e){
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
@@ -2292,7 +2380,7 @@ private:
     // DRAWN in DRAW_POST_END instead of a font glyph: the baked Montserrat
     // subset has no U+2039/U+203A (they rendered as tofu boxes), so we paint
     // the arrow ourselves and it can never depend on glyph coverage. Returns a
-    // clickable btn whose user_data carries +1/-1 (consumed by presetArrowCb).
+    // clickable btn whose user_data carries +1/-1 (consumed by browserArrowCb).
     static void presetArrowDrawCb(lv_event_t* e){
         auto* b=(lv_obj_t*)lv_event_get_target(e);
         if(!b) return;
@@ -2750,16 +2838,16 @@ private:
         lv_obj_set_flex_grow(ddRow,1);
         // prev arrow
         presetPrevBtn=addPresetArrowBtn(ddRow,-1);
+        fPresetPrevBtn=presetPrevBtn;
         // dropdown moved to the top bar (was the center card's preset row)
         presetDropdown=lv_dropdown_create(ddRow); regDropdown(presetDropdown);
         tagLearnable(presetDropdown,PluginMultiScaleBody::kParamPreset);
         {
-            std::string opts; for(int i=0;i<modal::kNumPresets;++i){ if(i) opts+="\n"; opts+=modal::kPresets[i].name; }
+            std::string opts; const int np=modal::soundPresetCount();
+            for(int i=0;i<np;++i){ if(i) opts+="\n"; opts+=modal::soundPreset(i).name; }
             lv_dropdown_set_options(presetDropdown,opts.c_str());
         }
-        int mxp=modal::kNumPresets-1;
-        int selp=(int)std::round(paramCache[PluginMultiScaleBody::kParamPreset]*(float)mxp);
-        lv_dropdown_set_selected(presetDropdown,std::clamp(selp,0,mxp));
+        lv_dropdown_set_selected(presetDropdown,std::clamp(fPresetLibIdx,0,std::max(0,modal::soundPresetCount()-1)));
         lv_obj_set_flex_grow(presetDropdown,1);
         lv_obj_add_style(presetDropdown,&styles.compactSelectMain,0);
         lv_obj_set_style_bg_color(presetDropdown,PLATE_WELL,0);
@@ -2779,14 +2867,53 @@ private:
         }
         // next arrow
         presetNextBtn=addPresetArrowBtn(ddRow,+1);
+        fPresetNextBtn=presetNextBtn;
         // (R-user) RANDOMIZE lives here as a dice icon, right of the arrows.
         fDiceBtn=addDiceBtn(ddRow);
+        // BODY browser: same row, to the right of the preset browser. It exists
+        // so the body can be swapped UNDER a preset - applyBodySelection() lays
+        // the new body's own model down and then re-asserts the active preset's
+        // character, so the sound survives the swap.
+        addLabel(ddRow,"BODY",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        lv_obj_t* bodyPrev=addPresetArrowBtn(ddRow,-1);
+        fBodyPrevBtn=bodyPrev;
+        fBodyDropdown=lv_dropdown_create(ddRow); regDropdown(fBodyDropdown);
+        tagLearnable(fBodyDropdown,PluginMultiScaleBody::kParamPreset);
+        {
+            std::string opts; for(int i=0;i<modal::kNumPresets;++i){ if(i) opts+="\n"; opts+=modal::kPresets[i].name; }
+            lv_dropdown_set_options(fBodyDropdown,opts.c_str());
+        }
+        {
+            const int mxp=modal::kNumPresets-1;
+            const int selp=(int)std::round(paramCache[PluginMultiScaleBody::kParamPreset]*(float)mxp);
+            lv_dropdown_set_selected(fBodyDropdown,std::clamp(selp,0,mxp));
+        }
+        lv_obj_add_style(fBodyDropdown,&styles.compactSelectMain,0);
+        lv_obj_set_style_bg_color(fBodyDropdown,PLATE_WELL,0);
+        lv_obj_set_style_border_color(fBodyDropdown,PLATE_EDGE,0);
+        lv_obj_set_style_radius(fBodyDropdown,scaled(lay::RADIUS_SM),0);
+        lv_obj_set_width(fBodyDropdown,scaled(112));
+        {
+            lv_obj_t* list=lv_dropdown_get_list(fBodyDropdown);
+            if(list){
+                lv_obj_add_style(list,&styles.compactSelectListMain,0);
+                lv_obj_set_style_max_height(list,scaled(8*18),0);
+                lv_obj_set_style_text_font(list,getScaledSmallFont(),0);
+            }
+            lv_group_remove_obj(fBodyDropdown);   // wheel must scroll the list, not move focus
+        }
+        lv_obj_t* bodyNext=addPresetArrowBtn(ddRow,+1);
+        fBodyNextBtn=bodyNext;
+        lv_obj_add_event_cb(bodyPrev,browserArrowCb,LV_EVENT_CLICKED,this);
+        lv_obj_add_event_cb(bodyNext,browserArrowCb,LV_EVENT_CLICKED,this);
+        lv_obj_add_event_cb(fBodyDropdown,bodyDropdownCb,LV_EVENT_VALUE_CHANGED,this);
+        lv_obj_add_event_cb(fBodyDropdown,dropdownExclusiveCb,LV_EVENT_RELEASED,this);
         lv_obj_add_event_cb(fDiceBtn,rndBtnCb,LV_EVENT_CLICKED,this);
         // piece-6: dropdown group/keyboard handling. Dropdown must NOT be in
         // the group (wheel = encoder; group focus defocuses + closes).
         lv_group_remove_obj(presetDropdown);
         // FIX: the VALUE_CHANGED + CLICKED handlers were defined
-        // (dropdownCb/presetArrowCb) but never registered, so the whole
+        // (dropdownCb/browserArrowCb) but never registered, so the whole
         // preset browser was dead. Wire them here.
         lv_obj_add_event_cb(presetDropdown,dropdownCb,LV_EVENT_VALUE_CHANGED,this);
         // The other three dropdowns register this and the preset one did not, so
@@ -2801,8 +2928,8 @@ private:
         // this line removed it fails exactly the three whose release lands on the
         // preset dropdown and passes the other nine.
         lv_obj_add_event_cb(presetDropdown,dropdownExclusiveCb,LV_EVENT_RELEASED,this);
-        lv_obj_add_event_cb(presetPrevBtn,presetArrowCb,LV_EVENT_CLICKED,this);
-        lv_obj_add_event_cb(presetNextBtn,presetArrowCb,LV_EVENT_CLICKED,this);
+        lv_obj_add_event_cb(presetPrevBtn,browserArrowCb,LV_EVENT_CLICKED,this);
+        lv_obj_add_event_cb(presetNextBtn,browserArrowCb,LV_EVENT_CLICKED,this);
         // R5: vertical divider between the preset browser and the master
         // cluster - second of three separators in the top bar so each zone
         // (brand | preset | master+zoom) reads as a distinct module.
@@ -4040,6 +4167,16 @@ private:
     lv_obj_t* fDampVals[16]={};
     int fDampDragBand=-1;    // DAMPING panel: band whose edit bracket is open
     float fDampNominalT60=0.f;   // longest band tail (s); the Decay knob's readout
+    // library preset currently applied (-1 = none: the body's own sound). The
+    // body browser re-asserts its character after a body swap.
+    int fPresetLibIdx=-1;
+    lv_obj_t* fBodyDropdown=nullptr;
+    // the four browser arrows: both browsers share one top-bar row, so the
+    // button's parent cannot say which browser it belongs to - the pointers
+    // can (a parent comparison sent the preset arrows down the body branch).
+    lv_obj_t* fPresetPrevBtn=nullptr; lv_obj_t* fPresetNextBtn=nullptr;
+    lv_obj_t* fBodyPrevBtn=nullptr;   lv_obj_t* fBodyNextBtn=nullptr;
+    lv_obj_t* fPresetNameLbl=nullptr;
     int fDampPresetCache=-1;
     float fDampDecayCache=-1.f;
     float fDampBandSumCache=-1.f;
