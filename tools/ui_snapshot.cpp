@@ -19,6 +19,7 @@
 #include "SoundPresets.hpp"        // sound-preset library (body x character)
 #include "components/UICommon.hpp"  // abstract UI contract
 #include <windows.h>
+#include <cstddef>
 #include <functional>
 
 static FILE* gLog=nullptr;
@@ -746,7 +747,7 @@ static void learnTagProof(DISTRHO::UIExporter* exp,HWND hwnd){
     lv_obj_t* mt=findLabelText(lv_screen_active(),"Morph Tgt");
     tagged("Learn: Morph Tgt dropdown",lastChild(mt?lv_obj_get_parent(mt):nullptr),
            PluginMultiScaleBody::kParamMorphTarget);
-    tagged("Learn: preset dropdown",findByClass(lv_screen_active(),"lv_dropdown"),
+    tagged("Learn: BODY dropdown",findNthDropdown(lv_screen_active(),1),
            PluginMultiScaleBody::kParamPreset);
     // knobs carry the RAW param index (no tag) - that is what the arc branch of
     // learnParamAt reads
@@ -941,9 +942,21 @@ static void presetNavProof(DISTRHO::UIExporter* exp,HWND hwnd){
     lv_dropdown_set_selected(body,0);
     lv_obj_send_event(body,LV_EVENT_VALUE_CHANGED,nullptr); idleFrames(exp,4);
     lv_obj_t* bodyNext=siblingArrow(body,+1);
+    lv_obj_t* bodyPrev=siblingArrow(body,-1);
     lv_obj_send_event(bodyNext,LV_EVENT_CLICKED,nullptr); idleFrames(exp,6);
     LOGF("[nav] body next -> sel=%d (expect 1)\n",lv_dropdown_get_selected(body));
     EXPECT(lv_dropdown_get_selected(body)==1,"Nav: the body stepper moves the BODY dropdown");
+    // walk the rest of the ladder, then both wraps
+    const int mxBody=modal::kNumPresets-1;
+    for(int i=0;i<mxBody-1;++i){ lv_obj_send_event(bodyNext,LV_EVENT_CLICKED,nullptr); idleFrames(exp,2); }
+    LOGF("[nav] body walked to %d (expect %d)\n",lv_dropdown_get_selected(body),mxBody);
+    EXPECT(lv_dropdown_get_selected(body)==mxBody,"Nav: the body stepper walks the whole ladder");
+    lv_obj_send_event(bodyNext,LV_EVENT_CLICKED,nullptr); idleFrames(exp,6);
+    LOGF("[nav] body next at the end -> %d (expect 0, the wrap)\n",lv_dropdown_get_selected(body));
+    EXPECT(lv_dropdown_get_selected(body)==0,"Nav: the body stepper wraps forward at the end");
+    lv_obj_send_event(bodyPrev,LV_EVENT_CLICKED,nullptr); idleFrames(exp,6);
+    LOGF("[nav] body prev at 0 -> %d (expect %d, the wrap)\n",lv_dropdown_get_selected(body),mxBody);
+    EXPECT(lv_dropdown_get_selected(body)==mxBody,"Nav: the body stepper wraps back at the start");
     // leave the default selection behind for the later proofs
     lv_dropdown_set_selected(lib,0);
     lv_obj_send_event(lib,LV_EVENT_VALUE_CHANGED,nullptr);
@@ -965,6 +978,71 @@ static lv_obj_t* knobValueLabel(lv_obj_t* arc){
         if(lv_obj_check_type(c,&lv_label_class)) last=c;
     }
     return last;
+}
+
+// ---- library diversity + selection round-trip -----------------------------
+// Two things the first library proof did not establish:
+//   (1) that the six characters actually differ from each other, rather than the
+//       generator producing 25 bodies plus five thin skins - Pure inherits every
+//       parameter, so "distinct from Pure" is not enough on its own;
+//   (2) that a saved session's selection survives: stateChanged must land the
+//       library dropdown on the stored index. The harness's stubSetState is a
+//       no-op, so the ordinary write path is never exercised by any gate and the
+//       callback has to be driven directly.
+static void presetLibraryProof(DISTRHO::UIExporter* exp,HWND hwnd){
+    bool first=true; resizeWindow(hwnd,exp,1440,1068,first);
+    lv_obj_update_layout(lv_screen_active());
+    lv_obj_t* lib=findNthDropdown(lv_screen_active(),0);
+    EXPECT(lib!=nullptr,"Lib: library dropdown found");
+    if(!lib) return;
+    const int n=modal::soundPresetCount();
+    const int nch=modal::kNumCharacters;
+
+    float snap[16][PluginMultiScaleBody::kParameterCount];
+    int nonInherit[16]={};
+    for(int c=0;c<nch && c<16;++c){
+        lv_dropdown_set_selected(lib,modal::soundPresetIndex(0,c));
+        lv_obj_send_event(lib,LV_EVENT_VALUE_CHANGED,nullptr);
+        idleFrames(exp,5);
+        for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount;++i) snap[c][i]=gParamVal[i];
+        const modal::Character& ch=modal::kCharacters[c];
+        // Field count from the FIRST and LAST members, not from sizeof: the
+        // struct has 4 bytes of tail padding (its alignment is the name
+        // pointer's), so sizeof/4 reads one float past strikeY and counted that
+        // padding as an override - which made Pure look like it had one.
+        const float* f=&ch.decay;
+        const size_t nf=(offsetof(modal::Character,strikeY)-offsetof(modal::Character,decay))/sizeof(float)+1;
+        for(size_t k=0;k<nf;++k) if(f[k]>=0.f) ++nonInherit[c];
+    }
+    for(int c=0;c<nch;++c)
+        LOGF("[lib] character %d '%s': %d explicit parameter(s)\n",c,modal::kCharacters[c].name,nonInherit[c]);
+    EXPECT(nonInherit[0]==0,"Lib: Pure inherits everything (the body's own sound)");
+    int thin=0,dupes=0;
+    for(int c=1;c<nch;++c) if(nonInherit[c]<4) ++thin;
+    for(int a=0;a<nch;++a) for(int b=a+1;b<nch;++b){
+        bool same=true;
+        for(uint32_t i=0;i<PluginMultiScaleBody::kParameterCount && same;++i)
+            if(std::fabs(snap[a][i]-snap[b][i])>1e-4f) same=false;
+        if(same){ ++dupes; LOGF("[lib] characters %d and %d leave identical host state\n",a,b); }
+    }
+    EXPECT(thin==0,"Lib: every character moves at least four parameters");
+    EXPECT(dupes==0,"Lib: no two characters leave the host in the same state");
+
+    const int want=n>1?n-2:0;
+    exp->stateChanged("soundpreset",std::to_string(want).c_str());
+    idleFrames(exp,4);
+    LOGF("[lib] stateChanged(soundpreset, %d) -> dropdown %d\n",want,lv_dropdown_get_selected(lib));
+    EXPECT(lv_dropdown_get_selected(lib)==want,
+           "Lib: a stored selection reaches the library dropdown");
+    exp->stateChanged("soundpreset","9999");
+    idleFrames(exp,4);
+    LOGF("[lib] stateChanged(soundpreset, 9999) -> dropdown %d (expect %d)\n",
+         lv_dropdown_get_selected(lib),n-1);
+    EXPECT(lv_dropdown_get_selected(lib)==n-1,
+           "Lib: a stale out-of-range selection is clamped to the library");
+    lv_dropdown_set_selected(lib,0);
+    lv_obj_send_event(lib,LV_EVENT_VALUE_CHANGED,nullptr);
+    idleFrames(exp,4);
 }
 
 static void hostSyncLabelProof(DISTRHO::UIExporter* exp,HWND hwnd){
@@ -1224,6 +1302,7 @@ int main(int argc,char** argv)
         exposureWiringProof(exp,hwnd);
         presetBaselineProof(exp,hwnd);
         presetNavProof(exp,hwnd);
+        presetLibraryProof(exp,hwnd);
         specStripProof(exp,hwnd);
         hostSyncLabelProof(exp,hwnd);
         dropdownExclusiveProof(exp,hwnd);

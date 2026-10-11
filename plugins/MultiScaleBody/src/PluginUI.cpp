@@ -465,7 +465,8 @@ public:
         // library selection from a loaded session: show it, do NOT re-apply it
         // (the host restores the parameters themselves)
         if(key && std::strcmp(key,"soundpreset")==0){
-            fPresetLibIdx=std::max(0,std::atoi(value?value:"0"));
+            { const int n=modal::soundPresetCount();
+              fPresetLibIdx=std::clamp(std::atoi(value?value:"0"),0,n>0?n-1:0); }
             if(presetDropdown){
                 const int n=modal::soundPresetCount();
                 lv_dropdown_set_selected(presetDropdown,std::clamp(fPresetLibIdx,0,n>0?n-1:0));
@@ -1667,6 +1668,11 @@ private:
         setParamValue(P::kParamPreset, mx? (float)sp.body/(float)mx : 0.f);
         applyPresetModel((int)sp.body);
         applyCharacter(modal::kCharacters[sp.character]);
+        // the double-click baseline must be the PRESET's values. parameterChanged
+        // (kParamPreset) and applyPresetModel both capture, but both run before
+        // applyCharacter above, so without this the cache held the pre-character
+        // values and double-clicking a character knob reverted it off the preset.
+        capturePresetDefaults();
         // persist the selection so a session reloads on the same preset name
         // (the sound itself rides the ordinary parameters)
         setState("soundpreset",std::to_string(fPresetLibIdx).c_str());
@@ -1681,8 +1687,10 @@ private:
         bodyIdx=std::clamp(bodyIdx,0,mx);
         setParamValue(P::kParamPreset, mx? (float)bodyIdx/(float)mx : 0.f);
         applyPresetModel(bodyIdx);
-        if(fPresetLibIdx>=0)
+        if(fPresetLibIdx>=0){
             applyCharacter(modal::kCharacters[modal::soundPreset(fPresetLibIdx).character]);
+            capturePresetDefaults();   // same baseline rule as applySoundPreset
+        }
     }
     void applyPresetModel(int idx){
         idx=std::clamp(idx,0,modal::kNumPresets-1);
@@ -2841,7 +2849,9 @@ private:
         fPresetPrevBtn=presetPrevBtn;
         // dropdown moved to the top bar (was the center card's preset row)
         presetDropdown=lv_dropdown_create(ddRow); regDropdown(presetDropdown);
-        tagLearnable(presetDropdown,PluginMultiScaleBody::kParamPreset);
+        // deliberately NOT tagLearnable: the library is UI state, not a
+        // parameter. The BODY dropdown below carries the kParamPreset tag.
+
         {
             std::string opts; const int np=modal::soundPresetCount();
             for(int i=0;i<np;++i){ if(i) opts+="\n"; opts+=modal::soundPreset(i).name; }
