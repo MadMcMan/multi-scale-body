@@ -1008,9 +1008,30 @@ static void dropdownExclusiveProof(DISTRHO::UIExporter* exp,HWND hwnd){
 // (the longest band, from the DAMPING card's own computation) rather than the
 // raw 0..1 parameter. The displayed number must also move the same way as the
 // sound: raising Decay lengthens the tail (engine: 0.1*pow(100,1-v)).
+// the zoom stepper carries its step (+/-1) as user_data (zoomBtnCb reads it)
+static lv_obj_t* findZoomStepBtn(lv_obj_t* o,intptr_t step){
+    if((intptr_t)lv_obj_get_user_data(o)==step && lv_obj_has_flag(o,LV_OBJ_FLAG_CLICKABLE)) return o;
+    for(uint32_t i=0;i<lv_obj_get_child_count(o);++i)
+        if(auto* f=findZoomStepBtn(lv_obj_get_child(o,i),step)) return f;
+    return nullptr;
+}
 static void decayReadoutProof(DISTRHO::UIExporter* exp,HWND hwnd){
     bool first=true; resizeWindow(hwnd,exp,1440,1068,first);
     lv_obj_update_layout(lv_screen_active());
+    // FIRST-PAINT check, before any parameter is written. buildUI paints the knob
+    // labels while creating them and only calls updateDampingDisplay() afterwards,
+    // and clearWidgetRefs() zeroes the cache, so a fresh build - or any
+    // zoom/resize rebuild - would leave the raw fallback on screen unless
+    // something re-formats the knob after the card computes. This must hold
+    // without relying on the host echoing parameters on editor open.
+    {
+        lv_obj_t* a0=findParamArc(lv_screen_active(),PluginMultiScaleBody::kParamDecay);
+        lv_obj_t* l0=a0?knobValueLabel(a0):nullptr;
+        const char* t0=l0?lv_label_get_text(l0):"(none)";
+        LOGF("[decay] first paint, before any param write -> '%s'\n",t0);
+        EXPECT(t0 && std::strstr(t0,"s")!=nullptr,
+               "Decay: readout is in seconds from the first paint (no host echo needed)");
+    }
     // The selftest shares ONE UI instance and the proofs before this one leave
     // physics params set (Rayleigh in particular adds an ABSOLUTE rate term
     // proportional to frequency^2, which swamps the Decay scale entirely). Reset
@@ -1047,6 +1068,24 @@ static void decayReadoutProof(DISTRHO::UIExporter* exp,HWND hwnd){
     LOGF("[decay] decay=0.8 -> knob '%s' ; card B1 '%s'\n",lv_label_get_text(lbl),b1Text());
     EXPECT(tLow>0.f && tHigh>0.f,"Decay: readout is a time in seconds");
     EXPECT(tHigh>tLow,"Decay: raising Decay lengthens the displayed tail");
+    // The path the first-paint check above cannot reach: a UI-internal rebuild
+    // with NO host echo. The zoom stepper calls applyZoomStep -> rebuildForScale
+    // directly. clearWidgetRefs() zeroes the cache, buildUI paints the knob
+    // labels while creating them and only calls updateDampingDisplay() later, so
+    // unless the build path re-formats the knob itself the readout falls back to
+    // the raw parameter until something else happens to move.
+    {
+        lv_obj_t* btn=findZoomStepBtn(lv_screen_active(),1);
+        if(!btn){ EXPECT(false,"Decay: zoom stepper found"); return; }
+        lv_obj_send_event(btn,LV_EVENT_CLICKED,nullptr);
+        idleFrames(exp,8);
+        lv_obj_t* a1=findParamArc(lv_screen_active(),PluginMultiScaleBody::kParamDecay);
+        lv_obj_t* l1=a1?knobValueLabel(a1):nullptr;
+        const char* t1=l1?lv_label_get_text(l1):"(none)";
+        LOGF("[decay] after a zoom rebuild with no host echo -> '%s'\n",t1);
+        EXPECT(t1 && std::strstr(t1,"s")!=nullptr,
+               "Decay: readout survives a UI-internal rebuild (zoom) with no host echo");
+    }
 }
 
 // ---- info-column spec strip self-test ------------------------------------
