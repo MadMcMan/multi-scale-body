@@ -9,7 +9,6 @@
 #include <vector>
 START_NAMESPACE_DISTRHO
 static const int kNumParams = PluginMultiScaleBody::kParameterCount;
-static float bandDecayCurve(float v){ return std::pow(2.f,(v-0.5f)*2.f); } // 0.5 -> EXACT 1.0
 PluginMultiScaleBody::PluginMultiScaleBody() : Plugin(kNumParams, 0, 6) {
     paramBase_.fill(0.f);
     std::fill(ccToParam_, ccToParam_+128, -1);
@@ -52,7 +51,7 @@ PluginMultiScaleBody::PluginMultiScaleBody() : Plugin(kNumParams, 0, 6) {
     engine_.setDamper(paramBase_[kParamDamper]);
     engine_.setInharmSpread(paramBase_[kParamInharm]);
     engine_.setSlideMode((int)std::lround(paramBase_[kParamSlideMode]*2.f));
-    for(int i=0;i<16;++i) engine_.setBandDecayTrim(i, bandDecayCurve(paramBase_[kParamBandDecay0+i]));
+    for(int i=0;i<16;++i) engine_.setBandDecayTrim(i, bandDecayTrimFromNorm(paramBase_[kParamBandDecay0+i]));
     engine_.setSupport(paramBase_[kParamSupport]);
     engine_.setHoldDamp(paramBase_[kParamHoldDamp]);
     engine_.setResMorph(paramBase_[kParamResMorph]);
@@ -234,7 +233,7 @@ void PluginMultiScaleBody::setParameterValue(uint32_t idx,float v){
         default:
             if(idx>=kParamBandDecay0 && idx<=kParamBandDecay15){
                 int band=idx-kParamBandDecay0;
-                engine_.setBandDecayTrim(band, bandDecayCurve(v));
+                engine_.setBandDecayTrim(band, bandDecayTrimFromNorm(v));
             }
             else if(idx>=kParamBand0 && idx<=kParamBand15){
                 int band=idx-kParamBand0;
@@ -272,7 +271,7 @@ void PluginMultiScaleBody::sampleRateChanged(double sr){
     engine_.setDamper(paramBase_[kParamDamper]);
     engine_.setInharmSpread(paramBase_[kParamInharm]);
     engine_.setSlideMode((int)std::lround(paramBase_[kParamSlideMode]*2.f));
-    for(int i=0;i<16;++i) engine_.setBandDecayTrim(i, bandDecayCurve(paramBase_[kParamBandDecay0+i]));
+    for(int i=0;i<16;++i) engine_.setBandDecayTrim(i, bandDecayTrimFromNorm(paramBase_[kParamBandDecay0+i]));
     engine_.setSupport(paramBase_[kParamSupport]);
     engine_.setHoldDamp(paramBase_[kParamHoldDamp]);
     engine_.setResMorph(paramBase_[kParamResMorph]);

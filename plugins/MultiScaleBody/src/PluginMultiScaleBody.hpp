@@ -3,6 +3,7 @@
 #include "MultiScaleBodyEngine.hpp"
 #include <array>
 #include <string>
+#include <cmath>
 START_NAMESPACE_DISTRHO
 class PluginMultiScaleBody : public Plugin {
 public:
@@ -130,4 +131,23 @@ public:
     const modal::MultiScaleBodyEngine& testEngine() const { return engine_; }
 #endif
 };
+
+// Normalized per-band decay-trim param (0..1, 0.5 = exact identity) -> the decay
+// RATE multiplier MultiScaleBodyEngine::setBandDecayTrim takes.
+//
+// Mirrored so a HIGHER param means a LONGER tail. That matches the main Decay
+// knob (setDecayScale: 0.1*pow(100,1-v) - larger v, smaller rate) and the
+// DAMPING card, whose bars and "<T60> s" labels display tail TIME.
+//
+// The trim is a reciprocal-time multiplier; measured on the engine at the -30 dB
+// point with all 16 bands set: x0.50 -> 1.533 s, x1.00 -> 0.801 s,
+// x2.00 -> 0.424 s. So the previous pow(2,(v-0.5)*2) form made the card's
+// left->right drag and the spectrum chart's upward decay scrub mean "shorter to
+// the right / up", i.e. the control read as reversed (user-reported).
+//
+// Single source of truth: the plugin's parameter mapping and PluginUI's display
+// both call this, so the two cannot drift apart again.
+inline float bandDecayTrimFromNorm(float v){
+    return std::pow(2.f,(0.5f-v)*2.f);   // 0.5 -> EXACT 1.0
+}
 END_NAMESPACE_DISTRHO

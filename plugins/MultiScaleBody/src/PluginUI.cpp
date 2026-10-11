@@ -952,10 +952,11 @@ private:
         idx = std::clamp(idx,0,mx);
         float decayV = paramCache[PluginMultiScaleBody::kParamDecay];
         // idea 2: per-band decay trims also rescale the display (and gate the
-        // recompute). Trim curve mirrors the engine: v 0.5 -> EXACT 1.0.
+        // recompute). One shared curve with the engine, so the card cannot
+        // display a different direction from the one the drag writes.
         float bdSum=0.f, bandTrim[16];
         for(int b=0;b<16;++b){
-            bandTrim[b]=std::pow(2.f,(paramCache[PluginMultiScaleBody::kParamBandDecay0+b]-0.5f)*2.f);
+            bandTrim[b]=bandDecayTrimFromNorm(paramCache[PluginMultiScaleBody::kParamBandDecay0+b]);
             bdSum+=paramCache[PluginMultiScaleBody::kParamBandDecay0+b];
         }
         // wave-3: support/hold/res/morph/rayleigh reshape the ring; they join
@@ -1782,7 +1783,7 @@ private:
         if(!fScrubLbl) return;
         char buf[32];
         if(fScrubMode){
-            const float t=std::pow(2.f,(paramCache[PluginMultiScaleBody::kParamBandDecay0+band]-0.5f)*2.f);
+            const float t=bandDecayTrimFromNorm(paramCache[PluginMultiScaleBody::kParamBandDecay0+band]);
             snprintf(buf,sizeof(buf),"B%d - DECAY x%.2f",band+1,t);
         } else {
             snprintf(buf,sizeof(buf),"B%d - GAIN %d %%",band+1,
@@ -3450,9 +3451,9 @@ private:
         paramCache[PluginMultiScaleBody::kParamBand0+3]=0.80f;      // gain x1.6
         // B4 carries BOTH trims so the demo covers all three legend states:
         // B4 both (teal), B8 gain-only (blue), B12 decay-only (green).
-        paramCache[PluginMultiScaleBody::kParamBandDecay0+3]=0.65f; // decay x1.41
+        paramCache[PluginMultiScaleBody::kParamBandDecay0+3]=0.65f; // rate x0.81 (longer)
         paramCache[PluginMultiScaleBody::kParamBand0+7]=0.30f;      // gain x0.6
-        paramCache[PluginMultiScaleBody::kParamBandDecay0+11]=0.77f;// decay x1.9
+        paramCache[PluginMultiScaleBody::kParamBandDecay0+11]=0.77f;// rate x0.69 (longer)
         fScrubBand=band;
         fScrubLblAge=-1;        // mid-drag look (chip + column persistent)
         updateScrubChip(band);

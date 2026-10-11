@@ -586,6 +586,30 @@ static void dampDragProof(DISTRHO::UIExporter* exp,HWND hwnd){
     lv_obj_t* val=lv_obj_get_child(row,2);
     if(val && lv_obj_check_type(val,&lv_label_class))
         LOGF("[damp] B1 value label now '%s'\n",lv_label_get_text(val));
+    // Direction (user-reported reversal): dragging the row RIGHT must RAISE the
+    // displayed tail time. The labels and bars show TIME while the parameter is a
+    // rate multiplier, so a rate-mapped drag reads as reversed. This is the
+    // assertion for that report - pre-fix it fails with right < left.
+    auto readT60=[&]()->float{
+        lv_obj_t* l=lv_obj_get_child(row,2);
+        if(!l||!lv_obj_check_type(l,&lv_label_class)) return -1.f;
+        return (float)std::atof(lv_label_get_text(l));
+    };
+    auto dragTo=[&](int x){
+        contactPointer={(lv_coord_t)x,(lv_coord_t)((rc.y1+rc.y2)/2)};
+        lv_indev_t* p=lv_indev_create();
+        lv_indev_set_type(p,LV_INDEV_TYPE_POINTER);
+        lv_indev_set_display(p,lv_display_get_default());
+        lv_indev_set_read_cb(p,contactPointerRead);
+        contactPressed=true;  lv_indev_read(p); idleFrames(exp,4);
+        contactPressed=false; lv_indev_read(p); idleFrames(exp,4);
+        lv_indev_delete(p);
+    };
+    dragTo(rc.x2-2); const float tRight=readT60();
+    dragTo(rc.x1+2); const float tLeft=readT60();
+    LOGF("[damp] B1 tail time: right edge %.3f s, left edge %.3f s\n",tRight,tLeft);
+    EXPECT(tRight>0.f && tLeft>0.f,"Damp: both ends display a tail time");
+    EXPECT(tRight>tLeft,"Damp: dragging RIGHT raises the tail time (control not reversed)");
     // The card is EXACTLY content-height (24 pad + 22 head + 16*22 rows + 16*2
     // gaps = DAMP_CARD_H 430), so any change to DAMP_ROW_H or the head would
     // start clipping the last bands with nothing to catch it: no bounds check
