@@ -282,7 +282,13 @@ public:
            || i==PluginMultiScaleBody::kParamMorphAmt || i==PluginMultiScaleBody::kParamRayleighA
            || i==PluginMultiScaleBody::kParamRayleighB
            || i==PluginMultiScaleBody::kParamStrikeX || i==PluginMultiScaleBody::kParamStrikeY
-           || (i>=PluginMultiScaleBody::kParamBandDecay0 && i<=PluginMultiScaleBody::kParamBandDecay15)) updateDampingDisplay();
+           || (i>=PluginMultiScaleBody::kParamBandDecay0 && i<=PluginMultiScaleBody::kParamBandDecay15)){
+                updateDampingDisplay();
+                // its readout IS the card's longest tail time, and
+                // syncParamWidget above ran before the card recomputed
+                if(widgets[PluginMultiScaleBody::kParamDecay])
+                    formatKnobText(widgets[PluginMultiScaleBody::kParamDecay],(int)PluginMultiScaleBody::kParamDecay);
+            }
         if(i==PluginMultiScaleBody::kParamVolume && fMasterValLbl){
             char b[24]; formatParamValue(PluginMultiScaleBody::kParamVolume,v,b,sizeof(b));
             lv_label_set_text(fMasterValLbl,b);
@@ -420,7 +426,14 @@ public:
                || i==PluginMultiScaleBody::kParamMorphAmt || i==PluginMultiScaleBody::kParamRayleighA
                || i==PluginMultiScaleBody::kParamRayleighB
                || i==PluginMultiScaleBody::kParamStrikeX || i==PluginMultiScaleBody::kParamStrikeY
-           || (i>=PluginMultiScaleBody::kParamBandDecay0 && i<=PluginMultiScaleBody::kParamBandDecay15)) updateDampingDisplay();
+           || (i>=PluginMultiScaleBody::kParamBandDecay0 && i<=PluginMultiScaleBody::kParamBandDecay15)){
+                updateDampingDisplay();
+                // the Decay knob's readout IS the card's longest tail time, and
+                // syncParamWidget above ran before the card recomputed, so the
+                // text has to be re-asserted after it (host automation path)
+                if(widgets[PluginMultiScaleBody::kParamDecay])
+                    formatKnobText(widgets[PluginMultiScaleBody::kParamDecay],(int)PluginMultiScaleBody::kParamDecay);
+            }
             if(i==PluginMultiScaleBody::kParamVolume && fMasterValLbl){
                 char b[24]; formatParamValue(PluginMultiScaleBody::kParamVolume,v,b,sizeof(b));
                 lv_label_set_text(fMasterValLbl,b);
@@ -700,6 +713,7 @@ private:
         for(int i=0;i<lay::KEY_BLACK_N;++i) kbBlack[i]=nullptr;
         // R5: damping panel - bars + value labels
         for(int i=0;i<16;++i){ fDampBars[i]=nullptr; fDampVals[i]=nullptr; }
+        fDampNominalT60=0.f;
         fDampPresetCache=-1; fDampDecayCache=-1.f; fDampBandSumCache=-1.f; fDampPhysSumCache=-1.f;
         fDampDragBand=-1;
         for(int i=0;i<100;++i) fHeatDots[i]=nullptr; fHeatCount=0; fHeatDirty=true; fModeFocus=-1;
@@ -1045,6 +1059,9 @@ private:
             bandT60[b]=t60;
             if(t60>maxT60) maxT60=t60;
         }
+        // the Decay knob's readout is this longest band (published for
+        // formatParamValue; the knob scales every band by the same factor)
+        fDampNominalT60=maxT60;
         // paint bars + values
         for(int b=0;b<16;++b){
             int m0=(b*pr.n)/16;
@@ -1431,6 +1448,18 @@ private:
                 if(v<=0.f) snprintf(buf,cap,"OFF");
                 else snprintf(buf,cap,"%d %%",(int)std::lround(v*200.f));
                 break;
+            case P::kParamDecay:
+                // seconds, not a bare 0..1 number: the knob scales every band's
+                // tail, so it reads the longest band from the DAMPING card's own
+                // computation (fDampNominalT60) - same physics, same tiers as the
+                // card's "<T60> s" labels. Before the card has run, fall back to
+                // the raw value rather than inventing a time.
+                if(fDampNominalT60>0.f){
+                    if(fDampNominalT60>=10.f)     snprintf(buf,cap,"%.0f s",(double)fDampNominalT60);
+                    else if(fDampNominalT60>=1.f) snprintf(buf,cap,"%.1f s",(double)fDampNominalT60);
+                    else                          snprintf(buf,cap,"%.2f s",(double)fDampNominalT60);
+                } else snprintf(buf,cap,"%.2f",v);
+                break;
             case P::kParamResMorph:  snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
             case P::kParamMorphAmt:   snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
             case P::kParamMorphTarget: {
@@ -1783,8 +1812,12 @@ private:
         if(!fScrubLbl) return;
         char buf[32];
         if(fScrubMode){
-            const float t=bandDecayTrimFromNorm(paramCache[PluginMultiScaleBody::kParamBandDecay0+band]);
-            snprintf(buf,sizeof(buf),"B%d - DECAY x%.2f",band+1,t);
+            // TAIL multiplier, not the rate: the band trim is a rate divisor, so
+            // showing it raw printed a SMALLER number for a LONGER tail and read
+            // as reversed in exactly the way the drag itself did. x2.00 = twice
+            // the tail time, matching the direction the scrub moves.
+            const float tail=1.f/bandDecayTrimFromNorm(paramCache[PluginMultiScaleBody::kParamBandDecay0+band]);
+            snprintf(buf,sizeof(buf),"B%d - TAIL x%.2f",band+1,tail);
         } else {
             snprintf(buf,sizeof(buf),"B%d - GAIN %d %%",band+1,
                      (int)std::lround(paramCache[PluginMultiScaleBody::kParamBand0+band]*200.f));
@@ -3998,6 +4031,7 @@ private:
     lv_obj_t* fDampBars[16]={};
     lv_obj_t* fDampVals[16]={};
     int fDampDragBand=-1;    // DAMPING panel: band whose edit bracket is open
+    float fDampNominalT60=0.f;   // longest band tail (s); the Decay knob's readout
     int fDampPresetCache=-1;
     float fDampDecayCache=-1.f;
     float fDampBandSumCache=-1.f;

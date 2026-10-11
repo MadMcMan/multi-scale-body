@@ -1003,6 +1003,52 @@ static void dropdownExclusiveProof(DISTRHO::UIExporter* exp,HWND hwnd){
     EXPECT(presetSlotPairs>=3,"Dropdowns: the release-on-preset pairs were exercised");
 }
 
+// ---- Decay readout self-test ---------------------------------------------
+// The Decay knob scales every band's tail, so its readout is a TIME in seconds
+// (the longest band, from the DAMPING card's own computation) rather than the
+// raw 0..1 parameter. The displayed number must also move the same way as the
+// sound: raising Decay lengthens the tail (engine: 0.1*pow(100,1-v)).
+static void decayReadoutProof(DISTRHO::UIExporter* exp,HWND hwnd){
+    bool first=true; resizeWindow(hwnd,exp,1440,1068,first);
+    lv_obj_update_layout(lv_screen_active());
+    // The selftest shares ONE UI instance and the proofs before this one leave
+    // physics params set (Rayleigh in particular adds an ABSOLUTE rate term
+    // proportional to frequency^2, which swamps the Decay scale entirely). Reset
+    // them to identity, plus the band trims, so the measurement isolates Decay.
+    exp->parameterChanged(PluginMultiScaleBody::kParamRayleighA,0.f);
+    exp->parameterChanged(PluginMultiScaleBody::kParamRayleighB,0.f);
+    exp->parameterChanged(PluginMultiScaleBody::kParamSupport,0.f);
+    exp->parameterChanged(PluginMultiScaleBody::kParamHoldDamp,0.f);
+    exp->parameterChanged(PluginMultiScaleBody::kParamResMorph,0.f);
+    exp->parameterChanged(PluginMultiScaleBody::kParamMorphAmt,0.f);
+    for(int b=0;b<16;++b){
+        exp->parameterChanged(PluginMultiScaleBody::kParamBandDecay0+b,0.5f);
+        exp->parameterChanged(PluginMultiScaleBody::kParamBand0+b,0.5f);
+    }
+    idleFrames(exp,4);
+    lv_obj_t* arc=findParamArc(lv_screen_active(),PluginMultiScaleBody::kParamDecay);
+    EXPECT(arc!=nullptr,"Decay: knob present");
+    if(!arc) return;
+    lv_obj_t* lbl=knobValueLabel(arc);
+    if(!lbl){ EXPECT(false,"Decay: value label present"); return; }
+    auto readSec=[&]()->float{
+        const char* t=lv_label_get_text(lbl);
+        return (t && std::strstr(t,"s"))?(float)std::atof(t):-1.f;
+    };
+    // the card's own B1 label must agree with the knob (same physics)
+    lv_obj_t* dampLab=findLabelText(lv_screen_active(),"DAMPING");
+    lv_obj_t* b1row=dampLab?lv_obj_get_child(lv_obj_get_parent(lv_obj_get_parent(dampLab)),1):nullptr;
+    auto b1Text=[&]()->const char*{ lv_obj_t* v=b1row?lv_obj_get_child(b1row,2):nullptr; return v?lv_label_get_text(v):"(no row)"; };
+    exp->parameterChanged(PluginMultiScaleBody::kParamDecay,0.2f); idleFrames(exp,4);
+    const float tLow=readSec();
+    LOGF("[decay] decay=0.2 -> knob '%s' ; card B1 '%s'\n",lv_label_get_text(lbl),b1Text());
+    exp->parameterChanged(PluginMultiScaleBody::kParamDecay,0.8f); idleFrames(exp,4);
+    const float tHigh=readSec();
+    LOGF("[decay] decay=0.8 -> knob '%s' ; card B1 '%s'\n",lv_label_get_text(lbl),b1Text());
+    EXPECT(tLow>0.f && tHigh>0.f,"Decay: readout is a time in seconds");
+    EXPECT(tHigh>tLow,"Decay: raising Decay lengthens the displayed tail");
+}
+
 // ---- info-column spec strip self-test ------------------------------------
 // The BODY/MODES/MAT/F0 strip was built as a 0-height container. LVGL's
 // content-size sentinel is LV_SIZE_CONTENT, so an explicit 0 is an EMPTY area
@@ -1088,6 +1134,7 @@ int main(int argc,char** argv)
         specStripProof(exp,hwnd);
         hostSyncLabelProof(exp,hwnd);
         dropdownExclusiveProof(exp,hwnd);
+        decayReadoutProof(exp,hwnd);
         LOGF("SELFTEST RESULT failures=%d\n",gTestFails);
         exp->quit(); delete exp;
         if(gLog) fclose(gLog);
