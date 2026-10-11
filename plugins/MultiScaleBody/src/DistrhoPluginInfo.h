@@ -2,8 +2,9 @@
 #define HEADER_DISTR__PLUGIN_INFO
 
 #define DISTRHO_PLUGIN_NAME        "MultiScaleBody"
-#define DISTRHO_PLUGIN_URI         "urn:distrho:multiscalebody"
-#define DISTRHO_PLUGIN_CLAP_ID     "studio.kx.distrho.multiscalebody"
+#define DISTRHO_PLUGIN_BRAND       "MadMcMan"
+#define DISTRHO_PLUGIN_URI         "urn:madmcman:multiscalebody"
+#define DISTRHO_PLUGIN_CLAP_ID     "com.madmcman.multiscalebody"
 
 #define DISTRHO_PLUGIN_NUM_INPUTS  1
 #define DISTRHO_PLUGIN_NUM_OUTPUTS 2

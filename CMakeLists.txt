@@ -92,6 +92,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         PROPERTIES COMPILE_OPTIONS "-Wno-error")
 endif()
 
+
 # --- UI-only visual verification harness (Windows) ---------------------------
 # Rebuilds tools/ui_snapshot.cpp against the REAL PluginUI sources. This is
 # the capture/ground-truth tool used by the gauntlet rounds; having it as a
@@ -134,6 +135,77 @@ if(WIN32)
         "${DEPS_DIR}/dpf-widgets/generic/LVGL.cpp"
         PROPERTIES COMPILE_OPTIONS "-Wno-error")
     set_target_properties(ui_snapshot PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+endif()
+
+# --- identity hardening ------------------------------------------------------
+# Fleet convention: BRAND MadMcMan / urn:madmcman:<slug> / com.madmcman.<slug>.
+# The DistrhoPluginInfo.h macros are edited in place (not injected as -D) so the
+# plugin identity lives in exactly one place and cannot drift between the DSP
+# and UI TUs.
+# -iquote pin of this plugin's own src/ on the two glue TUs: a vendored header
+# that also ships a DistrhoPluginInfo.h can otherwise win the include search and
+# silently retarget the identity (the classic CLAP-id collision -> host
+# blacklisting failure).
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(
+        plugins/MultiScaleBody/src/PluginMultiScaleBody.cpp
+        plugins/MultiScaleBody/src/PluginUI.cpp
+        PROPERTIES COMPILE_OPTIONS "-iquote${CMAKE_CURRENT_SOURCE_DIR}/plugins/MultiScaleBody/src")
+endif()
+
+# --- gate tests --------------------------------------------------------------
+# test_multiscalebody_dsp  : engine-level DSP assertions + the parameter/control
+#                            coverage contract asserted at the plugin level.
+# test_multiscalebody_ui   : drives the REAL editor through DPF's UIExporter and
+#                            asserts control coverage, write-through both ways,
+#                            legibility, and dumps base + half frames.
+add_executable(test_multiscalebody_dsp EXCLUDE_FROM_ALL
+    tests/test_modal_dsp.cpp
+    plugins/MultiScaleBody/src/MultiScaleBodyEngine.cpp
+)
+target_include_directories(test_multiscalebody_dsp PRIVATE plugins/MultiScaleBody/src)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_multiscalebody_dsp PRIVATE -Wno-multichar -Wno-cpp)
+endif()
+set_target_properties(test_multiscalebody_dsp PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+if(WIN32)
+    add_executable(test_multiscalebody_ui EXCLUDE_FROM_ALL
+        tests/render_multiscalebody_ui.cpp
+        plugins/MultiScaleBody/src/PluginUI.cpp
+        # The live-telemetry gates in section [L] drive the REAL engine through
+        # the SHIPPING publisher (MultiScaleBodyPublish.hpp). Without this TU the
+        # suite could only seed the UI's private copies, which is exactly how
+        # MultiScaleBodyUI::fGotLiveViz stayed false and every data panel drew
+        # its idle preview for the whole run.
+        plugins/MultiScaleBody/src/MultiScaleBodyEngine.cpp
+        "${DEPS_DIR}/dpf-widgets/generic/LVGL.cpp"
+        "${DEPS_DIR}/DPF/distrho/src/DistrhoUI.cpp"
+    )
+    target_include_directories(test_multiscalebody_ui PRIVATE
+        plugins/MultiScaleBody/src
+        "${DEPS_DIR}/dpf-widgets/generic"
+        "${DEPS_DIR}/DPF/distrho"
+        "${DEPS_DIR}/DPF/distrho/src"
+    )
+    target_compile_definitions(test_multiscalebody_ui PRIVATE
+        SNAP_HAVE_LV_GLOBAL_PROVIDER
+        NOMINMAX
+        WIN32_LEAN_AND_MEAN
+    )
+    target_link_libraries(test_multiscalebody_ui PRIVATE
+        dgl-opengl dgl-opengl-definitions lvgl::lvgl
+        ${OPENGL_gl_LIBRARY} winmm gdi32 user32
+    )
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(test_multiscalebody_ui PRIVATE -Wno-multichar -Wno-cpp)
+    endif()
+    set_source_files_properties(
+        "${DEPS_DIR}/dpf-widgets/generic/LVGL.cpp"
+        PROPERTIES COMPILE_OPTIONS "-Wno-error")
+    set_target_properties(test_multiscalebody_ui PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 endif()
 

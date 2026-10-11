@@ -37,7 +37,11 @@
 #define LV_USE_OBJ_NAME        0
 #define LV_USE_FLOAT  1
 #define LV_USE_MATRIX 1
-#define LV_FONT_MONTSERRAT_10 1
+// Compiled OUT deliberately: the 12px legibility floor (Palette.hpp
+// getScaledMicroFont + the walker in tests/render_multiscalebody_ui.cpp).
+// Re-enabling this font is how sub-12px section captions, B1..B16 band
+// ticks and keyboard note labels silently came back.
+#define LV_FONT_MONTSERRAT_10 0
 #define LV_FONT_MONTSERRAT_12 1
 #define LV_FONT_MONTSERRAT_14 1
 #define LV_FONT_MONTSERRAT_16 1

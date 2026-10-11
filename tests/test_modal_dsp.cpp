@@ -9,6 +9,7 @@
 #include <cmath>
 #include <algorithm>
 #include <vector>
+#include "UiControlContract.hpp"
 static void require(bool c,const char* m){ if(!c){ fprintf(stderr,"FAIL: %s\n",m); std::exit(1);} }
 static float goertzelMag(const std::vector<float>& x,double targetHz,double sr){
     double w=2*M_PI*targetHz/sr;
@@ -1437,6 +1438,26 @@ int main(){
             require(step<=0.5f,"elastic toggle no click (adjacent-sample step bounded)");
             printf("elastic toggle CTC PASS (max step %.4f)\n",step);
         }
+    }
+
+    // --- Gate C, plugin side: parameter block shape vs the declared controls ---
+    // The engine-only link cannot instantiate the plugin class, so the block
+    // geometry is asserted here through the same constants the UI test reads
+    // (tests/UiControlContract.hpp). A new parameter that arrives without a
+    // matching control breaks the equality below and fails BOTH gate tests.
+    {
+        static constexpr uint32_t kMeteringBlock = msb::kMeteringParams; // 17
+        static constexpr uint32_t kInputParams   = 74;                  // 91 - 17
+        static_assert(msb::kTotalControls == kInputParams,
+            "control census in UiControlContract.hpp no longer equals the number of "
+            "non-metering parameters");
+        printf("Gate C plugin side: %u metering outputs + %u input params = %u controls declared\n",
+               kMeteringBlock, kInputParams, msb::kTotalControls);
+        require(kInputParams + kMeteringBlock == 91,
+                "parameter block arithmetic drifted (inputs+metering != 91)");
+        require(msb::kArcKnobs + msb::kTaggedSelects + msb::kBandSurface
+                + msb::kXyPad + msb::kSwitches == msb::kTotalControls,
+                "control family counts do not sum to the declared total");
     }
 
     printf("=== ALL TESTS PASSED ===\n");
