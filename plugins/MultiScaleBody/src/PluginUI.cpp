@@ -3284,6 +3284,14 @@ private:
         // initial fill: bar widths depend on baked decay, not on params -
         // call once on first build, and again on preset+Decay changes.
         updateDampingDisplay();
+        // The Decay knob's readout IS that longest tail time, and its label was
+        // painted when the knob was created above - before this call, and with
+        // the cache zeroed by clearWidgetRefs(). Without re-asserting it here,
+        // any rebuild the host does not follow with a parameter echo (a zoom
+        // step, a window resize) leaves the raw 0..1 value on the knob until
+        // something else happens to move.
+        if(widgets[PluginMultiScaleBody::kParamDecay])
+            formatKnobText(widgets[PluginMultiScaleBody::kParamDecay],(int)PluginMultiScaleBody::kParamDecay);
 
         // === ROUND-5 (issue #1): hero-column density ======================
         // Judged from fresh capture r4_mpe_check.png: the 280px disc interior

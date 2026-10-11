@@ -1008,13 +1008,6 @@ static void dropdownExclusiveProof(DISTRHO::UIExporter* exp,HWND hwnd){
 // (the longest band, from the DAMPING card's own computation) rather than the
 // raw 0..1 parameter. The displayed number must also move the same way as the
 // sound: raising Decay lengthens the tail (engine: 0.1*pow(100,1-v)).
-// the zoom stepper carries its step (+/-1) as user_data (zoomBtnCb reads it)
-static lv_obj_t* findZoomStepBtn(lv_obj_t* o,intptr_t step){
-    if((intptr_t)lv_obj_get_user_data(o)==step && lv_obj_has_flag(o,LV_OBJ_FLAG_CLICKABLE)) return o;
-    for(uint32_t i=0;i<lv_obj_get_child_count(o);++i)
-        if(auto* f=findZoomStepBtn(lv_obj_get_child(o,i),step)) return f;
-    return nullptr;
-}
 static void decayReadoutProof(DISTRHO::UIExporter* exp,HWND hwnd){
     bool first=true; resizeWindow(hwnd,exp,1440,1068,first);
     lv_obj_update_layout(lv_screen_active());
@@ -1075,7 +1068,11 @@ static void decayReadoutProof(DISTRHO::UIExporter* exp,HWND hwnd){
     // unless the build path re-formats the knob itself the readout falls back to
     // the raw parameter until something else happens to move.
     {
-        lv_obj_t* btn=findZoomStepBtn(lv_screen_active(),1);
+        // findZoomButton, NOT a user_data scan: the preset arrows also carry
+        // user_data +/-1 and come first in the tree (documented at its
+        // definition) - scanning by user_data clicked the preset-next arrow,
+        // which is a preset swap, not a rebuild, and cannot test this path.
+        lv_obj_t* btn=findZoomButton(lv_screen_active(),1);
         if(!btn){ EXPECT(false,"Decay: zoom stepper found"); return; }
         lv_obj_send_event(btn,LV_EVENT_CLICKED,nullptr);
         idleFrames(exp,8);
