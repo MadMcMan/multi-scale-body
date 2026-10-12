@@ -13,8 +13,8 @@ PluginMultiScaleBody::PluginMultiScaleBody() : Plugin(kNumParams, 0, 7) {   // 7
     paramBase_.fill(0.f);
     std::fill(ccToParam_, ccToParam_+128, -1);
     learnPending_=-1;
-    paramBase_[kParamPitch]=0.5f; paramBase_[kParamDecay]=0.5f; paramBase_[kParamBrightness]=0.65f;
-    paramBase_[kParamStrikeX]=0.5f; paramBase_[kParamStrikeY]=0.5f; paramBase_[kParamModeCount]=0.60f;
+    paramBase_[kParamPitch]=0.5f; paramBase_[kParamDecay]=0.60f; paramBase_[kParamBrightness]=0.65f;
+    paramBase_[kParamStrikeX]=0.5f; paramBase_[kParamStrikeY]=0.5f; paramBase_[kParamModeCount]=0.68f;
     paramBase_[kParamWidth]=0.30f; paramBase_[kParamPreset]=0.0f;
     for(int i=0;i<16;++i) paramBase_[kParamBand0+i]=0.5f;
     paramBase_[kParamRadiation]=0.45f; paramBase_[kParamAttack]=0.15f; paramBase_[kParamRelease]=0.45f;
@@ -80,11 +80,11 @@ void PluginMultiScaleBody::initParameter(uint32_t index, Parameter& p){
     p.hints=kParameterIsAutomatable;
     switch(index){
         case kParamPitch: p.name="Tune"; p.symbol="tune"; p.ranges.def=0.5f; p.ranges.min=0.f; p.ranges.max=1.f; break;
-        case kParamDecay: p.name="Decay"; p.symbol="decay"; p.ranges.def=0.5f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamDecay: p.name="Decay"; p.symbol="decay"; p.ranges.def=0.60f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamBrightness: p.name="Brightness"; p.symbol="brightness"; p.ranges.def=0.65f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamStrikeX: p.name="Strike X"; p.symbol="strikex"; p.ranges.def=0.5f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamStrikeY: p.name="Strike Y"; p.symbol="strikey"; p.ranges.def=0.5f; p.ranges.min=0.f; p.ranges.max=1.f; break;
-        case kParamModeCount: p.name="Modes"; p.symbol="modes"; p.ranges.def=0.60f; p.ranges.min=0.f; p.ranges.max=1.f; break;
+        case kParamModeCount: p.name="Modes"; p.symbol="modes"; p.ranges.def=0.68f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamWidth: p.name="Width"; p.symbol="width"; p.ranges.def=0.30f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamPreset: p.name="Body"; p.symbol="body"; p.ranges.def=0.f; p.ranges.min=0.f; p.ranges.max=1.f; break;
         case kParamRadiation: p.name="Radiation"; p.symbol="radiation"; p.ranges.def=0.45f; p.ranges.min=0.f; p.ranges.max=1.f; break;
