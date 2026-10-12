@@ -53,8 +53,8 @@ Render renderDefaultSound() {
     eng.prepare(44100.0);
 
     // EXACT copy of PluginMultiScaleBody ctor + sampleRateChanged defaults.
-    eng.setPitchScale(0.5f); eng.setDecayScale(0.5f); eng.setBrightness(0.65f);
-    eng.setStrike(0.5f, 0.5f); eng.setModeCount(0.60f); eng.setWidth(0.30f);
+    eng.setPitchScale(0.5f); eng.setDecayScale(0.60f); eng.setBrightness(0.65f);
+    eng.setStrike(0.5f, 0.5f); eng.setModeCount(0.68f); eng.setWidth(0.30f);
     eng.setPreset(0);
     for (int i = 0; i < 16; ++i) eng.setBandTrim(i, 0.5f * 2.f);
     eng.setRadiationMix(0.45f); eng.setAttack(0.15f); eng.setReleaseParam(0.45f);

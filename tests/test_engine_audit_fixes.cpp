@@ -73,8 +73,8 @@ double peakHz(const float* x, int n) {
 // The plugin's default parameter block (mirrors gen_golden_volume.cpp).
 void defaults(MultiScaleBodyEngine& e) {
     e.prepare(kSr);
-    e.setPitchScale(0.5f); e.setDecayScale(0.5f); e.setBrightness(0.65f);
-    e.setStrike(0.5f, 0.5f); e.setModeCount(0.60f); e.setWidth(0.30f);
+    e.setPitchScale(0.5f); e.setDecayScale(0.60f); e.setBrightness(0.65f);
+    e.setStrike(0.5f, 0.5f); e.setModeCount(0.68f); e.setWidth(0.30f);
     for (int i = 0; i < 16; ++i) e.setBandTrim(i, 1.f);
     e.setRadiationMix(0.45f); e.setAttack(0.15f); e.setReleaseParam(0.45f);
     e.setExciteMix(0.f); e.setVelStrike(0.35f); e.setDetuneSpread(0.15f);
@@ -111,9 +111,9 @@ void testRadiationBandEdge() {
     e.noteOn(60, 0.9f, 0);
     for (int i = 0; i < N; ++i) { float l, r; e.processSampleStereo(l, r); buf[(size_t)i] = 0.5f*(l+r); }
     const double mid = bandDb(buf.data(), N, 100.0, 8000.0, 80);
-    std::printf("     [rad] Can <8kHz band = %.3f dB (unit-bug build -14.459, fixed -13.726)\n", mid);
-    check(mid > -14.459 + 0.30, "Radiation: <8 kHz band is above the rad/s-vs-Hz bug level");
-    check(std::fabs(mid - -13.726) < 0.15, "Radiation: <8 kHz band matches the fixed reference");
+    std::printf("     [rad] Can <8kHz band = %.3f dB (unit-bug build -14.459, fixed -13.726; -11.777 under the 2026-10 ring-fix defaults Decay 0.60 / Modes 0.68)\n", mid);
+    check(mid > -12.210, "Radiation: <8 kHz band is above the rad/s-vs-Hz bug level");
+    check(std::fabs(mid - -11.777) < 0.15, "Radiation: <8 kHz band matches the fixed reference");
 }
 
 // ---------------------------------------------------------------------------

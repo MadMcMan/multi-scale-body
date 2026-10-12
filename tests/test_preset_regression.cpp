@@ -42,11 +42,11 @@ int main(){
         struct Def { int p; float v; const char* n; };
         const Def defs[] = {
             {PluginMultiScaleBody::kParamPitch, 0.5f, "Pitch"},
-            {PluginMultiScaleBody::kParamDecay, 0.5f, "Decay"},
+            {PluginMultiScaleBody::kParamDecay, 0.60f, "Decay"},
             {PluginMultiScaleBody::kParamBrightness, 0.65f, "Brightness"},
             {PluginMultiScaleBody::kParamStrikeX, 0.5f, "StrikeX"},
             {PluginMultiScaleBody::kParamStrikeY, 0.5f, "StrikeY"},
-            {PluginMultiScaleBody::kParamModeCount, 0.60f, "ModeCount"},
+            {PluginMultiScaleBody::kParamModeCount, 0.68f, "ModeCount"},
             {PluginMultiScaleBody::kParamWidth, 0.30f, "Width"},
             {PluginMultiScaleBody::kParamRadiation, 0.45f, "Radiation"},
             {PluginMultiScaleBody::kParamAttack, 0.15f, "Attack"},

@@ -69,10 +69,10 @@ std::vector<Event> gauntletClip() {
 void applyPluginDefaults(modal::MultiScaleBodyEngine& eng, int presetIndex) {
     eng.prepare(kSampleRate);
     eng.setPitchScale(0.5f);
-    eng.setDecayScale(0.5f);
+    eng.setDecayScale(0.60f);
     eng.setBrightness(0.65f);
     eng.setStrike(0.5f, 0.5f);
-    eng.setModeCount(0.60f);
+    eng.setModeCount(0.68f);
     eng.setWidth(0.30f);
     eng.setPreset(presetIndex);
     for (int i = 0; i < 16; ++i) eng.setBandTrim(i, 0.5f * 2.f);

@@ -109,3 +109,19 @@ as our own: edit them in place, and do **not** re-sync or re-copy from upstream
 cymbals-ui without re-checking the MultiScaleBody bindings. If you ever need a
 new cymbals-ui control, vendor it into `components/` on first use rather than
 adding a cymbals-ui dependency.
+
+## Preset browser overlay + capture hooks (added 2026-10-11)
+
+- The preset **LIBRARY** overlay (`LIBRARY` button in the top bar) is the browsing surface over the
+  150-preset library (25 bodies x 6 characters): character filter chips, a two-line list
+  (name + material / modes / F0), and a selection detail pane. It is created lazily on open and
+  destroyed on close, so the base tree and the control census are untouched while it is closed.
+- `MSB_BROWSER_DEMO=1` opens the overlay once per build for headless captures.
+  `MSB_CAPTURE_ONLY=1` (in `test_multiscalebody_ui`) dumps the frame without running the gate
+  sections — the overlay legitimately overlaps the single-page layout the gate asserts.
+- Default sound (2026-10-11 ring fix): **Decay 0.60, Modes 0.68** (was 0.5 / 0.60). Mirrors live in
+  `tools/render_probe.cpp`, `tests/gen_golden_volume.cpp`, `tests/test_engine_audit_fixes.cpp`,
+  `tests/test_preset_regression.cpp` and the UI param cache in `PluginUI.cpp` — change them together,
+  then `cmake --build build --target regen_golden` and report old+new md5.
+- Non-ASCII glyphs: the Montserrat subset carries ASCII + degree + bullet (U+2022); U+00B7 and
+  U+2013 render as tofu boxes. Use ` • ` or ASCII only in rendered strings.
