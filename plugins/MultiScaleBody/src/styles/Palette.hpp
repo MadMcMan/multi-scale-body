@@ -92,6 +92,14 @@ START_NAMESPACE_DISTRHO
 // other accent means "subsystem", never "this is live".
 #define COL_LIVE          lv_color_hex(0x58D68D)  // green (live output / watch-this)
 #define COL_LIVE_DIM      lv_color_hex(0x2E7D52)  // dimmer green (live area fill under the scope line)
+// === DAMPING heat ramp (per-band tail time, cool -> hot) ====================
+// One hue family (the blue accent that means "value"): short tails sit cool
+// and dim, long tails burn hot and bright, so a body whose tails are all
+// clustered still reads as a field instead of a flat block. MID is the
+// perceptual midpoint of the ramp.
+#define DAMP_HEAT_LO      lv_color_hex(0x27445C)  // cool steel (short tail)
+#define DAMP_HEAT_MID     lv_color_hex(0x2E7BC0)  // mid blue (half tail)
+#define DAMP_HEAT_HI      lv_color_hex(0x5FBCF8)  // hot accent (longest tail)
 
 // === LAYOUT TOKENS — chassis arithmetic (base units @ 1440x990, pre-scale) ===
 
@@ -170,7 +178,6 @@ namespace lay {
     constexpr int GRID_GUT_X = 8;                // knob pitch gutter (column math above)
     constexpr int SEC_LABEL_H = 16;              // group caption row
     constexpr int SEC_GAP = 6;                   // caption -> knob grid
-    constexpr int COORD_H = 20;                  // strike coordinate readout
     // hero strike plate - round-2 shrink: 280px (was 406) so it stops dominating
     // the stage as a dark empty area; the freed width flows to the spectrum panel
     // and the freed height inside the center column lets body-info + spec-strip
@@ -178,11 +185,22 @@ namespace lay {
     constexpr int CARD_PAD = 12;
     constexpr int HEAD_H = 22;                   // card caption rows
     constexpr int DISC_D = 280;                  // round-2: shrunk from 406
+    // hero "engraving": the live strike-position readout under the disc. The
+    // r2 console crown ("REC PLAY CLR CLICK X 0.50 - Y 0.50" in dim mono)
+    // read as dev tools; the numbers stay (paper-law: the strike point IS the
+    // paper-47 excitation coordinate) but restyled as one deliberate
+    // typographic accent beneath the instrument, in the panel's own voice.
+    constexpr int DISC_CAPTION_H = 16;           // engraved readout row under the disc
+    // gesture transport cluster in the disc header (REC + PLAY + CLR + 2 gaps):
+    // one tight control group on the right of the title, not a console strip.
+    constexpr int GEST_W = 116;
+    // spec strip row height (BODY/MODES/MAT/F0 caption+value pairs)
+    constexpr int SPEC_ROW_H = 34;
 
     // body preset preview - builder and painter share these (clip-bug killer):
-    //   inner = BOX - 2*PAD = 48; cell = (inner - 3*GAP)/4 = 10; grid = 4*10+3*2 = 46 <= 48
-    constexpr int PREVIEW_BOX = 52, PREVIEW_PAD = 4, PREVIEW_GAP = 2;
-    constexpr int PRESET_ROW_H = 52;             // preview box + dropdown/info column
+    //   inner = BOX - 2*PAD = 68; cell = (inner - 3*GAP)/4 = 15; grid = 4*15+3*2 = 66 <= 68
+    constexpr int PREVIEW_BOX = 76, PREVIEW_PAD = 4, PREVIEW_GAP = 2;
+    constexpr int PRESET_ROW_H = 76;             // preview box + dropdown/info column
 
     // analysis tower (right column, fills STAGE_H exactly @610):
     // spectrum 360 + gap 6 + scope 244 = 610. The nav strip's 44px flows
@@ -224,11 +242,11 @@ namespace lay {
     // frequency); height = strike-position gain from the SAME bilinear
     // sound-map the idle spectrum preview uses - engine-truthful modal data,
     // a different question than the live 16-band spectrum above it.
-    // Column budget @s=1 (discCol, 610 tall, 6px flex gap): 22 head + 6 +
-    // 280 disc + 6 + 22 head + 6 + 268 card = 610 EXACT.
+    // Column budget @s=1 (discCol, 610 tall, 6px flex gaps):
+    //   22 head + 6 + 280 disc + 6 + 16 engraving + 6 + 22 head + 6 + 246 card = 610 EXACT.
     // Bars: 128 x 1px with 1px gaps = 256 = card inner (280 - 2*12 pad).
-    constexpr int MAP_CARD_H = 268;           // full-height card (budget above)
-    constexpr int MAP_BARS_H = 228;           // bar strip height (bars bottom-aligned)
+    constexpr int MAP_CARD_H = 246;           // full-height card (budget above)
+    constexpr int MAP_BARS_H = 206;           // bar strip height (bars bottom-aligned)
     constexpr int MAP_BAR_W = 1;              // per-mode bar width (128-slot comb)
     constexpr int MAP_PEAK_H = 12;            // PEAK/M<n> readout row under the bars
     // top-bar identity cluster: brand mark | preset dropdown | master knob | zoom
@@ -236,28 +254,27 @@ namespace lay {
     // Paper-47 physics: each baked preset has 128 modes with per-mode decay
     // RATES; mean decay across a frequency band is the body's damping at
     // that scale - the multi-scale identity the plugin is named for. The
-    // panel aggregates 128 modes into 16 log bands, draws a horizontal
-    // bar per band whose length tracks 1/<decay>, and reacts live to the
-    // DECAY knob (the engine's decayScale_ mirror).
-    // infoCol budget: 22 head + 6 + 20 coord + 6 + 1 div + 6 + 52 infoRow +
-    // 6 + 1 div + 6 + 34 specStrip + 6 + spacer(grow) + 6 + 400 card = 610
-    // (exact match STAGE_H; the grow spacer absorbs the 44px the nav-strip
-    // deletion freed). Card internals: 2*4 pad + 22 head + 4 gap +
-    // 16*22 rows = 392; inner 400 - 8 pad = 392. See PluginUI.cpp builder.
-    // 400 -> 486 (round-1 blind critic: "a large empty dark block in the
-    // middle-right... between the material chip and the top of the DAMPING
-    // BY BAND list"). That gap was the infoCol flex spacer: the column
-    // fixed its content sizes, then absorbed every remaining pixel into an
-    // empty, unpainted, unframed block. Growing the one real framed module
-    // in that column into the slack removes the void without inventing a
-    // new panel, and 16 rows at DAMP_ROW_H still fit with the head.
-    // The card's own content needs exactly 24 pad + 22 head + 16*22 rows +
-    // 16*2 gaps = 430. It used to be 486, which over-reserved 56px; that slack
-    // is now spent on the info column's spec strip, which previously never
-    // rendered at all (a 0-height container). Column total: coord 20 + 2
-    // dividers + info row 52 + strip 62 + card 430 + 6 gaps*6 = 602 of 610.
-    constexpr int DAMP_CARD_H = 430;
-    constexpr int DAMP_ROW_H = 22;              // per-band row (16 fit cleanly)
+    // panel aggregates 128 modes into 16 log bands.
+    //
+    // R2 of this gauntlet: the 16-row monospaced text dump ("B1 | bar | 0.01 s"
+    // x16, ~11 near-identical low-contrast rows) collapsed into a HEAT STRIP:
+    // one slim bar per band whose colour encodes the band tail time (gamma-
+    // lifted so clustered tails still separate), with text labels ONLY on the
+    // meaningful rows (longest, shortest, user-edited, actively scrubbed) plus
+    // a footer range + live edit readout. The 16 per-band decay values and the
+    // per-row scrub/edit affordance are unchanged - a row is still a slider
+    // for kParamBandDecay0+band (absolute x -> trim, bracketed like a knob).
+    //
+    // Card budget @s=1: 2*12 pad + 22 head + 6 + 16 rows (19px, 2px gaps =
+    // 334) + 6 + 18 footer = 411. infoCol: 76 preview + 1 + 70 spec + spacer +
+    // 411 card + 4*6 gaps = 610 (the flex spacer pins the card to the bottom).
+    constexpr int DAMP_CARD_H = 411;
+    constexpr int DAMP_ROW_H = 19;              // per-band heat row (16 fit cleanly)
+    constexpr int DAMP_ROW_GAP = 2;             // hairline gap between heat rows
+    constexpr int DAMP_FOOT_H = 18;             // footer: range summary + live edit
+    // Decay heat ramp (one hue family: the amber accent means "value/signal").
+    // Cool = short tail, hot = long tail; MID keeps the mid-band readable.
+    constexpr int DAMP_HEAT_GAMMA_NUM = 1, DAMP_HEAT_GAMMA_DEN = 2;  // pow(t/tMax, 1/2)
 }
 
  extern float gUIScale;

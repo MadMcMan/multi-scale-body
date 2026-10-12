@@ -26,6 +26,10 @@ struct UIStyles {
     lv_style_t labelSmall;
     lv_style_t knobTitleSmall;
     lv_style_t compactValueLabel;
+    // ONE pill lockup: every small control caption (REC/PLAY/CLR, GAIN/DECAY,
+    // ARP, ECO, ELASTIC, band tags) shares this so no pill "squats at a
+    // smaller weight" or drifts into its own font/letterspacing.
+    lv_style_t pillLabel;
     lv_style_t compactSelectMain;
     lv_style_t compactSelectListMain;
     lv_style_t meterTrack;
@@ -51,6 +55,7 @@ struct UIStyles {
         lv_style_reset(&labelSmall);
         lv_style_reset(&knobTitleSmall);
         lv_style_reset(&compactValueLabel);
+        lv_style_reset(&pillLabel);
         lv_style_reset(&compactSelectMain);
         lv_style_reset(&compactSelectListMain);
         lv_style_reset(&meterTrack);
@@ -233,6 +238,15 @@ struct UIStyles {
         lv_style_set_text_color(&compactValueLabel, PLATE_AMBER_DIM);
         lv_style_set_text_font(&compactValueLabel, getScaledSmallFont());
         lv_style_set_text_align(&compactValueLabel, LV_TEXT_ALIGN_CENTER);
+
+        // The single pill lockup (see member comment): micro type, mid-grey,
+        // letterspace 1, centred. Control captions add this INSTEAD of
+        // hand-rolling a font/color/letterspacing triple per site.
+        lv_style_init(&pillLabel);
+        lv_style_set_text_color(&pillLabel, PLATE_TEXT_MID);
+        lv_style_set_text_font(&pillLabel, getScaledMicroFont());
+        lv_style_set_text_letter_space(&pillLabel, 1);
+        lv_style_set_text_align(&pillLabel, LV_TEXT_ALIGN_CENTER);
 
         // Shared compact dropdown button style for EQ header/settings controls.
         lv_style_init(&compactSelectMain);

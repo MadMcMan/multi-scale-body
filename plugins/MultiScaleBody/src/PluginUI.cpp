@@ -27,6 +27,11 @@
 #include <functional>
 #include <cmath>
 #ifdef _WIN32
+#include <direct.h>              // _mkdir for the user-preset folder
+#else
+#include <sys/stat.h>            // mkdir
+#endif
+#ifdef _WIN32
 #include <commdlg.h>   // GetOpenFileNameA (windows.h already pulled by DGL)
 #endif
 // idea 13: generate the .scl text of an N-EDO scale (name, count, N degree
@@ -141,11 +146,11 @@ public:
         // buildUI() reads paramCache (strike dot pos, preset selection) and writes widgets[]
         clearWidgetRefs();
         paramCache[PluginMultiScaleBody::kParamPitch]=0.5f;
-        paramCache[PluginMultiScaleBody::kParamDecay]=0.5f;
+        paramCache[PluginMultiScaleBody::kParamDecay]=0.60f;
         paramCache[PluginMultiScaleBody::kParamBrightness]=0.65f;
         paramCache[PluginMultiScaleBody::kParamStrikeX]=0.5f;
         paramCache[PluginMultiScaleBody::kParamStrikeY]=0.5f;
-        paramCache[PluginMultiScaleBody::kParamModeCount]=0.60f;
+        paramCache[PluginMultiScaleBody::kParamModeCount]=0.68f;
         paramCache[PluginMultiScaleBody::kParamWidth]=0.30f;
         paramCache[PluginMultiScaleBody::kParamPreset]=0.0f;
         paramCache[PluginMultiScaleBody::kParamRadiation]=0.45f;
@@ -527,6 +532,19 @@ public:
         // two instances at different zoom cannot drive each other into an
         // endless rebuild loop.
         ::DISTRHO::gUIScale=fBuiltScale;
+        // headless capture hook: MSB_BROWSER_DEMO=1 opens the preset library
+        // overlay once per build so a bare capture shows the browsing surface
+        // without mouse input (the harness cannot inject into the pointer
+        // indev). Inert unless the env var is set.
+        if(!fBrowserDemoChecked){
+            fBrowserDemoChecked=true;
+            if(std::getenv("MSB_BROWSER_DEMO")) openPresetBrowser();
+        }
+        // selection-pane live sync: a load from any path (arrows, dice, host
+        // automation) while the overlay is open must move the pane with the
+        // sound (user-report: "the description on the right doesn't work right").
+        if(fBrowserOverlay && !fBrowserUserSel && fPresetLibIdx>=0 && fPresetLibIdx!=fBrowserShownIdx)
+            browserSelect(fPresetLibIdx);
         UI::uiIdle();
     }
     void uiReshape(uint w,uint h) override {
@@ -708,6 +726,15 @@ private:
         discEnergyRing=nullptr; fDiscEnergy=0.f; fBandAvgPreset=-1;
         // piece-6: preset browser prev/next arrows
         presetPrevBtn=presetNextBtn=fDiceBtn=nullptr;
+        // library overlay refs: the tree is about to be wiped, so the pointers
+        // must die with it; fBrowserChar persists (the filter survives a
+        // rebuild), fBrowserDemoChecked resets so the demo capture re-opens.
+        fBrowserOverlay=fBrowserList=nullptr;
+        fBrowserDetailName=fBrowserDetailBody=fBrowserDetailMat=nullptr;
+        fBrowserDetailModes=fBrowserDetailF0=fBrowserDetailChar=nullptr;
+        for(int i=0;i<8;++i) fBrowserChips[i]=nullptr;
+        fBrowserShownIdx=-2; fBrowserUserSel=false;
+        fBrowserDemoChecked=false;
         bodyPreview=lfoDot=strikeLastMark=nullptr;
         hdrBodyVal=hdrMatVal=hdrModeVal=hdrF0Val=nullptr;
         fSpectrumChart=fScopeChart=fLevelBar=fLevelPeak=zoneWarnMark=zoneHotMark=nullptr;
@@ -723,7 +750,8 @@ private:
         for(int i=0;i<lay::KEY_WHITE_N;++i) kbWhite[i]=nullptr;
         for(int i=0;i<lay::KEY_BLACK_N;++i) kbBlack[i]=nullptr;
         // R5: damping panel - bars + value labels
-        for(int i=0;i<16;++i){ fDampBars[i]=nullptr; fDampVals[i]=nullptr; }
+        for(int i=0;i<16;++i){ fDampBars[i]=nullptr; fDampVals[i]=nullptr; fDampTags[i]=nullptr; }
+        fDampRangeLbl=nullptr; fDampEditLbl=nullptr; fDampShowBand=-1; fDampLabelAge=0;
         fDampNominalT60=0.f;
         fDampPresetCache=-1; fDampDecayCache=-1.f; fDampBandSumCache=-1.f; fDampPhysSumCache=-1.f;
         fDampDragBand=-1;
@@ -770,29 +798,13 @@ private:
         idx = std::clamp(idx, 0, mx);
         const auto& pr = modal::kPresets[idx];
         char buf[160];
-        const char* mat = "Alloy";
-        std::string n = pr.name;
-        if(n=="WoodBlock" || n=="Squirrel") mat="Pine - Wood";
-        else if(n=="Membrane") mat="Membrane";
-        else if(n=="Glass") mat="Crystal";
-        else if(n=="Bar" || n=="Chime" || n=="Plate" || n=="Gong" || n=="Handpan" || n=="Kalimba" || n=="Celesta") mat="Steel";
-        else if(n=="Bell" || n=="Shell" || n=="Cowbell") mat="Bronze";
-        else if(n=="Bowl" || n=="Blade") mat="Aluminium";
-        else if(n=="LogDrum") mat="Mahogany";
-        else if(n=="Marimba") mat="Rosewood";
-        else if(n=="Cymbal") mat="Bronze Cymbal";
-        else if(n=="Bottle") mat="Glass Bottle";
-        else if(n=="Can") mat="Steel Can";
-        else if(n=="Xylo") mat="Rosewood Bar";
-        else if(n=="Tongue") mat="Steel Tongue";
-        else if(n=="Tube") mat="Brass Tube";
-        else if(n=="Cone") mat="Aluminium Cone";
-        snprintf(buf,sizeof(buf),"%s  -  %s  -  %d modes  -  %.0f Hz", pr.name, mat, pr.n, pr.freq[0]/(2*3.14159f));
+        const char* mat = browserMaterial(pr.name);
+        snprintf(buf,sizeof(buf),"%s • %s • %d modes • %.0f Hz", pr.name, mat, pr.n, pr.freq[0]/(2*3.14159f));
         lv_label_set_text(bodySubLabel, buf);
         if(hdrBodyVal){ char b[32]; snprintf(b,sizeof(b),"%s",pr.name); lv_label_set_text(hdrBodyVal,b); }
         if(hdrMatVal){ lv_label_set_text(hdrMatVal,mat); }
         if(hdrModeVal){ char b[16]; snprintf(b,sizeof(b),"%d",pr.n); lv_label_set_text(hdrModeVal,b); }
-        if(hdrF0Val){ char b[16]; snprintf(b,sizeof(b),"%.0f HZ",uiEffFreqHz(pr,0,idx,std::clamp((int)(8+paramCache[PluginMultiScaleBody::kParamModeCount]*120.f),8,pr.n))); lv_label_set_text(hdrF0Val,b); }
+        if(hdrF0Val){ char b[16]; snprintf(b,sizeof(b),"%.0f Hz",uiEffFreqHz(pr,0,idx,std::clamp((int)(8+paramCache[PluginMultiScaleBody::kParamModeCount]*120.f),8,pr.n))); lv_label_set_text(hdrF0Val,b); }
     }
     void updateBodyPreview(){
         if(!bodyPreview) return;
@@ -970,7 +982,7 @@ private:
         return std::clamp(6.9078f/rate,0.25f,3.0f);
     }
     // n=88, bands 8..15) render with 0 fill and "-" label.
-    void updateDampingDisplay(){
+    void updateDampingDisplay(bool force=false){
         if(!fDampBars[0]) return;
         int mx = modal::kNumPresets - 1;
         int idx = (int)std::round(paramCache[PluginMultiScaleBody::kParamPreset]*(float)mx);
@@ -997,7 +1009,7 @@ private:
             +paramCache[PluginMultiScaleBody::kParamSupX]+paramCache[PluginMultiScaleBody::kParamSupY];
         if(idx==fDampPresetCache && std::abs(decayV-fDampDecayCache)<1e-4f
            && std::abs(bdSum-fDampBandSumCache)<1e-4f
-           && std::abs(physSum-fDampPhysSumCache)<1e-4f) return;
+           && std::abs(physSum-fDampPhysSumCache)<1e-4f && !force) return;
         fDampPresetCache=idx; fDampDecayCache=decayV; fDampBandSumCache=bdSum; fDampPhysSumCache=physSum;
         const auto& pr = modal::kPresets[idx];
         const int mtx=std::clamp((int)std::lround(mTgt*(float)mx),0,mx);
@@ -1073,25 +1085,73 @@ private:
         // the Decay knob's readout is this longest band (published for
         // formatParamValue; the knob scales every band by the same factor)
         fDampNominalT60=maxT60;
-        // paint bars + values
+        // paint heat + values, then decide which rows earn text
+        int hotBand=-1, coolBand=-1;
         for(int b=0;b<16;++b){
-            int m0=(b*pr.n)/16;
-            int m1=((b+1)*pr.n)/16;
+            if(bandT60[b]<=0.f) continue;   // empty band (e.g. Bar bands 8..15)
+            if(hotBand<0 || bandT60[b]>bandT60[hotBand]) hotBand=b;
+            if(coolBand<0 || bandT60[b]<bandT60[coolBand]) coolBand=b;
+        }
+        float tMin=0.f, tMax=0.f;
+        if(coolBand>=0){ tMin=bandT60[coolBand]; tMax=bandT60[hotBand]; }
+        for(int b=0;b<16;++b){
+            const bool empty=(bandT60[b]<=0.f);
             char vbuf[16];
-            if(m0>=m1){
-                lv_bar_set_value(fDampBars[b],0,LV_ANIM_OFF);
+            bool show=false;
+            if(empty){
+                // no modes in this band: an empty slot, not a zero tail
+                lv_obj_set_style_bg_color(fDampBars[b],PLATE_WELL,0);
+                lv_obj_set_style_bg_opa(fDampBars[b],LV_OPA_COVER,0);
                 snprintf(vbuf,sizeof(vbuf),"-");
             } else {
-                int v = (int)std::lround(1000.f*bandT60[b]/maxT60);
-                lv_bar_set_value(fDampBars[b],v,LV_ANIM_OFF);
-                // display seconds with 1- or 2-decimal precision depending
-                // on magnitude; cap at 99.9s so 4-digit formats never blow
-                // the 40px value cell.
-                if(bandT60[b]>=10.f)      snprintf(vbuf,sizeof(vbuf),"%.0f s",bandT60[b]);
-                else if(bandT60[b]>=1.f)  snprintf(vbuf,sizeof(vbuf),"%.1f s",bandT60[b]);
-                else                      snprintf(vbuf,sizeof(vbuf),"%.2f s",bandT60[b]);
+                // heat: gamma-lifted ratio (see lay::DAMP_HEAT_GAMMA) so a body
+                // whose tails cluster still reads as a field, not a flat block
+                const float r=std::clamp(bandT60[b]/maxT60,0.f,1.f);
+                const float g=std::pow(r,(float)lay::DAMP_HEAT_GAMMA_NUM/(float)lay::DAMP_HEAT_GAMMA_DEN);
+                const uint8_t m8=(uint8_t)std::lround((g<0.5f?g*2.f:(g-0.5f)*2.f)*255.f);
+                const lv_color_t heat=(g<0.5f)?lv_color_mix(DAMP_HEAT_LO,DAMP_HEAT_MID,m8)
+                                              :lv_color_mix(DAMP_HEAT_MID,DAMP_HEAT_HI,m8);
+                lv_obj_set_style_bg_color(fDampBars[b],heat,0);
+                lv_obj_set_style_bg_opa(fDampBars[b],LV_OPA_COVER,0);
+                // seconds, the knob-readout lockup (formatParamValue tiers)
+                if(bandT60[b]>=10.f)     snprintf(vbuf,sizeof(vbuf),"%.0f s",bandT60[b]);
+                else if(bandT60[b]>=1.f) snprintf(vbuf,sizeof(vbuf),"%.1f s",bandT60[b]);
+                else                     snprintf(vbuf,sizeof(vbuf),"%.2f s",bandT60[b]);
+                // text ONLY on meaningful rows: the extremes, anything the user
+                // edited, and the band being scrubbed (the rest are near-
+                // identical duplicates - exactly the dump the critic named)
+                show = (b==hotBand)||(b==coolBand)
+                    || std::fabs(paramCache[PluginMultiScaleBody::kParamBandDecay0+b]-0.5f)>0.02f
+                    || b==fDampShowBand;
             }
             lv_label_set_text(fDampVals[b],vbuf);
+            // trim POSITION fill (norm 0..1 -> 0..1000): the drag writes this
+            // value and host echoes/automation move it, so the fill always
+            // tracks the edit.
+            lv_bar_set_value(fDampBars[b],(int)std::lround(paramCache[PluginMultiScaleBody::kParamBandDecay0+b]*1000.f),LV_ANIM_OFF);
+            setDampRowLabelled(b,show&&!empty);
+        }
+        if(fDampRangeLbl){
+            char rb[32];
+            if(tMax>0.f) snprintf(rb,sizeof(rb),"%.2f - %.2f s",tMin,tMax);
+            else          snprintf(rb,sizeof(rb),"-");
+            lv_label_set_text(fDampRangeLbl,rb);
+        }
+    }
+    // Gauntlet r3 + user-report fixes: the band TAG (B1..B16) is always visible
+    // as a dim left gutter, and the VALUE label always OCCUPIES its slot with
+    // opacity-only emphasis. HIDDEN toggling used to re-run the row's flex
+    // layout on press - the bar shrank under the pointer mid-drag and the
+    // absolute-x mapping went dead ("click drag doesn't work; numbers suddenly
+    // appear"). Nothing in this function may change geometry any more.
+    void setDampRowLabelled(int b,bool on){
+        if(b<0||b>15) return;
+        if(fDampTags[b]){
+            lv_obj_clear_flag(fDampTags[b],LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_style_text_opa(fDampTags[b],on?LV_OPA_COVER:LV_OPA_40,0);
+        }
+        if(fDampVals[b]){
+            lv_obj_set_style_text_opa(fDampVals[b],on?LV_OPA_COVER:LV_OPA_40,0);
         }
     }
     // Build (or refresh) the per-band average mode-shape grid for the current
@@ -1288,7 +1348,7 @@ private:
                 int preset=(int)std::round(ui->paramCache[PluginMultiScaleBody::kParamPreset]*(float)mxp);
                 const auto& pr=modal::kPresets[std::clamp(preset,0,mxp)];
                 int pi=std::clamp(ui->fModePeakIdx,0,modal::kMaxModes-1);
-                snprintf(nm,sizeof(nm),"M%d  -  %.0f HZ",ui->fModePeakIdx+1,pr.freq[pi]/(2.f*3.14159f));
+                snprintf(nm,sizeof(nm),"M%d • %.0f Hz",ui->fModePeakIdx+1,pr.freq[pi]/(2.f*3.14159f));
             }
             lv_label_set_text(ui->fModePeakLbl,nm);
         }
@@ -1341,7 +1401,7 @@ private:
         lv_obj_set_pos(strikeDot, x, y);
         if(strikeCoordLabel){
             char buf[32];
-            snprintf(buf,sizeof(buf),"X %.2f  -  Y %.2f", paramCache[PluginMultiScaleBody::kParamStrikeX], paramCache[PluginMultiScaleBody::kParamStrikeY]);
+            snprintf(buf,sizeof(buf),"X %.2f • Y %.2f", paramCache[PluginMultiScaleBody::kParamStrikeX], paramCache[PluginMultiScaleBody::kParamStrikeY]);
             lv_label_set_text(strikeCoordLabel, buf);
         }
     }
@@ -1431,15 +1491,31 @@ private:
     // contextual value formatting (design guidelines: units where they exist).
     // Mirrors the engine's own denormalization so readouts match the audio:
     //   Glide v*600 ms - LFO 0.05*240^v Hz - Modes 8+v*120 - Reverb % - Tune +-24 ST
+    //
+    // === THE READOUT LOCKUP (one convention for every knob value) ===========
+    // A blind critic read the dial bank as "four+ formats with inconsistent
+    // unit suffixes and padding". One rule set, applied everywhere:
+    //   * normalized 0..1 amounts ....... always 2 decimals      "0.65"
+    //   * percentages ................... always integer + space "132 %"
+    //   * signed quantities ............. sign always shown     "+0.0 ST"
+    //   * physical magnitudes ........... 2 decimals below one, 1 below ten,
+    //                                       none above          "0.26 Hz" "1.5 s" "12 s"
+    //   * multipliers ................... "x" prefix, 2 decimals "x1.00"
+    //   * units ......................... one case, one separator (a single
+    //                                      space): s / ms / Hz / % / ST / x / dB
+    // Everything that shows a parameter value (knob pills, the spectrum scrub
+    // chip, the MODE MAP peak readout) formats through this one function or
+    // matches its conventions verbatim.
     void formatParamValue(int pi,float v,char* buf,size_t cap) const {
         using P=PluginMultiScaleBody;
         switch(pi){
             case P::kParamWet:      snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
-            case P::kParamGlide:    snprintf(buf,cap,"%d MS",(int)std::lround(v*600.f)); break;
+            case P::kParamGlide:    snprintf(buf,cap,"%d ms",(int)std::lround(v*600.f)); break;
             case P::kParamLFORate: {
                 float hz=0.05f*std::pow(240.f,v);
-                if(hz>=10.f) snprintf(buf,cap,"%.0f HZ",hz);
-                else         snprintf(buf,cap,"%.2f HZ",hz);
+                if(hz>=10.f)      snprintf(buf,cap,"%.0f Hz",hz);
+                else if(hz>=1.f)  snprintf(buf,cap,"%.1f Hz",hz);
+                else              snprintf(buf,cap,"%.2f Hz",hz);
                 break; }
             case P::kParamVolume: {
                 // squared-law gain (engine applies v*v): dB = 40*log10(v)
@@ -1459,10 +1535,10 @@ private:
                 break; }
             case P::kParamSupport:   snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
             case P::kParamHoldDamp:  snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
-            case P::kParamSupX:       snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
-            case P::kParamSupY:       snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
-            case P::kParamStrikeW:    snprintf(buf,cap,"x%.2f",0.25f+1.5f*v); break;
-            case P::kParamScrape:     snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
+            case P::kParamSupX:      snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
+            case P::kParamSupY:      snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
+            case P::kParamStrikeW:   snprintf(buf,cap,"x%.2f",0.25f+1.5f*v); break;
+            case P::kParamScrape:    snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
             case P::kParamContactNoise:
                 if(v<=0.f) snprintf(buf,cap,"OFF");
                 else snprintf(buf,cap,"%d %%",(int)std::lround(v*200.f));
@@ -1470,8 +1546,8 @@ private:
             case P::kParamDecay:
                 // seconds, not a bare 0..1 number: the knob scales every band's
                 // tail, so it reads the longest band from the DAMPING card's own
-                // computation (fDampNominalT60) - same physics, same tiers as the
-                // card's "<T60> s" labels. Before the card has run, fall back to
+                // computation (fDampNominalT60) - same physics, same tiers as
+                // the card's own readouts. Before the card has run, fall back to
                 // the raw value rather than inventing a time.
                 if(fDampNominalT60>0.f){
                     if(fDampNominalT60>=10.f)     snprintf(buf,cap,"%.0f s",(double)fDampNominalT60);
@@ -1480,7 +1556,7 @@ private:
                 } else snprintf(buf,cap,"%.2f",v);
                 break;
             case P::kParamResMorph:  snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
-            case P::kParamMorphAmt:   snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
+            case P::kParamMorphAmt:  snprintf(buf,cap,"%d %%",(int)std::lround(v*100.f)); break;
             case P::kParamMorphTarget: {
                 const int t=std::clamp((int)std::lround(v*(float)(modal::kNumPresets-1)),0,modal::kNumPresets-1);
                 snprintf(buf,cap,"%s",modal::kPresets[t].name);
@@ -1773,6 +1849,454 @@ private:
         ui->applySoundPreset(nxt);
         ui->editParameter(PluginMultiScaleBody::kParamPreset,false);
     }
+    // ---- preset LIBRARY browser (overlay) -----------------------------------
+    // The library is 25 bodies x 6 characters = 150 presets. The inline
+    // dropdowns stay for quick stepping; this overlay is the browsing surface:
+    // character filter chips, a two-line preset list with per-entry metadata
+    // (body name, material, mode count, F0) and a detail pane for the current
+    // selection. Lazily created on open and destroyed on close, so the base
+    // tree (and the control census) is untouched while it is closed.
+    static const char* browserCharDesc(int ci){
+        switch(ci){
+            case 0: return "body exactly as designed";
+            case 1: return "hard mallet, short ring";
+            case 2: return "soft, felted, long ring";
+            case 3: return "friction swell, sustained";
+            case 4: return "big soft head, percussive";
+            case 5: return "stretched partials, bell-like";
+            default: return "";
+        }
+    }
+    // body-name -> material, the same vocabulary updateBodyInfo prints
+    static const char* browserMaterial(const char* n){
+        const std::string s = n ? n : "";
+        if(s=="WoodBlock"||s=="Squirrel") return "Pine - Wood";
+        if(s=="Membrane") return "Membrane";
+        if(s=="Glass") return "Crystal";
+        if(s=="Bar"||s=="Chime"||s=="Plate"||s=="Gong"||s=="Handpan"||s=="Kalimba"||s=="Celesta") return "Steel";
+        if(s=="Bell"||s=="Shell"||s=="Cowbell") return "Bronze";
+        if(s=="Bowl"||s=="Blade") return "Aluminium";
+        if(s=="LogDrum") return "Mahogany";
+        if(s=="Marimba") return "Rosewood";
+        if(s=="Cymbal") return "Bronze Cymbal";
+        if(s=="Bottle") return "Glass Bottle";
+        if(s=="Can") return "Steel Can";
+        if(s=="Xylo") return "Rosewood Bar";
+        if(s=="Tongue") return "Steel Tongue";
+        if(s=="Tube") return "Brass Tube";
+        if(s=="Cone") return "Aluminium Cone";
+        return "Alloy";
+    }
+    void browserSelect(int idx){
+        if(!fBrowserOverlay) return;
+        const int n=modal::soundPresetCount();
+        idx=std::clamp(idx,0,std::max(0,n-1));
+        const modal::SoundPreset& sp=modal::soundPreset(idx);
+        const modal::PresetData& pd=modal::kPresets[sp.body];
+        if(fBrowserDetailName) lv_label_set_text(fBrowserDetailName,sp.name);
+        if(fBrowserDetailBody) lv_label_set_text(fBrowserDetailBody,pd.name);
+        if(fBrowserDetailMat) lv_label_set_text(fBrowserDetailMat,browserMaterial(pd.name));
+        if(fBrowserDetailModes){
+            char b[24]; snprintf(b,sizeof(b),"%d",pd.n);
+            lv_label_set_text(fBrowserDetailModes,b);
+        }
+        if(fBrowserDetailF0){
+            char b[24]; snprintf(b,sizeof(b),"%.0f Hz",pd.freq[0]/(2*3.14159f));
+            lv_label_set_text(fBrowserDetailF0,b);
+        }
+        if(fBrowserDetailChar){
+            char b[96];
+            snprintf(b,sizeof(b),"%s  •  %s",modal::kCharacters[sp.character].name,
+                     browserCharDesc(sp.character));
+            lv_label_set_text(fBrowserDetailChar,b);
+        }
+        fBrowserShownIdx=idx;
+        fBrowserUserSel=false;
+        // highlight the selected row (rows carry their preset index in user_data)
+        if(fBrowserList){
+            const uint32_t rc=lv_obj_get_child_count(fBrowserList);
+            for(uint32_t i=0;i<rc;++i){
+                lv_obj_t* row=lv_obj_get_child(fBrowserList,i);
+                const int ri=(int)(intptr_t)lv_obj_get_user_data(row);
+                if(ri==idx){
+                    lv_obj_set_style_bg_color(row,PLATE_WELL_HI,0);
+                    lv_obj_set_style_border_color(row,PLATE_AMBER_DIM,0);
+                    lv_obj_set_style_border_width(row,1,0);
+                } else {
+                    lv_obj_set_style_bg_opa(row,LV_OPA_TRANSP,0);
+                    lv_obj_set_style_border_width(row,0,0);
+                }
+            }
+        }
+    }
+    void browserRebuildList(){
+        if(!fBrowserList) return;
+        lv_obj_clean(fBrowserList);
+        if(fBrowserChar==-2){ rebuildUserList(); return; }
+        const int n=modal::soundPresetCount();
+        for(int i=0;i<n;++i){
+            const modal::SoundPreset& sp=modal::soundPreset(i);
+            if(fBrowserChar>=0 && sp.character!=fBrowserChar) continue;
+            const modal::PresetData& pd=modal::kPresets[sp.body];
+            lv_obj_t* row=lv_obj_create(fBrowserList);
+            lv_obj_set_size(row,lv_pct(100),scaled(40));
+            lv_obj_set_layout(row,LV_LAYOUT_FLEX);
+            lv_obj_set_flex_flow(row,LV_FLEX_FLOW_COLUMN);
+            lv_obj_set_flex_align(row,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
+            lv_obj_set_style_pad_row(row,scaled(1),0);
+            lv_obj_set_style_pad_left(row,scaled(8),0);
+            lv_obj_set_style_bg_opa(row,LV_OPA_TRANSP,0);
+            lv_obj_set_style_border_width(row,0,0);
+            lv_obj_set_style_radius(row,scaled(lay::RADIUS_SM),0);
+            lv_obj_set_style_bg_color(row,PLATE_WELL_HI,LV_STATE_HOVERED);
+            lv_obj_set_style_bg_opa(row,LV_OPA_COVER,LV_STATE_HOVERED);
+            lv_obj_set_user_data(row,(void*)(intptr_t)i);
+            // user-report fix: lv_obj_create rows are SCROLLABLE by default in
+            // LVGL9, so every preset row grew its own scrollbar and could be
+            // scrolled independently ("each preset can be scrolled"). Only the
+            // list itself scrolls.
+            lv_obj_clear_flag(row,LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_scrollbar_mode(row,LV_SCROLLBAR_MODE_OFF);
+            lv_obj_add_event_cb(row,browseRowCb,LV_EVENT_CLICKED,this);
+            lv_obj_t* l1=addLabel(row,sp.name,getScaledSmallFont(),PLATE_TITLE,0);
+            lv_obj_clear_flag(l1,LV_OBJ_FLAG_CLICKABLE);
+            char meta[96];
+            snprintf(meta,sizeof(meta),"%s  •  %d modes  •  %.0f Hz",
+                     browserMaterial(pd.name),pd.n,pd.freq[0]/(2*3.14159f));
+            lv_obj_t* l2=addLabel(row,meta,getScaledMicroFont(),PLATE_TEXT_DIM,0);
+            lv_obj_clear_flag(l2,LV_OBJ_FLAG_CLICKABLE);
+        }
+    }
+    // ---- user presets (file-backed) ----------------------------------------
+    // Saved knob sets live in a small text file next to the user's config
+    // (MSB_USERPRESETS_FILE overrides the path; the headless tests point it at
+    // a temp file). Line format:  name<TAB>v0,v1,...  one line per slot, with
+    // every input parameter in index order, %.6g.
+    static std::string userPresetFilePath(){
+        if(const char* e=std::getenv("MSB_USERPRESETS_FILE")) return std::string(e);
+        if(const char* a=std::getenv("APPDATA")) return std::string(a)+"/MultiScaleBody/userpresets.msb";
+        if(const char* h=std::getenv("HOME")) return std::string(h)+"/.config/MultiScaleBody/userpresets.msb";
+        return std::string("userpresets.msb");
+    }
+    static void ensureUserPresetDir(const std::string& path){
+        const size_t p=path.find_last_of("/\\");
+        if(p==std::string::npos || p==0) return;
+#ifdef _WIN32
+        _mkdir(path.substr(0,p).c_str());
+#else
+        mkdir(path.substr(0,p).c_str(),0755);
+#endif
+    }
+    void userStoreLoad(){
+        if(fUserStoreLoaded) return;
+        fUserStoreLoaded=true;
+        fUserStore.clear();
+        FILE* f=std::fopen(userPresetFilePath().c_str(),"rb");
+        if(!f) return;
+        char buf[1024];
+        while(std::fgets(buf,sizeof(buf),f)) fUserStore+=buf;
+        std::fclose(f);
+    }
+    // Headless-test hooks (called from tests/render_multiscalebody_ui.cpp the
+    // same way the plugin's test*() hooks are). They exercise the real store
+    // functions through the real code paths; no UI interaction required.
+    int testUserPresetSave(){ userPresetSave(); return userPresetCount(); }
+    int testUserPresetCount(){ return userPresetCount(); }
+    bool testUserPresetLoad(int slot){ userPresetLoad(slot); return true; }
+    bool testUserPresetDelete(int slot){ userPresetDelete(slot); return userPresetCount()==slot; }
+    void userStoreWrite(){
+        ensureUserPresetDir(userPresetFilePath());
+        FILE* f=std::fopen(userPresetFilePath().c_str(),"wb");
+        if(!f) return;
+        std::fwrite(fUserStore.data(),1,fUserStore.size(),f);
+        std::fclose(f);
+    }
+    bool userPresetLine(int i,std::string& out){
+        userStoreLoad();
+        size_t s=0; int idx=0;
+        while(s<fUserStore.size()){
+            size_t e=fUserStore.find('\n',s);
+            if(e==std::string::npos) e=fUserStore.size();
+            if(e>s){
+                if(idx==i){ out=fUserStore.substr(s,e-s); return true; }
+                ++idx;
+            }
+            s=e+1;
+        }
+        return false;
+    }
+    int userPresetCount(){
+        int n=0; std::string l;
+        while(userPresetLine(n,l)) ++n;
+        return n;
+    }
+    static std::string userSlotName(const std::string& line){
+        const size_t t=line.find('\t');
+        return (t==std::string::npos)?line:line.substr(0,t);
+    }
+    static std::string userSlotVals(const std::string& line){
+        const size_t t=line.find('\t');
+        return (t==std::string::npos)?std::string():line.substr(t+1);
+    }
+    void userPresetSave(){
+        using P=PluginMultiScaleBody;
+        std::string vals;
+        for(uint32_t i=0;i<P::kParameterCount;++i){
+            if(!P::isInputParameter(i)) continue;
+            char b[24]; snprintf(b,sizeof(b),"%.6g",paramCache[i]);
+            if(!vals.empty()) vals+=',';
+            vals+=b;
+        }
+        userStoreLoad();
+        char nm[32]; snprintf(nm,sizeof(nm),"User %d",userPresetCount()+1);
+        fUserStore += std::string(nm)+"\t"+vals+"\n";
+        userStoreWrite();
+        if(fBrowserOverlay && fBrowserChar==-2) browserRebuildList();
+    }
+    void userPresetLoad(int slot){
+        std::string line;
+        if(!userPresetLine(slot,line)) return;
+        const std::string vals=userSlotVals(line);
+        using P=PluginMultiScaleBody;
+        size_t pos=0;
+        for(uint32_t p=0;p<P::kParameterCount;++p){
+            if(!P::isInputParameter(p)) continue;
+            if(pos>vals.size()) break;
+            const size_t comma=vals.find(',',pos);
+            const size_t end=(comma==std::string::npos)?vals.size():comma;
+            setParamValue(p,(float)std::atof(vals.substr(pos,end-pos).c_str()));
+            pos=end+1;
+        }
+        capturePresetDefaults();
+        if(fBrowserDetailName) lv_label_set_text(fBrowserDetailName,userSlotName(line).c_str());
+        if(fBrowserDetailBody) lv_label_set_text(fBrowserDetailBody,"saved knobs");
+        if(fBrowserDetailMat) lv_label_set_text(fBrowserDetailMat,"user preset");
+        if(fBrowserDetailModes) lv_label_set_text(fBrowserDetailModes,"-");
+        if(fBrowserDetailF0) lv_label_set_text(fBrowserDetailF0,"-");
+        if(fBrowserDetailChar) lv_label_set_text(fBrowserDetailChar,"STORED IN userpresets.msb");
+        fBrowserShownIdx=-3; fBrowserUserSel=true;
+    }
+    void userPresetDelete(int slot){
+        userStoreLoad();
+        std::string out; int idx=0; size_t s=0;
+        while(s<fUserStore.size()){
+            size_t e=fUserStore.find('\n',s);
+            if(e==std::string::npos) e=fUserStore.size();
+            if(e>s){
+                if(idx!=slot) out+=fUserStore.substr(s,e-s)+"\n";
+                ++idx;
+            }
+            s=e+1;
+        }
+        fUserStore=out;
+        userStoreWrite();
+        if(fBrowserOverlay && fBrowserChar==-2) browserRebuildList();
+    }
+    void rebuildUserList(){
+        const int n=userPresetCount();
+        if(n==0){
+            lv_obj_t* l=addLabel(fBrowserList,"NO USER PRESETS YET - TUNE THE KNOBS AND PRESS SAVE",
+                                 getScaledMicroFont(),PLATE_TEXT_DIM,1);
+            lv_obj_clear_flag(l,LV_OBJ_FLAG_CLICKABLE);
+            return;
+        }
+        for(int i=0;i<n;++i){
+            std::string line;
+            if(!userPresetLine(i,line)) break;
+            lv_obj_t* row=lv_obj_create(fBrowserList);
+            lv_obj_set_size(row,lv_pct(100),scaled(40));
+            lv_obj_set_layout(row,LV_LAYOUT_FLEX);
+            lv_obj_set_flex_flow(row,LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(row,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);
+            lv_obj_set_style_pad_column(row,scaled(8),0);
+            lv_obj_set_style_pad_left(row,scaled(8),0);
+            lv_obj_set_style_bg_opa(row,LV_OPA_TRANSP,0);
+            lv_obj_set_style_border_width(row,0,0);
+            lv_obj_set_style_radius(row,scaled(lay::RADIUS_SM),0);
+            lv_obj_set_style_bg_color(row,PLATE_WELL_HI,LV_STATE_HOVERED);
+            lv_obj_set_style_bg_opa(row,LV_OPA_COVER,LV_STATE_HOVERED);
+            lv_obj_clear_flag(row,LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_scrollbar_mode(row,LV_SCROLLBAR_MODE_OFF);
+            lv_obj_set_user_data(row,(void*)(intptr_t)i);
+            lv_obj_add_event_cb(row,userRowLoadCb,LV_EVENT_CLICKED,this);
+            lv_obj_t* col=makeCol(row,0,lv_pct(100),scaled(1));
+            lv_obj_set_flex_grow(col,1);
+            lv_obj_t* l1=addLabel(col,userSlotName(line).c_str(),getScaledSmallFont(),PLATE_TITLE,0);
+            lv_obj_clear_flag(l1,LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_t* l2=addLabel(col,"USER PRESET",getScaledMicroFont(),PLATE_TEXT_DIM,0);
+            lv_obj_clear_flag(l2,LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_t* del=addButton(row,24,20,"X",PLATE_TEXT_DIM);
+            lv_obj_set_user_data(del,(void*)(intptr_t)i);
+            lv_obj_add_event_cb(del,userRowDelCb,LV_EVENT_CLICKED,this);
+        }
+    }
+    static void browseSaveCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        if(ui) ui->userPresetSave();
+    }
+    static void userRowLoadCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* row=(lv_obj_t*)lv_event_get_target(e);
+        if(!ui) return;
+        ui->userPresetLoad((int)(intptr_t)lv_obj_get_user_data(row));
+    }
+    static void userRowDelCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* b=(lv_obj_t*)lv_event_get_target(e);
+        if(!ui) return;
+        ui->userPresetDelete((int)(intptr_t)lv_obj_get_user_data(b));
+    }
+    // caption + value row for the selection pane (the pane read as a big empty
+    // box; real spec rows give it structure)
+    lv_obj_t* browserSpecRow(lv_obj_t* parent,const char* cap){
+        lv_obj_t* r=makeRow(parent,lv_pct(100),scaled(20),scaled(8),LV_FLEX_ALIGN_START);
+        lv_obj_t* c=addLabel(r,cap,getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        lv_obj_clear_flag(c,LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_t* sp=makeBox(r,0,0);
+        lv_obj_set_flex_grow(sp,1);
+        lv_obj_t* v=addLabel(r,"-",getScaledSmallFont(),PLATE_TEXT_MID,0);
+        lv_obj_clear_flag(v,LV_OBJ_FLAG_CLICKABLE);
+        return v;
+    }
+    void browserRestyleChips(){
+        for(int i=0;i<8;++i){
+            lv_obj_t* c=fBrowserChips[i];
+            if(!c) continue;
+            const bool active=(i==0)?(fBrowserChar==-1)
+                            :(i==7)?(fBrowserChar==-2)
+                            :(fBrowserChar==i-1);
+            lv_obj_set_style_bg_color(c,active?PLATE_AMBER_DIM:PLATE_WELL,0);
+        }
+    }
+    void openPresetBrowser(){
+        if(fBrowserOverlay) return;
+        lv_obj_t* scr=lv_screen_active();
+        if(!scr) return;
+        lv_obj_t* ov=lv_obj_create(scr);
+        fBrowserOverlay=ov;
+        lv_obj_set_size(ov,lv_pct(86),lv_pct(80));
+        // user-report fix: on a full-screen window 86%/80% made the overlay
+        // absurdly wide; cap it so the list column keeps a sane reading width
+        // on any display while the pct size still wins on small windows.
+        lv_obj_set_style_max_width(ov,scaled(1020),0);
+        lv_obj_set_style_max_height(ov,scaled(680),0);
+        lv_obj_center(ov);
+        lv_obj_set_style_bg_color(ov,PLATE_PANEL,0);
+        lv_obj_set_style_bg_opa(ov,LV_OPA_COVER,0);
+        lv_obj_set_style_border_color(ov,PLATE_EDGE,0);
+        lv_obj_set_style_border_width(ov,1,0);
+        lv_obj_set_style_radius(ov,scaled(lay::RADIUS),0);
+        lv_obj_set_style_pad_all(ov,scaled(14),0);
+        lv_obj_set_style_shadow_width(ov,scaled(lay::CARD_SHADOW),0);
+        lv_obj_set_style_shadow_color(ov,COL_BLACK,0);
+        lv_obj_set_style_shadow_opa(ov,LV_OPA_40,0);
+        lv_obj_set_layout(ov,LV_LAYOUT_FLEX);
+        lv_obj_set_flex_flow(ov,LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_row(ov,scaled(10),0);
+        // header: title + inventory line + close
+        lv_obj_t* head=makeRow(ov,lv_pct(100),scaled(30),scaled(10),LV_FLEX_ALIGN_START);
+        addLabel(head,"PRESET LIBRARY",getDisplayFont(),PLATE_TITLE,1);
+        {
+            char cnt[64];
+            snprintf(cnt,sizeof(cnt),"%d PRESETS  -  %d BODIES x 6 CHARACTERS",
+                     modal::soundPresetCount(),modal::kNumPresets);
+            lv_obj_t* inv=addLabel(head,cnt,getScaledMicroFont(),PLATE_TEXT_DIM,1);
+            lv_obj_clear_flag(inv,LV_OBJ_FLAG_CLICKABLE);
+        }
+        lv_obj_t* spacer=makeBox(head,0,0);
+        lv_obj_set_flex_grow(spacer,1);
+        // SAVE CURRENT: stores the live parameter set as a user preset
+        // (user-report: "presets doesn't let us save our own").
+        lv_obj_t* saveBtn=addButton(head,64,24,"SAVE",PLATE_TEXT_MID);
+        lv_obj_add_event_cb(saveBtn,browseSaveCb,LV_EVENT_CLICKED,this);
+        lv_obj_t* closeBtn=addButton(head,64,24,"CLOSE",PLATE_TEXT_MID);
+        lv_obj_add_event_cb(closeBtn,browseCloseCb,LV_EVENT_CLICKED,this);
+        // filter chips: characters + USER
+        lv_obj_t* chips=makeRow(ov,lv_pct(100),scaled(26),scaled(6),LV_FLEX_ALIGN_START);
+        static const char* cnames[8]={"ALL","PURE","BRIGHT","DARK","BOWED","MALLET","BELL","USER"};
+        for(int i=0;i<8;++i){
+            lv_obj_t* c=addButton(chips,i==0?44:58,24,cnames[i],PLATE_TEXT_MID);
+            lv_obj_set_user_data(c,(void*)(intptr_t)i);
+            lv_obj_add_event_cb(c,browseChipCb,LV_EVENT_CLICKED,this);
+            fBrowserChips[i]=c;
+        }
+        // content: list (left) + detail (right)
+        lv_obj_t* content=makeRow(ov,lv_pct(100),0,scaled(12),LV_FLEX_ALIGN_START);
+        lv_obj_set_flex_grow(content,1);
+        lv_obj_t* list=makeCol(content,0,lv_pct(100),scaled(4));
+        lv_obj_set_flex_grow(list,3);
+        lv_obj_set_style_bg_color(list,PLATE_WELL,0);
+        lv_obj_set_style_bg_opa(list,LV_OPA_COVER,0);
+        lv_obj_set_style_border_color(list,PLATE_LINE,0);
+        lv_obj_set_style_border_width(list,1,0);
+        lv_obj_set_style_radius(list,scaled(lay::RADIUS_SM),0);
+        lv_obj_set_style_pad_all(list,scaled(6),0);
+        lv_obj_set_scrollbar_mode(list,LV_SCROLLBAR_MODE_ACTIVE);
+        lv_group_remove_obj(list);
+        fBrowserList=list;
+        lv_obj_t* det=makeCol(content,0,lv_pct(100),scaled(8),LV_FLEX_ALIGN_START);
+        lv_obj_set_flex_grow(det,2);
+        lv_obj_set_style_bg_color(det,PLATE_WELL,0);
+        lv_obj_set_style_bg_opa(det,LV_OPA_COVER,0);
+        lv_obj_set_style_border_color(det,PLATE_LINE,0);
+        lv_obj_set_style_border_width(det,1,0);
+        lv_obj_set_style_radius(det,scaled(lay::RADIUS_SM),0);
+        lv_obj_set_style_pad_all(det,scaled(12),0);
+        addLabel(det,"SELECTION",getScaledMicroFont(),PLATE_TEXT_DIM,2);
+        fBrowserDetailName=addLabel(det,"-",getDisplayFont(),PLATE_TITLE,0);
+        { lv_obj_t* rule=makeBox(det,lv_pct(100),scaled(1));
+          lv_obj_set_style_bg_color(rule,PLATE_LINE,0);
+          lv_obj_set_style_bg_opa(rule,LV_OPA_COVER,0);
+          lv_obj_clear_flag(rule,LV_OBJ_FLAG_CLICKABLE); }
+        fBrowserDetailBody =browserSpecRow(det,"BODY");
+        fBrowserDetailMat  =browserSpecRow(det,"MATERIAL");
+        fBrowserDetailModes=browserSpecRow(det,"MODES");
+        fBrowserDetailF0   =browserSpecRow(det,"F0");
+        fBrowserDetailChar =addLabel(det,"-",getScaledSmallFont(),PLATE_AMBER,0);
+        {
+            lv_obj_t* hint=addLabel(det,"CLICK TO LOAD  •  SAVE KEEPS THE KNOBS",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+            lv_obj_clear_flag(hint,LV_OBJ_FLAG_CLICKABLE);
+        }
+        lv_obj_move_foreground(ov);
+        browserRestyleChips();
+        browserRebuildList();
+        browserSelect(fPresetLibIdx>=0?fPresetLibIdx:0);
+    }
+    void closePresetBrowser(){
+        if(!fBrowserOverlay) return;
+        lv_obj_delete(fBrowserOverlay);
+        fBrowserOverlay=fBrowserList=nullptr;
+        fBrowserDetailName=fBrowserDetailBody=fBrowserDetailMat=nullptr;
+        fBrowserDetailModes=fBrowserDetailF0=fBrowserDetailChar=nullptr;
+        for(int i=0;i<8;++i) fBrowserChips[i]=nullptr;
+    }
+    static void browseOpenCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        if(ui) ui->openPresetBrowser();
+    }
+    static void browseCloseCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        if(ui) ui->closePresetBrowser();
+    }
+    static void browseChipCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* c=(lv_obj_t*)lv_event_get_target(e);
+        if(!ui) return;
+        const int sel=(int)(intptr_t)lv_obj_get_user_data(c);
+        ui->fBrowserChar=(sel==0)?-1:(sel==7)?-2:sel-1;
+        ui->browserRestyleChips();
+        ui->browserRebuildList();
+    }
+    static void browseRowCb(lv_event_t* e){
+        auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
+        lv_obj_t* row=(lv_obj_t*)lv_event_get_target(e);
+        if(!ui) return;
+        const int idx=(int)(intptr_t)lv_obj_get_user_data(row);
+        ui->editParameter(PluginMultiScaleBody::kParamPreset,true);
+        ui->applySoundPreset(idx);
+        ui->editParameter(PluginMultiScaleBody::kParamPreset,false);
+        ui->browserSelect(idx);
+    }
     static void padPressCb(lv_event_t* e){
         auto* ui=(MultiScaleBodyUI*)lv_event_get_user_data(e);
         if(!ui||!ui->strikeDisc) return;
@@ -1894,16 +2418,32 @@ private:
             const int bw=std::max(1,(int)(bc.x2-bc.x1+1));
             const float frac=std::clamp((float)(p.x-bc.x1)/(float)bw,0.f,1.f);
             ui->setParamValue(pi,frac);
+            // zero-lag visual: the fill follows the pointer this frame (the
+            // display recompute lands on the next tick).
+            lv_bar_set_value(bar,(int)std::lround(frac*1000.f),LV_ANIM_OFF);
+            // live edit readout (footer, right): the trim as the TAIL multiplier
+            // it produces - same lockup + direction as the spectrum scrub chip
+            ui->fDampShowBand=b; ui->fDampLabelAge=30;
+            if(ui->fDampEditLbl){
+                char buf[24];
+                const float tail=1.f/bandDecayTrimFromNorm(frac);
+                snprintf(buf,sizeof(buf),"B%d • x%.2f",b+1,tail);
+                lv_label_set_text(ui->fDampEditLbl,buf);
+                lv_obj_clear_flag(ui->fDampEditLbl,LV_OBJ_FLAG_HIDDEN);
+            }
         } else if(code==LV_EVENT_RELEASED || code==LV_EVENT_PRESS_LOST){
             if(ui->fDampDragBand>=0){
                 ui->editParameter((uint32_t)(PluginMultiScaleBody::kParamBandDecay0+ui->fDampDragBand),false);
                 ui->fDampDragBand=-1;
             }
+            // hold the edit readout ~1s after release, then retire it
+            ui->fDampLabelAge=30;
         }
     }
-    // wave-6: pinned value chip inside the spectrum chart — "B7 · GAIN 132 %"
-    // or "B7 · DECAY x1.35". Recomputed every scrub frame so the operator
-    // reads the exact edit, not just a bar that moved.
+    // wave-6: pinned value chip inside the spectrum chart — "B7 • 132 %"
+    // or "B7 • x1.35". Recomputed every scrub frame so the operator
+    // reads the exact edit, not just a bar that moved. Same readout lockup as
+    // the knob pills (one separator, one unit style).
     void updateScrubChip(int band){
         if(!fScrubLbl) return;
         char buf[32];
@@ -1913,9 +2453,9 @@ private:
             // as reversed in exactly the way the drag itself did. x2.00 = twice
             // the tail time, matching the direction the scrub moves.
             const float tail=1.f/bandDecayTrimFromNorm(paramCache[PluginMultiScaleBody::kParamBandDecay0+band]);
-            snprintf(buf,sizeof(buf),"B%d - TAIL x%.2f",band+1,tail);
+            snprintf(buf,sizeof(buf),"B%d • x%.2f",band+1,tail);
         } else {
-            snprintf(buf,sizeof(buf),"B%d - GAIN %d %%",band+1,
+            snprintf(buf,sizeof(buf),"B%d • %d %%",band+1,
                      (int)std::lround(paramCache[PluginMultiScaleBody::kParamBand0+band]*200.f));
         }
         lv_label_set_text(fScrubLbl,buf);
@@ -2011,7 +2551,7 @@ private:
         refreshZoomWidgets();
     }
     void refreshZoomWidgets(){
-        if(zoomValLbl){ char b[16]; snprintf(b,sizeof(b),"%d%%",lay::ZOOM_STEPS[fZoomIdx]); lv_label_set_text(zoomValLbl,b); }
+        if(zoomValLbl){ char b[16]; snprintf(b,sizeof(b),"%d %%",lay::ZOOM_STEPS[fZoomIdx]); lv_label_set_text(zoomValLbl,b); }
         if(zoomMinus){ if(fZoomIdx==0) lv_obj_add_state(zoomMinus,LV_STATE_DISABLED); else lv_obj_clear_state(zoomMinus,LV_STATE_DISABLED); }
         if(zoomPlus){ if(fZoomIdx==lay::ZOOM_STEP_COUNT-1) lv_obj_add_state(zoomPlus,LV_STATE_DISABLED); else lv_obj_clear_state(zoomPlus,LV_STATE_DISABLED); }
     }
@@ -2381,6 +2921,11 @@ private:
         lv_obj_set_style_border_width(b,1,0);
         lv_obj_set_style_pad_all(b,0,0);
         lv_obj_t* l=addLabel(b,txt,getScaledMicroFont(),txtCol,1);
+        // one pill lockup: font/letterspacing/alignment come from the shared
+        // style so every control pill on the screen is the same weight; only
+        // the role colour varies per site.
+        lv_obj_add_style(l,&styles.pillLabel,0);
+        lv_obj_set_style_text_color(l,txtCol,0);
         lv_obj_center(l);
         return b;
     }
@@ -2524,7 +3069,9 @@ private:
         lv_obj_set_style_radius(arpBtn,scaled(lay::RADIUS_SM),0);
         lv_obj_set_style_pad_all(arpBtn,0,0);
         lv_obj_add_event_cb(arpBtn,arpBtnCb,LV_EVENT_VALUE_CHANGED,this);
-        lv_obj_t* albl=lv_label_create(arpBtn); lv_label_set_text(albl,"ARP"); lv_obj_center(albl);
+        lv_obj_t* albl=lv_label_create(arpBtn); lv_label_set_text(albl,"ARP");
+        lv_obj_add_style(albl,&styles.pillLabel,0);   // one pill lockup (was: button default type)
+        lv_obj_center(albl);
         lv_obj_t* octDown=lv_btn_create(octRow); lv_obj_set_size(octDown,scaled(lay::BTN_W_OCT),scaled(lay::BTN_H)); lv_obj_add_style(octDown,&styles.btnMain,0); lv_obj_add_style(octDown,&styles.btnHovered,LV_STATE_HOVERED); lv_obj_add_style(octDown,&styles.btnPressed,LV_STATE_PRESSED); lv_obj_set_style_radius(octDown,scaled(lay::RADIUS_SM),0); lv_obj_set_style_pad_all(octDown,0,0);
         lv_obj_set_user_data(octDown,(void*)(intptr_t)-12); lv_obj_add_event_cb(octDown,octaveBtnCb,LV_EVENT_CLICKED,this);
         lv_obj_t* dl=lv_label_create(octDown); lv_label_set_text(dl,"<"); lv_obj_center(dl); lv_obj_set_style_text_color(dl,COL_TEXT,0);
@@ -2617,8 +3164,12 @@ private:
     // in one unbroken line" the R3 critic named.
     void stripDivider(lv_obj_t* row){
         lv_obj_t* d=makeBox(row,scaled(1),scaled(lay::KNOB_H_N*3/4));
-        lv_obj_set_style_bg_color(d,PLATE_LINE,0);
-        lv_obj_set_style_bg_opa(d,LV_OPA_50,0);
+        // gauntlet r3: at PLATE_LINE/50% the five subgroup rules were
+        // invisible, so the strip still read as "14 same-weight knobs in one
+        // unbroken line". Full-strength edge colour + near-full opacity makes
+        // the clamp | contact | damping | body | material clusters legible.
+        lv_obj_set_style_bg_color(d,PLATE_EDGE,0);
+        lv_obj_set_style_bg_opa(d,LV_OPA_80,0);
         lv_obj_set_style_border_width(d,0,0);
         lv_obj_set_style_radius(d,0,0);
         lv_obj_set_style_pad_all(d,0,0);
@@ -2671,7 +3222,9 @@ private:
         styles.applyToggleButton(fEcoBtn,paramCache[P::kParamEcoMode]>0.5f);
         lv_obj_set_style_radius(fEcoBtn,scaled(lay::RADIUS_SM),0);
         lv_obj_set_style_pad_all(fEcoBtn,0,0);
-        lv_obj_t* elbl=lv_label_create(fEcoBtn); lv_label_set_text(elbl,"ECO"); lv_obj_center(elbl);
+        lv_obj_t* elbl=lv_label_create(fEcoBtn); lv_label_set_text(elbl,"ECO");
+        lv_obj_add_style(elbl,&styles.pillLabel,0);   // one pill lockup
+        lv_obj_center(elbl);
         // Gate C: this button was dead on arrival - built, styled, learn-tagged
         // and host-synced, but never given a click handler, so kParamEcoMode
         // could only be moved from the host. ecoBtnCb opens/closes the host
@@ -2725,7 +3278,9 @@ private:
         styles.applyToggleButton(fModeTypeBtn,paramCache[P::kParamModelMode]>0.5f);
         lv_obj_set_style_radius(fModeTypeBtn,scaled(lay::RADIUS_SM),0);
         lv_obj_set_style_pad_all(fModeTypeBtn,0,0);
-        lv_obj_t* mtype=lv_label_create(fModeTypeBtn); lv_label_set_text(mtype,"ELASTIC"); lv_obj_center(mtype);
+        lv_obj_t* mtype=lv_label_create(fModeTypeBtn); lv_label_set_text(mtype,"ELASTIC");
+        lv_obj_add_style(mtype,&styles.pillLabel,0);   // one pill lockup
+        lv_obj_center(mtype);
         lv_obj_add_event_cb(fModeTypeBtn,modeTypeCb,LV_EVENT_CLICKED,this);
     }
     //   +-- TOP-BAR  (identity: brand mark | preset browser | master knob | zoom)
@@ -2880,6 +3435,13 @@ private:
         fPresetNextBtn=presetNextBtn;
         // (R-user) RANDOMIZE lives here as a dice icon, right of the arrows.
         fDiceBtn=addDiceBtn(ddRow);
+        // preset LIBRARY button: opens the browser overlay (character filter
+        // chips + per-entry metadata + detail pane). The inline dropdowns stay
+        // for quick stepping; this is the browsing surface.
+        {
+            lv_obj_t* browseBtn=addButton(ddRow,66,24,"LIBRARY",PLATE_TEXT_MID);
+            lv_obj_add_event_cb(browseBtn,browseOpenCb,LV_EVENT_CLICKED,this);
+        }
         // BODY browser: same row, to the right of the preset browser. It exists
         // so the body can be swapped UNDER a preset - applyBodySelection() lays
         // the new body's own model down and then re-asserts the active preset's
@@ -2994,7 +3556,7 @@ private:
         zoomMinus=addButton(zoomRow,lay::ZOOM_BTN,lay::ZOOM_LBL_H,"-",PLATE_TEXT_MID);
         lv_obj_set_user_data(zoomMinus,(void*)(intptr_t)-1);
         lv_obj_add_event_cb(zoomMinus,zoomBtnCb,LV_EVENT_CLICKED,this);
-        { char zb[16]; snprintf(zb,sizeof(zb),"%d%%",lay::ZOOM_STEPS[std::clamp(fZoomIdx,0,lay::ZOOM_STEP_COUNT-1)]); zoomValLbl=addLabel(zoomRow,zb,getScaledSmallFont(),PLATE_AMBER,1); }
+        { char zb[16]; snprintf(zb,sizeof(zb),"%d %%",lay::ZOOM_STEPS[std::clamp(fZoomIdx,0,lay::ZOOM_STEP_COUNT-1)]); zoomValLbl=addLabel(zoomRow,zb,getScaledSmallFont(),PLATE_AMBER,1); }
         lv_obj_set_width(zoomValLbl,scaled(lay::ZOOM_LBL_W));
         lv_obj_set_style_text_align(zoomValLbl,LV_TEXT_ALIGN_CENTER,0);
         zoomPlus=addButton(zoomRow,lay::ZOOM_BTN,lay::ZOOM_LBL_H,"+",PLATE_TEXT_MID);
@@ -3101,18 +3663,23 @@ private:
         lv_obj_t* cHead=makeRow(discCol,scaled(lay::DISC_D),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         addLabel(cHead,"STRIKE THE BODY",getScaledSmallFont(),COL_HIGHLIGHT,2);
         // wave-3 (idea 10): disc motion recorder — REC captures the drag path,
-        // PLAY replays it as a strike sequence, X clears.
-        fRecBtn=addButton(cHead,40,lay::BTN_H,"REC",PLATE_TEXT_MID);
+        // PLAY replays it as a strike sequence, CLR clears. Round-2 of this
+        // gauntlet: the crown of the hero read as a dev console
+        // ("REC PLAY CLR CLICK" sprawled across the header in dim mono type).
+        // The transport is now ONE tight cluster on the right of the title -
+        // a control group, not an instrument readout - and the redundant
+        // "CLICK" hint is gone (the title already says what to do).
+        lv_obj_t* gestRow=makeRow(cHead,scaled(lay::GEST_W),scaled(lay::BTN_H),scaled(4));
+        fRecBtn=addButton(gestRow,38,lay::BTN_H,"REC",PLATE_TEXT_MID);
         styles.applyToggleButton(fRecBtn,false);
         lv_obj_add_event_cb(fRecBtn,recBtnCb,LV_EVENT_CLICKED,this);
-        fPlayBtn=addButton(cHead,40,lay::BTN_H,"PLAY",PLATE_TEXT_MID);
+        fPlayBtn=addButton(gestRow,38,lay::BTN_H,"PLAY",PLATE_TEXT_MID);
         styles.applyToggleButton(fPlayBtn,false);
         lv_obj_add_event_cb(fPlayBtn,playBtnCb,LV_EVENT_CLICKED,this);
         // (R-user) a bare "X" read as a close/dismiss button and collided with
         // the "X 0.50" coordinate readout; label it CLR so the action is clear.
-        lv_obj_t* recClearBtn=addButton(cHead,34,lay::BTN_H,"CLR",PLATE_TEXT_MID);
+        lv_obj_t* recClearBtn=addButton(gestRow,32,lay::BTN_H,"CLR",PLATE_TEXT_MID);
         lv_obj_add_event_cb(recClearBtn,recClearCb,LV_EVENT_CLICKED,this);
-        addLabel(cHead,"CLICK",getScaledMicroFont(),PLATE_TEXT_DIM,1);
         // The disc - top view of the resonant body (hero element)
         const lv_coord_t D=scaled(lay::DISC_D);
         strikeDisc=makeBox(discCol,D,D);
@@ -3263,10 +3830,24 @@ private:
         // this body do under the mallet" vs "what is it sounding now"), and
         // it visibly morphs as the strike disc / preset / Modes knob move.
         // Budget @s=1 (discCol = 610, 6px flex gaps): 22 head + 6 + 280 disc
-        //   + 6 + 22 head + 6 + 268 card = 610 EXACT - zero dead band.
+        //   + 6 + 16 engraving + 6 + 22 head + 6 + 246 card = 610 EXACT.
+        // hero engraving: the live strike coordinate, restyled. The r2 layout
+        // crowned the disc with a dev-console strip ("REC PLAY CLR CLICK
+        // X 0.50 - Y 0.50" in dim mono); the numbers are paper-47 state (the
+        // excitation point the engine bakes into radGain), so they stay - but
+        // as ONE engraved line in the chassis's own voice, under the hero,
+        // where an instrument would print its position scale.
+        lv_obj_t* coordWrap=makeRow(discCol,scaled(lay::DISC_D),scaled(lay::DISC_CAPTION_H),0,LV_FLEX_ALIGN_CENTER);
+        strikeCoordLabel=addLabel(coordWrap,"X 0.50 • Y 0.50",getScaledMicroFont(),PLATE_TEXT_DIM,2);
+        lv_obj_set_style_text_align(strikeCoordLabel,LV_TEXT_ALIGN_CENTER,0);
+        lv_obj_set_width(strikeCoordLabel,lv_pct(100));
+        lv_obj_clear_flag(coordWrap,LV_OBJ_FLAG_CLICKABLE);
         lv_obj_t* actHead=makeRow(discCol,scaled(lay::DISC_D),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         addLabel(actHead,"MODE MAP",getScaledSmallFont(),PLATE_TEXT,2);
-        addLabel(actHead,"STRIKE GAINS",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        // gauntlet r3: the comb had "no axis or context" - the caption now
+        // names the axis (mode index 1..128, ascending frequency) so the
+        // sparse-looking 1px ticks read as a bounded data plot.
+        addLabel(actHead,"M1 - M128 • STRIKE GAINS",getScaledMicroFont(),PLATE_TEXT_DIM,1);
         lv_obj_t* actCard=makeCard(discCol,scaled(lay::DISC_D),scaled(lay::MAP_CARD_H),scaled(4));
         lv_obj_t* actRow=makeRow(actCard,lv_pct(100),scaled(lay::MAP_BARS_H),1,LV_FLEX_ALIGN_START);
         lv_obj_set_flex_align(actRow,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_END,LV_FLEX_ALIGN_CENTER);
@@ -3302,17 +3883,14 @@ private:
         // The body-info cluster spread to the right of the disc instead of
         // below - this is the r1->r2 anchor shift that puts the disc in
         // dialog with the body it represents, not stacked over a cramped 3-label
-        // caption row. Also hosts the coord readout.
+        // caption row.
         // (R-user) the "BODY / PRESET / MATERIAL / MODES" section caption
         // above this column was redundant with the spec strip below and the
         // preset browser in the top bar, and read as label soup. Removed; the
-        // column now opens on the live coordinate readout, and the flex spacer
-        // below absorbs the freed 22px so the damping card stays pinned.
-        // coordinate readout (the live "X 0.50  Y 0.50" line - now prominent)
-        lv_obj_t* coordWrap=makeRow(infoCol,lv_pct(100),scaled(lay::COORD_H),0);
-        strikeCoordLabel=addLabel(coordWrap,"X 0.50  -  Y 0.50",getScaledSmallFont(),PLATE_AMBER,1);
-        // divider hairline
-        addDivider(infoCol,scaled(1));
+        // column opens on the body identity, and the flex spacer below absorbs
+        // the freed height so the damping card stays pinned to the bottom.
+        // (Gauntlet r2) the live coordinate readout that used to crown this
+        // column moved under the disc as an engraved accent - see coordWrap.
         // body-info row: material jewel (preview) + spec line
         lv_obj_t* infoRow=makeRow(infoCol,lv_pct(100),scaled(lay::PRESET_ROW_H),scaled(8));
         // builder side of the shared preview geometry (painter: previewGeometry())
@@ -3339,13 +3917,13 @@ private:
         // LV_SIZE_CONTENT, and an explicit 0 makes the container area empty, so
         // its children were never drawn (the band read as dead space and a
         // previous note here wrongly claimed "height 0 = content-sized").
-        // Rows are 30px: a caption + value pair stacks ~24px, so the old 16px
-        // rows clipped even once the strip rendered.
+        // Rows are SPEC_ROW_H (34): a caption + value pair stacks ~24px, so the
+        // old 16px rows clipped even once the strip rendered.
         lv_obj_t* specStrip=makeCol(infoCol,lv_pct(100),LV_SIZE_CONTENT,scaled(2));
-        lv_obj_t* specRow1=makeRow(specStrip,lv_pct(100),scaled(30),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
+        lv_obj_t* specRow1=makeRow(specStrip,lv_pct(100),scaled(lay::SPEC_ROW_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         addSpecCell(specRow1,"BODY",&hdrBodyVal,PLATE_AMBER,80);
         addSpecCell(specRow1,"MODES",&hdrModeVal,PLATE_TEXT,64);   // 5 chars at letter-space 4 (56 clipped it)
-        lv_obj_t* specRow2=makeRow(specStrip,lv_pct(100),scaled(30),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
+        lv_obj_t* specRow2=makeRow(specStrip,lv_pct(100),scaled(lay::SPEC_ROW_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         addSpecCell(specRow2,"MAT",&hdrMatVal,PLATE_TEXT,80);
         // the F0 cell the design called for: hdrF0Val was written by
         // updateBodyInfo but no cell was ever created for it (a dead write).
@@ -3362,11 +3940,11 @@ private:
         // padding absorbed by the infoCol's 6px flex gaps and the spec
         // strip above (no dead band remains).
         // CARD height is the ONLY fixed slot; the spec strip above is
-        // content-sized (height 0) and the head + coord wrap + dividers
-        // contribute their fixed sizes - the makeCol gap of 6 carries the
-        // remaining vertical slack. To keep the card at the bottom of the
-        // column without floating, we push the preceding content up via
-        // a flex-grow spacer (infoColSpacer) above the card.
+        // content-sized (height 0) and the preview row + dividers contribute
+        // their fixed sizes - the makeCol gap of 6 carries the remaining
+        // vertical slack. To keep the card at the bottom of the column
+        // without floating, we push the preceding content up via a flex-grow
+        // spacer (infoColSpacer) above the card.
         lv_obj_t* infoColSpacer=lv_obj_create(infoCol);
         lv_obj_set_size(infoColSpacer,1,1);
         lv_obj_set_style_bg_opa(infoColSpacer,LV_OPA_TRANSP,0);
@@ -3380,12 +3958,28 @@ private:
         lv_obj_t* dampHead=makeRow(dampCard,lv_pct(100),scaled(lay::HEAD_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
         addLabel(dampHead,"DAMPING",getScaledSmallFont(),COL_HIGHLIGHT,2);
         addLabel(dampHead,"BY BAND",getScaledMicroFont(),PLATE_TEXT_DIM,1);
-        // 16 band rows. Each row: [Bxx label][bar (lv_bar, flex_grow)][t60 value].
-        // Bars are lv_bar widgets styled like the fLevelBar meter so the
-        // chassis reads as one instrument (meterTrack style + PLATE_AMBER
-        // indicator at LV_OPA_70 so the panels don't compete for amber).
+        // HEAT STRIP - 16 slim band rows, one per frequency band (B1..B16 =
+        // ascending mode-index ranges). Gauntlet r2: the 16-row monospaced
+        // text dump ("B1 | bar | 0.01 s" x16) collapsed. Each row is now one
+        // heat bar whose COLOUR encodes the band tail time (cool = short,
+        // hot = long, gamma-lifted so clustered tails still separate); text
+        // appears ONLY on the meaningful rows (longest / shortest / user-
+        // edited / actively scrubbed) - updateDampingDisplay owns which.
+        // The per-band value and the scrub/edit affordance are unchanged:
+        // the row is still a slider for kParamBandDecay0+band (absolute x
+        // across the row -> trim, bracketed like a knob), and the footer
+        // carries the live range + the active edit readout.
         for(int b=0;b<16;++b){
-            lv_obj_t* row=makeRow(dampCard,lv_pct(100),scaled(lay::DAMP_ROW_H),scaled(4),LV_FLEX_ALIGN_CENTER);
+            lv_obj_t* row=makeRow(dampCard,lv_pct(100),scaled(lay::DAMP_ROW_H),scaled(lay::DAMP_ROW_GAP),LV_FLEX_ALIGN_CENTER);
+            // gauntlet r2: alternating row wells + a small inset so the 16 heat
+            // bars read as ONE framed data table integrated into the card
+            // ("undecorated flat bars, minimal visual integration").
+            lv_obj_set_style_pad_hor(row,scaled(3),0);
+            if(b&1){
+                lv_obj_set_style_bg_color(row,PLATE_WELL,0);
+                lv_obj_set_style_bg_opa(row,LV_OPA_60,0);
+                lv_obj_set_style_radius(row,scaled(2),0);
+            }
             // the whole row is a slider for this band's decay trim: clickable +
             // tagged with the band index; children are non-clickable so the
             // press lands on the row (labels are clickable by default in LVGL9).
@@ -3395,30 +3989,49 @@ private:
             lv_obj_add_event_cb(row,dampBandCb,LV_EVENT_PRESSING,this);
             lv_obj_add_event_cb(row,dampBandCb,LV_EVENT_RELEASED,this);
             lv_obj_add_event_cb(row,dampBandCb,LV_EVENT_PRESS_LOST,this);
+            // child 0: the band tag ("B7") - engraved on the heat bar, shown
+            // only when the row is meaningful (extremes / edited / active).
             char lab[8]; snprintf(lab,sizeof(lab),"B%d",b+1);
             lv_obj_t* labObj=addLabel(row,lab,getScaledMicroFont(),PLATE_TEXT_DIM,1);
             lv_obj_clear_flag(labObj,LV_OBJ_FLAG_CLICKABLE);
-            // 1px narrower than the label spec (22) so the B-cell and
-            // value cell actually fit a 194-wide card: 22 + 4 + flex + 4 + 40
-            // = 70; remaining 124 for the bar - generous. The bar's
-            // background is a dark track, the fill is amber.
+            lv_obj_add_flag(labObj,LV_OBJ_FLAG_HIDDEN);
+            fDampTags[b]=labObj;
+            // child 1: the heat bar itself - flex_grow so it spans the row and
+            // the drag mapping (absolute x -> trim) keeps its full travel.
+            // Styled like the fLevelBar meter so the chassis reads as one
+            // instrument; updateDampingDisplay repaints its colour per band.
             lv_obj_t* bar=lv_bar_create(row);
-            lv_obj_set_height(bar,scaled(8));
+            lv_obj_set_height(bar,scaled(lay::DAMP_ROW_H-4));
             lv_obj_set_flex_grow(bar,1);
             lv_obj_set_style_radius(bar,scaled(2),0);
             lv_obj_set_style_radius(bar,scaled(2),LV_PART_INDICATOR);
             lv_obj_add_style(bar,&styles.meterTrack,LV_PART_MAIN);
-            lv_obj_set_style_bg_color(bar,PLATE_AMBER,LV_PART_INDICATOR);
-            lv_obj_set_style_bg_opa(bar,LV_OPA_70,LV_PART_INDICATOR);
+            // heat colour IS the band's tail time (MAIN), and the INDICATOR is
+            // the trim POSITION fill - so a drag visibly moves a fill under the
+            // pointer instead of only tinting a flat block ("drag doesn't work").
+            lv_obj_set_style_bg_color(bar,PLATE_AMBER_PALE,LV_PART_INDICATOR);
+            lv_obj_set_style_bg_opa(bar,LV_OPA_40,LV_PART_INDICATOR);
             lv_obj_set_style_border_width(bar,0,0);
             lv_obj_clear_flag(bar,LV_OBJ_FLAG_CLICKABLE);
             lv_bar_set_range(bar,0,1000);
             lv_bar_set_value(bar,0,LV_ANIM_OFF);
             fDampBars[b]=bar;
+            // child 2: the tail-time value. FIXED-WIDTH, always present, dim by
+            // default - a stable slot so nothing re-lays-out on press/drag.
             fDampVals[b]=addLabel(row,"-",getScaledMicroFont(),PLATE_TEXT,0);
+            lv_obj_set_width(fDampVals[b],scaled(46));
+            lv_obj_set_style_text_align(fDampVals[b],LV_TEXT_ALIGN_RIGHT,0);
+            lv_obj_set_style_text_opa(fDampVals[b],LV_OPA_40,0);
             lv_obj_clear_flag(fDampVals[b],LV_OBJ_FLAG_CLICKABLE);
         }
-        // initial fill: bar widths depend on baked decay, not on params -
+        // footer: range summary (left) + live edit readout (right).
+        lv_obj_t* dampFoot=makeRow(dampCard,lv_pct(100),scaled(lay::DAMP_FOOT_H),0,LV_FLEX_ALIGN_SPACE_BETWEEN);
+        addLabel(dampFoot,"TAIL RANGE",getScaledMicroFont(),PLATE_TEXT_DIM,1);
+        fDampRangeLbl=addLabel(dampFoot,"-",getScaledMicroFont(),PLATE_TEXT,0);
+        fDampEditLbl=addLabel(dampFoot,"",getScaledMicroFont(),PLATE_AMBER,1);
+        lv_obj_add_flag(fDampEditLbl,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(dampFoot,LV_OBJ_FLAG_CLICKABLE);
+        // initial fill: bar colours depend on baked decay, not on params -
         // call once on first build, and again on preset+Decay changes.
         updateDampingDisplay();
         // The Decay knob's readout IS that longest tail time, and its label was
@@ -3485,7 +4098,7 @@ private:
         fSpectrumChart=chart; for(int i=0;i<16;++i) lv_chart_set_value_by_id(chart,series,i,0);
 
         // wave-6: value chip pinned inside the chart — shows the exact
-        // "B# · GAIN/DECAY value" while scrubbing (and ~1s after). A chart
+        // "B# • GAIN/DECAY value" while scrubbing (and ~1s after). A chart
         // child label, so it rides every rebuild. CLICKABLE is cleared so
         // it can never eat the scrub drag (LVGL9 default-clickable trap),
         // and it is excluded from the draw-callback overlays' hit path.
@@ -3799,6 +4412,14 @@ private:
             if(fScrubLbl) lv_obj_add_flag(fScrubLbl,LV_OBJ_FLAG_HIDDEN);
             fBandTicksDirty=true;
         }
+        // DAMPING heat strip: the scrubbed band keeps its engraving + the
+        // footer edit readout for ~1s after release, then both retire (the
+        // extremes/edited bands keep theirs - updateDampingDisplay owns that).
+        if(fDampLabelAge>0 && --fDampLabelAge==0){
+            fDampShowBand=-1;
+            if(fDampEditLbl) lv_obj_add_flag(fDampEditLbl,LV_OBJ_FLAG_HIDDEN);
+            if(fDampVals[0]) updateDampingDisplay(true);
+        }
         // wave-6: legend restyle (active band + edited bands) — gated so
         // idle ticks do zero label work.
         if(fBandTicksDirty){ fBandTicksDirty=false; restyleBandTicks(); }
@@ -3948,7 +4569,7 @@ private:
                 // effective frequency even when the peak mode is unchanged)
                 fModePeakIdx=peakM;
                 char nm[24];
-                snprintf(nm,sizeof(nm),"M%d  -  %.0f HZ",peakM+1,
+                snprintf(nm,sizeof(nm),"M%d • %.0f Hz",peakM+1,
                          uiEffFreqHz(pr,peakM,preset,n));
                 lv_label_set_text(fModePeakLbl,nm);
             }
@@ -4175,12 +4796,36 @@ private:
     // nor DECAY knob moved (same gating as fModeMapDirty).
     lv_obj_t* fDampBars[16]={};
     lv_obj_t* fDampVals[16]={};
+    lv_obj_t* fDampTags[16]={};       // per-band "B#" engraving (meaningful rows only)
+    lv_obj_t* fDampRangeLbl=nullptr;  // footer: live "min – max" tail range
+    lv_obj_t* fDampEditLbl=nullptr;   // footer: live edit readout ("B3 • x1.16")
+    int fDampShowBand=-1;             // band whose row earns text while/after a scrub
+    int fDampLabelAge=0;               // ~1s post-release hold (33ms ticks)
     int fDampDragBand=-1;    // DAMPING panel: band whose edit bracket is open
     float fDampNominalT60=0.f;   // longest band tail (s); the Decay knob's readout
     // library preset currently applied (-1 = none: the body's own sound). The
     // body browser re-asserts its character after a body swap.
     int fPresetLibIdx=-1;
     lv_obj_t* fBodyDropdown=nullptr;
+    // preset LIBRARY browser overlay: lazily created on open, destroyed on
+    // close, so the base tree (and the control census) is untouched while
+    // closed. fBrowserChar: -1 = all characters, else 0..5.
+    lv_obj_t* fBrowserOverlay=nullptr;
+    lv_obj_t* fBrowserList=nullptr;
+    lv_obj_t* fBrowserDetailName=nullptr;
+    lv_obj_t* fBrowserDetailBody=nullptr;
+    lv_obj_t* fBrowserDetailMat=nullptr;
+    lv_obj_t* fBrowserDetailModes=nullptr;
+    lv_obj_t* fBrowserDetailF0=nullptr;
+    lv_obj_t* fBrowserDetailChar=nullptr;
+    lv_obj_t* fBrowserChips[8]={};
+    int fBrowserChar=-1;             // -1 = all, 0..5 = character, -2 = USER
+    int fBrowserShownIdx=-2;         // library idx the pane currently shows
+    bool fBrowserUserSel=false;      // pane shows a user preset, not a library row
+    bool fBrowserDemoChecked=false;
+    // user presets (file-backed; see userPresetFilePath)
+    std::string fUserStore;          // raw file content
+    bool fUserStoreLoaded=false;
     // the four browser arrows: both browsers share one top-bar row, so the
     // button's parent cannot say which browser it belongs to - the pointers
     // can (a parent comparison sent the preset arrows down the body branch).
